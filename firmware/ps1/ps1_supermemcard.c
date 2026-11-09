@@ -8,7 +8,8 @@
  *   SuperMemCard/<system>/card.ini                     card=<N>: the system's current virtual card (1..99)
  *   SuperMemCard/<system>/Card<N>/<game ID>/<file>     a save file (system: Main's save folder name)
  *   SuperMemCard/<system>/Card<N>/<game ID>/<file>.new a save being written, until Commit
- *   SuperMemCard/<system>/Card<N>/<game ID>/meta.ini   <file>=<generation>
+ *   SuperMemCard/<system>/Card<N>/<game ID>/meta.ini   <file>=<generation>, or <file>=-<generation>: deleted
+ *   SuperMemCard/<system>/Card<N>/<game ID>/.deleted/  deleted saves, kept
  *
  * A save is written to <file>.new and only replaces <file> at Commit, so a card pulled or
  * powered off mid-save keeps the previous save whole. */
@@ -62,6 +63,7 @@ int ps1_supermemcard_req_len(uint8_t cmd, const uint8_t *r, int have) {
         if (r[0] == 0 || r[0] > SMC_SYS_LEN) return -1;
         return 1 + r[0] + 1 + 2;
     case SMC_INFO: return 1;
+    case SMC_DELETE: return 5;
     case SMC_CORE:
         if (have < 1) return 1;
         if (r[0] == 0 || r[0] > SMC_SYS_LEN) return -1;
@@ -92,6 +94,7 @@ struct file {
     char name[SMC_NAME_LEN + 1];
     uint32_t size, gen;
     bool exists;   /* committed copy on the SD card */
+    bool deleted;  /* a tombstone: deleted at generation gen */
     bool writing;  /* <name>.new is open for writing */
     uint32_t new_size;
 };
@@ -222,8 +225,9 @@ static void save_meta(void) {
     char text[SMC_MAX_FILES * (SMC_NAME_LEN + 16)], line[48], p[192];
     text[0] = 0;
     for (int i = 0; i < nfiles; i++)
-        if (files[i].exists) {
-            snprintf(line, sizeof(line), "%s=%lu\n", files[i].name, (unsigned long)files[i].gen);
+        if (files[i].exists || files[i].deleted) {
+            snprintf(line, sizeof(line), "%s=%s%lu\n", files[i].name, files[i].deleted ? "-" : "",
+                     (unsigned long)files[i].gen);
             strcat(text, line);
         }
     snprintf(p, sizeof(p), "%s/meta.ini", set_dir);
@@ -234,7 +238,7 @@ static uint32_t meta_gen(const char *meta, const char *name) {
     size_t n = strlen(name);
     for (const char *l = meta; l && *l; l = strchr(l, '\n') ? strchr(l, '\n') + 1 : NULL)
         if (strncmp(l, name, n) == 0 && l[n] == '=')
-            return (uint32_t)strtoul(l + n + 1, NULL, 10);
+            return (uint32_t)strtoul(l + n + 1 + (l[n + 1] == '-'), NULL, 10);
     return 0;
 }
 
@@ -344,6 +348,26 @@ static void select_set(const char *sys, const char *id, int card) {
     if (it != -1)
         sd_close(it);
     sd_close(dir);
+    /* tombstones: deleted saves, in meta.ini only */
+    for (const char *l = meta; *l && nfiles < SMC_MAX_FILES; l = strchr(l, '\n') ? strchr(l, '\n') + 1 : "") {
+        const char *eq = strchr(l, '=');
+        const char *nl = strchr(l, '\n');
+        if (!eq || (nl && eq > nl) || eq[1] != '-' || eq - l > SMC_NAME_LEN)
+            continue;
+        char name[SMC_NAME_LEN + 1];
+        memcpy(name, l, (size_t)(eq - l));
+        name[eq - l] = 0;
+        bool have = false;
+        for (int i = 0; i < nfiles; i++)
+            have |= strcmp(files[i].name, name) == 0;
+        if (have || !is_save_name(name))
+            continue; /* a save written again since is there itself */
+        struct file *f = &files[nfiles++];
+        memset(f, 0, sizeof(*f));
+        snprintf(f->name, sizeof(f->name), "%s", name);
+        f->gen = (uint32_t)strtoul(eq + 2, NULL, 10);
+        f->deleted = true;
+    }
     /* stable order: by name */
     for (int i = 1; i < nfiles; i++)
         for (int j = i; j > 0 && strcmp(files[j - 1].name, files[j].name) > 0; j--) {
@@ -368,7 +392,7 @@ static int do_command(uint8_t cmd, const uint8_t *r, int len, uint8_t *a) {
         a[0] = 'S';
         a[1] = 'M';
         a[2] = SMC_VERSION;
-        a[3] = 0x07; /* features: save files, list, virtual cards (Core) */
+        a[3] = 0x0F; /* features: save files, list, virtual cards (Core), delete */
         for (int i = 0; i < 8; i++) {
             unsigned v;
             sscanf(card_id + i * 2, "%2x", &v);
@@ -416,11 +440,11 @@ static int do_command(uint8_t cmd, const uint8_t *r, int len, uint8_t *a) {
 
     case SMC_INFO:
         memset(a, 0, 25);
-        if (!file_ok(r[0]) || !files[r[0]].exists) {
+        if (!file_ok(r[0]) || !(files[r[0]].exists || files[r[0]].deleted)) {
             a[0] = have_set ? SMC_NOT_FOUND : SMC_NO_SET;
             return 25;
         }
-        a[0] = SMC_GOOD;
+        a[0] = files[r[0]].deleted ? SMC_DELETED : SMC_GOOD;
         memcpy(a + 1, files[r[0]].name, strlen(files[r[0]].name));
         put32(a + 17, files[r[0]].size);
         put32(a + 21, files[r[0]].gen);
@@ -529,7 +553,32 @@ static int do_command(uint8_t cmd, const uint8_t *r, int len, uint8_t *a) {
             return 1;
         files[f].writing = false;
         files[f].exists = true;
+        files[f].deleted = false;
         files[f].size = files[f].new_size;
+        files[f].gen = be32(r + 1);
+        save_meta();
+        a[0] = SMC_GOOD;
+        return 1;
+    }
+
+    case SMC_DELETE: {
+        uint8_t f = r[0];
+        a[0] = SMC_FAIL;
+        if (!file_ok(f) || !files[f].exists || files[f].writing)
+            return 1;
+        close_open();
+        char p[192], t[200];
+        path_of(p, sizeof(p), f, false);
+        snprintf(t, sizeof(t), "%s/.deleted", set_dir);
+        sd_mkdir(t);
+        snprintf(t, sizeof(t), "%s/.deleted/%s", set_dir, files[f].name);
+        if (sd_exists(t))
+            sd_remove(t);
+        if (sd_rename(p, t) != 0)
+            return 1;
+        files[f].exists = false;
+        files[f].deleted = true;
+        files[f].size = 0;
         files[f].gen = be32(r + 1);
         save_meta();
         a[0] = SMC_GOOD;

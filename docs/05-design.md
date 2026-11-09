@@ -23,7 +23,7 @@ the card has the answer (an SD access, so up to tens of milliseconds late: Super
 |---|---|---|
 | `60` **Hello** | `'S' 'M' ver host caps` | `'S' 'M' ver features id[8] free_kb[4]` (16) |
 | `61` **Select** | `syslen sys idlen id card`: system = Main's save folder name (`SNES`, `TGFX16`), game ID = Main's save name (`Super Metroid (USA)`) or a serial, card = the system's virtual card 1-99 (0: its current one) | `status nfiles card` |
-| `68` **Info** | `file` | `status name[16] size[4] gen[4]` |
+| `68` **Info** | `file` | `status name[16] size[4] gen[4]`; status `44` 'D': deleted at generation gen (a tombstone) |
 | `62` **Read** | `file blk_hi blk_lo` | `data[128] chk end` (as a PS1 read; chk = XOR of blk bytes and data) |
 | `64` **Create** | `size[4] namelen name` | `status file`: starts writing `<name>.new` |
 | `63` **Write** | `file blk_hi blk_lo data[128] chk` | `end`: `47` good, `4E` bad checksum, `FF` failed |
@@ -31,8 +31,9 @@ the card has the answer (an SD access, so up to tens of milliseconds late: Super
 | `66` **Status** | | `pending[2]` (0: every write is already on the SD card) |
 | `67` **List** | `syslen sys card idx[2]` | `status id[64]`: the idx-th game the card has for that system on that virtual card (0: current); sys `.`: the idx-th system |
 | `69` **Core** | `syslen sys flags` | `status card`: the system's current virtual card. Flags bit 0: this system's core is running now (the card shows it, its buttons pick this system's card); sys `.` with bit 0: none is. Without bit 0 it only asks |
+| `6A` **Delete** | `file gen[4]` | `end`: the save is deleted at generation gen; the card keeps a tombstone (meta.ini `<file>=-<gen>`) and the file itself in `<game>/.deleted/` |
 
-Status bytes: `47` good, `4F` not found, `53` no game selected, `FF` failed. Before a Hello, `61`-`69` aren't
+Status bytes: `47` good, `44` deleted, `4F` not found, `53` no game selected, `FF` failed. Before a Hello, `61`-`6A` aren't
 ACKed (exactly like stock firmware). Names that could leave `SuperMemCard/` (`/`, `\`, `:`, `..`, leading or
 trailing dots and spaces) are refused. A save only replaces the previous one at Commit, so a card pulled or powered
 off mid-save keeps the old one whole (tested).
@@ -198,6 +199,17 @@ Each save set has a **generation number** on the card and in the mirror. The hos
 | there | missing | the card's is used (a fresh install: the saves come back from the card) |
 
 The last row is what makes a reinstall safe.
+
+**Both changed** is never settled by guessing: the sync keeps both (the local file in place, the card's copy in
+`<state>/<card ID>/conflicts/`) and reports it every time until the frontend settles it (`smc_conflicts()` lists
+them, `smc_resolve()` keeps the SuperStation's copy, which goes to the card, or the card's, which replaces the local
+file). The other copy is kept, renamed `.old`.
+
+**Deleting** a save is something the frontend does (`smc_delete_save()`), never inferred from a missing file (a
+missing file is what a reinstall looks like). The card's copy gets a tombstone (Delete), so every SuperStation that
+syncs afterwards moves its own copy aside too, unless it was played there since: then the played save comes back.
+Nothing is ever erased: the card keeps the file in `<game>/.deleted/`, each SuperStation in
+`<state>/<card ID>/deleted/`.
 
 ## 6. To decide
 

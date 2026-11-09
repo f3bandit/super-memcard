@@ -5,8 +5,8 @@
 #include <string.h>
 #include <unistd.h>
 
-enum { C_HELLO = 0x60, C_SELECT, C_READ, C_WRITE, C_CREATE, C_COMMIT, C_STATUS, C_LIST, C_INFO, C_CORE };
-enum { GOOD = 0x47, BAD_CHECKSUM = 0x4E, NOT_FOUND = 0x4F };
+enum { C_HELLO = 0x60, C_SELECT, C_READ, C_WRITE, C_CREATE, C_COMMIT, C_STATUS, C_LIST, C_INFO, C_CORE, C_DELETE };
+enum { GOOD = 0x47, BAD_CHECKSUM = 0x4E, NOT_FOUND = 0x4F, DELETED = 0x44 };
 #define RETRIES 3
 
 int smc_frame(const struct smc_bus *b, uint8_t cmd, const uint8_t *req, int rlen, uint8_t *ans, int alen) {
@@ -145,13 +145,23 @@ int smc_info(const struct smc_bus *b, int idx, struct smc_file *f) {
     int rc = smc_frame(b, C_INFO, req, 1, a, 25);
     if (rc)
         return rc;
-    if (a[0] != GOOD)
+    if (a[0] != GOOD && a[0] != DELETED)
         return a[0] == NOT_FOUND ? SMC_E_NOT_FOUND : SMC_E_BAD;
     memcpy(f->name, a + 1, 16);
     f->name[16] = 0;
     f->size = be32(a + 17);
     f->gen = be32(a + 21);
+    f->deleted = a[0] == DELETED;
     return SMC_OK;
+}
+
+int smc_delete(const struct smc_bus *b, int idx, uint32_t gen) {
+    uint8_t req[5] = {(uint8_t)idx}, a[1];
+    put32(req + 1, gen);
+    int rc = smc_frame(b, C_DELETE, req, 5, a, 1);
+    if (rc)
+        return rc;
+    return a[0] == GOOD ? SMC_OK : SMC_E_BAD;
 }
 
 int smc_read_file(const struct smc_bus *b, int idx, uint32_t size, uint8_t *buf) {

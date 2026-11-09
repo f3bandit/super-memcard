@@ -1,12 +1,12 @@
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index 0b8258a..56d0747 100644
+index 0b8258a..47432a3 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
 @@ -11,6 +11,7 @@ set(CMAKE_C_STANDARD 11)
  set(CMAKE_CXX_STANDARD 17)
  
  option(SD2PSX_WITH_PSRAM "Build SD2PSX with PSRAM support" ON)
-+option(SD2PSX_WITH_SUPERMEMCARD "Super MemCard commands in PS1 mode (81 60-69)" ON)
++option(SD2PSX_WITH_SUPERMEMCARD "Super MemCard commands in PS1 mode (81 60-6A)" ON)
  option(SD2PSX_WITH_GUI   "Build SD2PSX with GUI support" ON)
  option(SD2PSX_WITH_LED   "Build SD2PSX with LED support" OFF)
  option(DEBUG_USB_UART "Activate UART over USB for debugging" OFF)
@@ -241,7 +241,7 @@ index 1544627..a5d4c41 100644
      target_link_libraries(ps1_card PRIVATE
              psram)
 diff --git a/src/ps1/ps1_memory_card.c b/src/ps1/ps1_memory_card.c
-index e780419..32e53fe 100644
+index e780419..5a10856 100644
 --- a/src/ps1/ps1_memory_card.c
 +++ b/src/ps1/ps1_memory_card.c
 @@ -134,6 +134,10 @@ static void __time_critical_func(ps1_mc_respond)(uint8_t ch) {
@@ -269,7 +269,7 @@ index e780419..32e53fe 100644
                  case 'W': mc_cmd_write(); break;
 +#endif
 +#if WITH_SUPERMEMCARD
-+                case 0x60 ... 0x69: mc_supermemcard(ch); break;
++                case 0x60 ... 0x6A: mc_supermemcard(ch); break;
 +#endif
                  default: DPRINTF("Unknown command: 0x%.02x\n", ch); break;
              }

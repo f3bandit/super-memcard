@@ -5,6 +5,13 @@ the design depends on. Newest first. Each entry says where it came from so it ca
 
 ## 2026-11-09
 
+### Deleting saves, and settling "both changed"
+
+Built and tested in the virtual card: Delete (`81 6A`) leaves a tombstone on the card; the sync deletes (moves
+aside) other SuperStations' copies, or brings the save back when one was played since; nothing is erased anywhere.
+`smc_conflicts()` / `smc_resolve()` let a frontend settle a both-changed save either way. Console Mode needs screens
+for both (a delete in its save manager, a "which one?" question); Phosphor is only the test bench.
+
 ### The card's SuperStation menu, free space, save icons
 
 - **Menu** (`src/gui.c` patch, built for SD2PSX and PMC+, not run on a card yet): Saves Yes/No, Free (count),

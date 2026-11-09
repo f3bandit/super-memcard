@@ -1,4 +1,4 @@
-/* Super MemCard for sd2psXtd's PS1 mode: commands 81 60..69 (docs/05-design.md §2).
+/* Super MemCard for sd2psXtd's PS1 mode: commands 81 60..6A (docs/05-design.md §2).
  *
  * Other systems' saves live on the card's SD card under SuperMemCard/<system>/Card<N>/<game ID>/, never
  * inside a .mcd, so PS1 mode can't see or change them (rule 3). Each system has virtual cards 1..99, like
@@ -23,10 +23,14 @@ enum {
     SMC_CORE   = 0x69, /* syslen sys flags                     -> status card (2): the system's current card;
                         * flags bit 0: this system's core is running (system mode: screen, buttons); sys "."
                         * with bit 0: no system (back to the PS1 card) */
+    SMC_DELETE = 0x6A, /* file gen[4]                          -> end (1): the save is deleted at generation gen; the
+                        * card keeps a tombstone (Info answers 44 'D') so other SS1s delete their copy too, and
+                        * the file itself in <game>/.deleted/ */
 };
 
 /* answer status / end bytes, as the PS1 commands use them */
-enum { SMC_GOOD = 0x47, SMC_BAD_CHECKSUM = 0x4E, SMC_FAIL = 0xFF, SMC_NOT_FOUND = 0x4F, SMC_NO_SET = 0x53 };
+enum { SMC_GOOD = 0x47, SMC_BAD_CHECKSUM = 0x4E, SMC_FAIL = 0xFF, SMC_NOT_FOUND = 0x4F, SMC_NO_SET = 0x53,
+       SMC_DELETED = 0x44 };
 
 /* host IDs in Hello */
 enum { SMC_HOST_PHOSPHOR = 1, SMC_HOST_CONSOLE_MODE = 2, SMC_HOST_CORE = 3, SMC_HOST_TEST = 0x7F };

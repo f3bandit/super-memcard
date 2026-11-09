@@ -310,6 +310,119 @@ static void t_sync_core_system_names(void) {
     CHECK(smc_core_system("_Computer/ao486_20250101.rbf") == NULL);
 }
 
+static struct smc_sync_cfg cfg_of(int which) {
+    static char saves[2][400], state[2][400];
+    snprintf(saves[which], sizeof(saves[which]), "%s/saves", ss[which]);
+    snprintf(state[which], sizeof(state[which]), "%s/state", ss[which]);
+    struct smc_sync_cfg cfg = {saves[which], state[which], smc_console_systems, SMC_HOST_TEST, slog};
+    return cfg;
+}
+
+static void t_sync_delete_reaches_every_superstation(void) {
+    sync_setup();
+    char p[800];
+    put_save(0, "SNES/Zelda (USA).srm", sA, 8192);
+    CHECK_EQ(run_sync(0).pushed, 1);
+    CHECK_EQ(run_sync(1).pulled, 1);
+    /* deleted on the first SuperStation */
+    struct smc_sync_cfg c0 = cfg_of(0);
+    CHECK_EQ(smc_delete_save(&vbus, &c0, "SNES", "Zelda (USA).srm"), SMC_OK);
+    CHECK_EQ(get_save(0, "SNES/Zelda (USA).srm", got, sizeof(got)), -1);
+    CHECK_EQ(file_size("SuperMemCard/SNES/Card1/Zelda (USA)/save.srm"), -1);
+    CHECK_EQ(file_size("SuperMemCard/SNES/Card1/Zelda (USA)/.deleted/save.srm"), 8192); /* kept on the card */
+    struct smc_sync_report r = run_sync(0);
+    snprintf(p, sizeof(p), "%s/state/%s/deleted/SNES/Card1/Zelda (USA).srm", ss[0], r.card_id);
+    FILE *k = fopen(p, "rb");
+    CHECK(k); /* and kept on the SuperStation */
+    if (k)
+        fclose(k);
+    CHECK_EQ(r.pushed + r.pulled, 0); /* not brought back */
+    /* the second one deletes its copy too, aside */
+    r = run_sync(1);
+    CHECK_EQ(r.deleted, 1);
+    CHECK_EQ(get_save(1, "SNES/Zelda (USA).srm", got, sizeof(got)), -1);
+    r = run_sync(1);
+    CHECK_EQ(r.deleted + r.pushed + r.pulled, 0);
+    /* played again later: the save comes back everywhere */
+    put_save(1, "SNES/Zelda (USA).srm", sB, 8192);
+    CHECK_EQ(run_sync(1).pushed, 1);
+    CHECK_EQ(run_sync(0).pulled, 1);
+    CHECK_EQ(get_save(0, "SNES/Zelda (USA).srm", got, sizeof(got)), 8192);
+    CHECK(memcmp(got, sB, 8192) == 0);
+}
+
+static void t_sync_delete_vs_played_since(void) {
+    /* deleted on one, played on the other before it synced: the played save wins, nothing lost */
+    sync_setup();
+    put_save(0, "NES/Metroid (USA).sav", sA, 8192);
+    CHECK_EQ(run_sync(0).pushed, 1);
+    CHECK_EQ(run_sync(1).pulled, 1);
+    struct smc_sync_cfg c0 = cfg_of(0);
+    CHECK_EQ(smc_delete_save(&vbus, &c0, "NES", "Metroid (USA).sav"), SMC_OK);
+    put_save(1, "NES/Metroid (USA).sav", sB, 8192);
+    struct smc_sync_report r = run_sync(1);
+    CHECK_EQ(r.deleted, 0);
+    CHECK_EQ(r.pushed, 1);
+    CHECK_EQ(run_sync(0).pulled, 1);
+    CHECK_EQ(get_save(0, "NES/Metroid (USA).sav", got, sizeof(got)), 8192);
+    CHECK(memcmp(got, sB, 8192) == 0);
+}
+
+static int nconf;
+static char conf_save[300];
+static void on_conflict(const char *sys, int card, const char *save, uint32_t gen, void *ctx) {
+    (void)ctx, (void)gen;
+    nconf++;
+    CHECK(strcmp(sys, "SMS") == 0);
+    CHECK_EQ(card, 1);
+    snprintf(conf_save, sizeof(conf_save), "%s", save);
+}
+
+static void t_sync_conflict_settled(void) {
+    sync_setup();
+    static uint8_t a2[8192], b2[8192];
+    fill(a2, sizeof(a2), 41);
+    fill(b2, sizeof(b2), 42);
+    put_save(0, "SMS/Phantasy Star (USA).sav", a2, sizeof(a2));
+    put_save(1, "SMS/Phantasy Star (USA).sav", b2, sizeof(b2));
+    CHECK_EQ(run_sync(1).pushed, 1);
+    struct smc_sync_report r = run_sync(0);
+    CHECK_EQ(r.conflicts, 1);
+    struct smc_sync_cfg c0 = cfg_of(0);
+    nconf = 0;
+    CHECK_EQ(smc_conflicts(&c0, r.card_id, on_conflict, NULL), 1);
+    CHECK(strcmp(conf_save, "Phantasy Star (USA).sav") == 0);
+    /* keep the card's: the local one is replaced (and kept beside) */
+    CHECK_EQ(smc_resolve(&vbus, &c0, "SMS", conf_save, SMC_KEEP_CARD), SMC_OK);
+    CHECK_EQ(get_save(0, "SMS/Phantasy Star (USA).sav", got, sizeof(got)), sizeof(b2));
+    CHECK(memcmp(got, b2, sizeof(b2)) == 0);
+    r = run_sync(0);
+    CHECK_EQ(r.conflicts, 0);
+    CHECK_EQ(r.pushed + r.pulled, 0);
+    nconf = 0;
+    CHECK_EQ(smc_conflicts(&c0, r.card_id, on_conflict, NULL), 0);
+    char p[800];
+    snprintf(p, sizeof(p), "%s/state/%s/conflicts/SMS/Card1/Phantasy Star (USA)/save.sav.local", ss[0], r.card_id);
+    FILE *k = fopen(p, "rb");
+    CHECK(k);
+    if (k) {
+        CHECK_EQ(fread(got, 1, sizeof(got), k), sizeof(a2));
+        CHECK(memcmp(got, a2, sizeof(a2)) == 0);
+        fclose(k);
+    }
+    /* again, keeping the SuperStation's this time: it goes to the card, and on to the other one */
+    put_save(0, "SMS/Phantasy Star (USA).sav", a2, sizeof(a2));
+    fill(b2, sizeof(b2), 43);
+    put_save(1, "SMS/Phantasy Star (USA).sav", b2, sizeof(b2));
+    CHECK_EQ(run_sync(1).pushed, 1);
+    CHECK_EQ(run_sync(0).conflicts, 1);
+    CHECK_EQ(smc_resolve(&vbus, &c0, "SMS", "Phantasy Star (USA).sav", SMC_KEEP_LOCAL), SMC_OK);
+    CHECK_EQ(run_sync(0).conflicts, 0);
+    CHECK_EQ(run_sync(1).pulled, 1);
+    CHECK_EQ(get_save(1, "SMS/Phantasy Star (USA).sav", got, sizeof(got)), sizeof(a2));
+    CHECK(memcmp(got, a2, sizeof(a2)) == 0);
+}
+
 #define SYNC_TESTS \
     {"sync: saves to the card, then nothing to do, then a change", t_sync_to_card_then_unchanged, true, NULL}, \
     {"sync: a reinstall gets every save back", t_sync_reinstall_gets_everything_back, true, NULL}, \
@@ -320,4 +433,7 @@ static void t_sync_core_system_names(void) {
     {"sync: no Super MemCard card: nothing changes", t_sync_no_card, true, NULL}, \
     {"sync: another virtual card picked: saves go to the old one first", t_sync_virtual_card_switch, true, NULL}, \
     {"sync: no switch until the old card has every save", t_sync_switch_waits_when_old_card_fails, true, NULL}, \
-    {"sync: a core's save folder from its .rbf", t_sync_core_system_names, true, NULL},
+    {"sync: a core's save folder from its .rbf", t_sync_core_system_names, true, NULL}, \
+    {"sync: a deleted save is deleted on every SuperStation", t_sync_delete_reaches_every_superstation, true, NULL}, \
+    {"sync: deleted on one, played on another: the save stays", t_sync_delete_vs_played_since, true, NULL}, \
+    {"sync: both changed, settled either way", t_sync_conflict_settled, true, NULL},

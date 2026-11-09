@@ -332,6 +332,24 @@ static int keep_both(struct entry *e, const uint8_t *card, uint32_t n, uint32_t 
     return 0;
 }
 
+/* A deleted save's local file goes to <state>/<card ID>/deleted/<sys>/Card<N>/, never deleted outright */
+static int trash_local(const struct entry *e, const char *path) {
+    char dir[1024], to[1300];
+    snprintf(dir, sizeof(dir), "%s/deleted/%s/Card%d", state_dir, e->sys, e->card);
+    const char *base = strrchr(path, '/');
+    snprintf(to, sizeof(to), "%s/%s", dir, base ? base + 1 : path);
+    if (mkdirs(dir) != 0)
+        return -1;
+    if (rename(path, to) == 0)
+        return 0;
+    long n = read_file(path, bufB, MAX_SAVE);
+    if (n < 0 || write_file(to, bufB, (size_t)n) != 0 || unlink(path) != 0) {
+        logf_("couldn't move %s to %s", path, to);
+        return -1;
+    }
+    return 0;
+}
+
 /* Bring one save file in step. card_idx: its index in the selected set on the card, -1 if the card
  * doesn't have it (the set must be selected when card_idx >= 0). */
 static int sync_one(const struct smc_bus *b, struct entry *e, const char *id, int card_idx, const struct smc_file *cf,
@@ -345,9 +363,25 @@ static int sync_one(const struct smc_bus *b, struct entry *e, const char *id, in
         rep->skipped++;
         return 0;
     }
-    bool have_local = ln > 0, have_card = card_idx >= 0;
+    bool have_local = ln > 0, have_card = card_idx >= 0 && !cf->deleted;
     uint32_t lcrc = have_local ? smc_crc32(bufA, (size_t)ln, 0) : 0;
     bool local_changed = have_local && (!e->seen || lcrc != e->crc);
+
+    if (card_idx >= 0 && cf->deleted) {
+        /* deleted on the card (by another SuperStation, or by this one) */
+        if (have_local && (local_changed || e->gen >= cf->gen))
+            return push(b, e, id, bufA, ln, cf->gen + 1, rep); /* played since: the save comes back */
+        if (have_local && trash_local(e, p) != 0)
+            return -1;
+        if (have_local) {
+            rep->deleted++;
+            logf_("deleted on the card: %s/%s %s (kept in the state folder's deleted/)", e->sys, e->game, e->file);
+        }
+        e->gen = cf->gen;
+        e->crc = 0;
+        e->seen = true;
+        return 0;
+    }
     bool card_changed = have_card && (!e->seen || cf->gen != e->gen);
 
     if (have_local && !have_card)
@@ -395,7 +429,7 @@ static int sync_game(const struct smc_bus *b, const char *sys, int card, const c
     char local_game[256];
     snprintf(local_game, sizeof(local_game), "%s", game);
     for (int i = 0; i < n; i++)
-        if (!strcmp(files[i].name, NAME_TXT) && files[i].size < sizeof(local_game)) {
+        if (!strcmp(files[i].name, NAME_TXT) && !files[i].deleted && files[i].size < sizeof(local_game)) {
             if (smc_read_file(b, i, files[i].size, (uint8_t *)local_game) == SMC_OK)
                 local_game[files[i].size] = 0;
         }
@@ -530,7 +564,8 @@ static int set_aside(const char *sys, int old) {
     return rc;
 }
 
-int smc_sync(const struct smc_bus *b, const struct smc_sync_cfg *cfg, struct smc_sync_report *rep) {
+/* A session with the card: Hello, the card's state loaded. 1: ready, 0: no (usable) card, <0: error. */
+static int begin(const struct smc_bus *b, const struct smc_sync_cfg *cfg, struct smc_sync_report *rep) {
     memset(rep, 0, sizeof(*rep));
     C = cfg;
     struct smc_card card;
@@ -545,7 +580,6 @@ int smc_sync(const struct smc_bus *b, const struct smc_sync_cfg *cfg, struct smc
         logf_("the card's firmware is too old (Super MemCard %u, needs %u): not synced", card.version, SMC_PROTOCOL);
         return 0;
     }
-
     snprintf(state_dir, sizeof(state_dir), "%s/%s", cfg->state_dir, card.id);
     if (mkdirs(state_dir) != 0)
         return -1;
@@ -554,12 +588,26 @@ int smc_sync(const struct smc_bus *b, const struct smc_sync_cfg *cfg, struct smc
     bufB = malloc(MAX_SAVE);
     if (!ents || !bufA || !bufB) {
         free(ents), free(bufA), free(bufB);
+        ents = NULL;
         return -1;
     }
     nents = 0;
     load_state();
-
     load_locals();
+    return 1;
+}
+
+static int end(void) {
+    int rc = save_state() | save_locals();
+    free(ents), free(bufA), free(bufB);
+    ents = NULL;
+    return rc;
+}
+
+int smc_sync(const struct smc_bus *b, const struct smc_sync_cfg *cfg, struct smc_sync_report *rep) {
+    int ok = begin(b, cfg, rep);
+    if (ok <= 0)
+        return ok;
     for (const char *const *s = cfg->systems; *s; s++) {
         int now = smc_core(b, *s, false);
         if (now < 1) {
@@ -583,11 +631,174 @@ int smc_sync(const struct smc_bus *b, const struct smc_sync_cfg *cfg, struct smc
         set_local_card(*s, now);
         sync_system(b, *s, now, rep);
     }
+    logf_("sync done: %d to card, %d from card, %d unchanged, %d both changed, %d deleted, %d skipped, %d failed",
+          rep->pushed, rep->pulled, rep->unchanged, rep->conflicts, rep->deleted, rep->skipped, rep->failed);
+    return end();
+}
 
-    int rc = save_state() | save_locals();
-    logf_("sync done: %d to card, %d from card, %d unchanged, %d both changed, %d skipped, %d failed", rep->pushed,
-          rep->pulled, rep->unchanged, rep->conflicts, rep->skipped, rep->failed);
-    free(ents), free(bufA), free(bufB);
-    ents = NULL;
-    return rc;
+/* the card's file for a local save: selects its game on the system's card; returns its index (or -1 when the card
+ * hasn't it, f->deleted for a tombstone), <-1 on error */
+static int find_on_card(const struct smc_bus *b, const char *sys, int card, const char *id, const char *cfile,
+                        struct smc_file *f) {
+    int n = smc_select_card(b, sys, id, card, NULL);
+    if (n < 0)
+        return -2;
+    for (int i = 0; i < n; i++) {
+        if (smc_info(b, i, f) != SMC_OK)
+            return -2;
+        if (!strcmp(f->name, cfile))
+            return i;
+    }
+    return -1;
+}
+
+static int system_card(const struct smc_bus *b, const char *sys) {
+    int card = local_card(sys);
+    return card ? card : smc_core(b, sys, false);
+}
+
+int smc_delete_save(const struct smc_bus *b, const struct smc_sync_cfg *cfg, const char *sys, const char *save) {
+    struct smc_sync_report rep;
+    char game[256], cfile[17], id[65], path[1024];
+    if (!split_name(save, game, sizeof(game), cfile, sizeof(cfile)))
+        return SMC_E_BAD;
+    int ok = begin(b, cfg, &rep);
+    if (ok <= 0)
+        return ok < 0 ? ok : SMC_E_NO_REPLY;
+    int rc = SMC_OK, card = system_card(b, sys);
+    smc_game_id(game, id);
+    struct entry *e = card > 0 ? add(sys, card, game, cfile) : NULL;
+    struct smc_file f;
+    int idx = e ? find_on_card(b, sys, card, id, cfile, &f) : -2;
+    if (idx < -1)
+        rc = SMC_E_NO_REPLY;
+    else {
+        uint32_t gen = idx >= 0 ? f.gen + 1 : (e->seen ? e->gen + 1 : 1);
+        if (idx >= 0 && !f.deleted)
+            rc = smc_delete(b, idx, gen);
+        snprintf(path, sizeof(path), "%s/%s/%s", cfg->saves_dir, sys, save);
+        if (rc == SMC_OK && access(path, F_OK) == 0 && trash_local(e, path) != 0)
+            rc = SMC_E_BAD;
+        if (rc == SMC_OK) {
+            e->gen = gen;
+            e->crc = 0;
+            e->seen = true;
+            logf_("deleted: %s/%s %s on card %d (generation %u)", sys, game, cfile, card, (unsigned)gen);
+        }
+    }
+    int erc = end();
+    return rc ? rc : (erc ? SMC_E_BAD : SMC_OK);
+}
+
+/* conflicts/<sys>/Card<N>/<game>/<file>.gen<G>: the card's copy kept when both sides changed */
+int smc_conflicts(const struct smc_sync_cfg *cfg, const char *card_id,
+                  void (*cb)(const char *sys, int card, const char *save, uint32_t gen, void *ctx), void *ctx) {
+    char root[1100];
+    int n = 0;
+    snprintf(root, sizeof(root), "%s/%s/conflicts", cfg->state_dir, card_id);
+    DIR *ds = opendir(root);
+    if (!ds)
+        return 0;
+    struct dirent *s, *c, *g, *f;
+    while ((s = readdir(ds))) {
+        char p1[1400];
+        if (s->d_name[0] == '.')
+            continue;
+        snprintf(p1, sizeof(p1), "%s/%s", root, s->d_name);
+        DIR *dc = opendir(p1);
+        while (dc && (c = readdir(dc))) {
+            char p2[1700];
+            int card = 0;
+            if (sscanf(c->d_name, "Card%d", &card) != 1)
+                continue;
+            snprintf(p2, sizeof(p2), "%s/%s", p1, c->d_name);
+            DIR *dg = opendir(p2);
+            while (dg && (g = readdir(dg))) {
+                char p3[2000];
+                if (g->d_name[0] == '.')
+                    continue;
+                snprintf(p3, sizeof(p3), "%s/%s", p2, g->d_name);
+                DIR *df = opendir(p3);
+                while (df && (f = readdir(df))) {
+                    const char *gp = strstr(f->d_name, ".gen");
+                    size_t l = strlen(f->d_name);
+                    if (!gp || (l > 4 && !strcmp(f->d_name + l - 4, ".old")))
+                        continue;
+                    char save[300], cfile[17];
+                    snprintf(cfile, sizeof(cfile), "%.*s", (int)(gp - f->d_name), f->d_name);
+                    /* card "save.sav" -> "<game>.sav", "save_1.cpk" -> "<game>_1.cpk" */
+                    snprintf(save, sizeof(save), "%s%s", g->d_name, strlen(cfile) > 4 ? cfile + 4 : "");
+                    cb(s->d_name, card, save, (uint32_t)strtoul(gp + 4, NULL, 10), ctx);
+                    n++;
+                }
+                if (df)
+                    closedir(df);
+            }
+            if (dg)
+                closedir(dg);
+        }
+        if (dc)
+            closedir(dc);
+    }
+    closedir(ds);
+    return n;
+}
+
+int smc_resolve(const struct smc_bus *b, const struct smc_sync_cfg *cfg, const char *sys, const char *save, int keep) {
+    struct smc_sync_report rep;
+    char game[256], cfile[17], id[65], path[1024];
+    if (!split_name(save, game, sizeof(game), cfile, sizeof(cfile)) || (keep != SMC_KEEP_LOCAL && keep != SMC_KEEP_CARD))
+        return SMC_E_BAD;
+    int ok = begin(b, cfg, &rep);
+    if (ok <= 0)
+        return ok < 0 ? ok : SMC_E_NO_REPLY;
+    int rc = SMC_E_NOT_FOUND, card = system_card(b, sys);
+    smc_game_id(game, id);
+    struct entry *e = card > 0 ? add(sys, card, game, cfile) : NULL;
+    struct smc_file f;
+    int idx = e ? find_on_card(b, sys, card, id, cfile, &f) : -2;
+    snprintf(path, sizeof(path), "%s/%s/%s", cfg->saves_dir, sys, save);
+    long ln = read_file(path, bufA, MAX_SAVE);
+    if (idx < -1)
+        rc = SMC_E_NO_REPLY;
+    else if (idx >= 0 && !f.deleted && ln > 0) {
+        char cdir[1300], keepdir[1300];
+        snprintf(cdir, sizeof(cdir), "%s/conflicts/%s/Card%d/%s", state_dir, sys, card, game);
+        if (keep == SMC_KEEP_LOCAL) {
+            rc = push(b, e, id, bufA, ln, f.gen + 1, &rep); /* the card's copy stays in conflicts/ */
+        } else if ((rc = smc_read_file(b, idx, f.size, bufB)) == SMC_OK) {
+            /* the local one is kept beside the card's copy before it's replaced */
+            char kp[1500];
+            snprintf(keepdir, sizeof(keepdir), "%s", cdir);
+            snprintf(kp, sizeof(kp), "%s/%s.local", keepdir, cfile);
+            if (mkdirs(keepdir) != 0 || write_file(kp, bufA, (size_t)ln) != 0 || write_file(path, bufB, f.size) != 0)
+                rc = SMC_E_BAD;
+            else {
+                e->gen = f.gen;
+                e->crc = smc_crc32(bufB, f.size, 0);
+                e->seen = true;
+            }
+        }
+        if (rc == SMC_OK) {
+            /* the conflict is settled: its copies stay, renamed .old */
+            DIR *d = opendir(cdir);
+            struct dirent *de;
+            while (d && (de = readdir(d))) {
+                size_t l = strlen(de->d_name), cl = strlen(cfile);
+                if (!strncmp(de->d_name, cfile, cl) && strncmp(de->d_name + cl, ".gen", 4) == 0 &&
+                    !(l > 4 && !strcmp(de->d_name + l - 4, ".old"))) {
+                    char from[1700], to[1800];
+                    snprintf(from, sizeof(from), "%s/%s", cdir, de->d_name);
+                    snprintf(to, sizeof(to), "%s.old", from);
+                    rename(from, to);
+                }
+            }
+            if (d)
+                closedir(d);
+            logf_("both changed, settled: %s/%s %s: the %s copy kept", sys, game, cfile,
+                  keep == SMC_KEEP_LOCAL ? "SuperStation's" : "card's");
+        }
+    }
+    int erc = end();
+    return rc ? rc : (erc ? SMC_E_BAD : SMC_OK);
 }

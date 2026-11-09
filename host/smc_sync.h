@@ -32,6 +32,7 @@ struct smc_sync_report {
     char card_id[17];
     int pushed, pulled, unchanged, conflicts, skipped, failed;
     int switched; /* systems moved to another virtual card (the card's buttons) */
+    int deleted;  /* saves deleted on another SuperStation, deleted here too (kept aside) */
 };
 
 /* The 15 console cores' save folders (cores/cores.tsv; names from each core's CONF_STR). */
@@ -48,6 +49,21 @@ const uint8_t *smc_system_icon(const char *sys, size_t *len);
 
 /* 0 on success (including "no Super MemCard card": report.card is false), <0 if the sync stopped. */
 int smc_sync(const struct smc_bus *b, const struct smc_sync_cfg *cfg, struct smc_sync_report *rep);
+
+/* The frontend deletes a save (`save`: its file name in saves/<sys>/, "Super Metroid (USA).sav"): the card's copy
+ * is deleted with a tombstone, so every SuperStation that syncs deletes its copy too (unless that one was played
+ * since: then it comes back). Nothing is lost: the card keeps the file in <game>/.deleted/, and each
+ * SuperStation moves its local file to <state>/<card ID>/deleted/. SMC_OK or <0. */
+int smc_delete_save(const struct smc_bus *b, const struct smc_sync_cfg *cfg, const char *sys, const char *save);
+
+/* Saves whose two copies both changed (the sync keeps both and reports them): calls cb for each, returns how many.
+ * card_id: report.card_id. */
+int smc_conflicts(const struct smc_sync_cfg *cfg, const char *card_id,
+                  void (*cb)(const char *sys, int card, const char *save, uint32_t gen, void *ctx), void *ctx);
+/* Settle one: keep the SuperStation's copy (it goes to the card) or the card's (it replaces the local file). The
+ * other copy stays in <state>/<card ID>/conflicts/. SMC_OK or <0. */
+enum { SMC_KEEP_LOCAL = 1, SMC_KEEP_CARD = 2 };
+int smc_resolve(const struct smc_bus *b, const struct smc_sync_cfg *cfg, const char *sys, const char *save, int keep);
 
 /* The card's game ID for a save name: the name itself, or for names over 64 characters the first
  * 55, '~' and 8 hex digits of its CRC-32 (the full name is then kept on the card in name.txt). */
