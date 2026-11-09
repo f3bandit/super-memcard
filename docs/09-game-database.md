@@ -4,7 +4,8 @@
 identifier the game itself carries (cartridge header code, disc product code; the ROM's CRC32 for systems without
 one), as sd2psXtd files PS1 cards (`SLUS-00594`), with `game.ini` (ID, the name in its header) and the save's date
 and time. That's what Console Mode's memory manager shows: **game name, game ID, date and time** (and the icon),
-through `smc_list_card()` and `smc_game_info()`. Not built yet: the official names from the game lists (section 2).
+through `smc_list_card()` and `smc_game_info()`. The official names come from the game lists (section 2) when the
+frontend has them on the SuperStation (`smc_sync_cfg.gamedb_dir`).
 
 Today a save set on the card is named after Main's save file, which is named after the ROM file
 (`saves/SNES/Super Metroid (USA).sav` for `games/SNES/Super Metroid (USA).sfc`). That works on one SuperStation, but
@@ -69,7 +70,13 @@ what it is; the game ID a frontend shows is its `id`, the game's own code:
 ```
 id=NSME
 title=SUPER MARIO 64
+name=Super Mario 64 (USA)
 ```
+
+`name` is looked up by the ROM's CRC (cartridges) or the product code (discs). Checked against libretro's lists with
+the SS1's own games: `007 - The World Is Not Enough (USA)`, `Pokemon - Emerald Version (USA, Europe)`,
+`Alien Resurrection (USA)`, `Aero Blasters (USA)`; the Castlevania hack isn't in any list, so it keeps its header
+name (`CASTLEVANIA2`). A frontend shows `name`, else `title`, else the save's file name.
 
 Each save file's time (when Main wrote it) goes with it to the card (Commit) and comes back onto other SuperStations'
 files.

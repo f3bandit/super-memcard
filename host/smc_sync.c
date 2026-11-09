@@ -2,6 +2,7 @@
 #define _GNU_SOURCE
 #include "smc_sync.h"
 #include "smc_ident.h"
+#include "smc_gamedb.h"
 
 #include <dirent.h>
 #include <errno.h>
@@ -699,14 +700,22 @@ static int sync_game(const struct smc_bus *b, const char *sys, int card, const c
             logf_("couldn't put the icon on the card: %s/%s", sys, local_game);
     }
     /* and what the game is, for a frontend's save list (game name, ID) */
-    char gid[65], title[65], ini[200];
+    char gid[65], title[65], ini[320];
     if (!has_ini && rep->pushed > pushed && card_id_for(sys, local_game, gid, title) && !strcmp(gid, id)) {
         /* the game ID shown is the game's own code (NSME), not the folder's code-CRC */
         char hid[65], t2[65];
         struct rom *r = rom_for(sys, local_game);
         if (r && smc_game_header_id(sys, r->path, hid, t2) == 0)
             snprintf(gid, sizeof(gid), "%s", hid);
-        snprintf(ini, sizeof(ini), "id=%s\ntitle=%s\n", gid, title);
+        /* the official name, from the game lists when the frontend has them: by the ROM's CRC (the end of the folder
+         * name), or a disc's product code (the folder name) */
+        const char *crc = NULL, *dash = strrchr(id, '-');
+        if (!strncmp(id, "CRC-", 4))
+            crc = id + 4;
+        else if (dash && strlen(dash + 1) == 8 && strspn(dash + 1, "0123456789ABCDEF") == 8)
+            crc = dash + 1;
+        const char *name = smc_gamedb_name(C->gamedb_dir, sys, crc, crc ? NULL : id);
+        snprintf(ini, sizeof(ini), "id=%s\ntitle=%s\nname=%.120s\n", gid, title, name ? name : "");
         if (smc_select_card(b, sys, id, card, NULL) < 0 ||
             smc_write_file(b, GAME_INI, (const uint8_t *)ini, (uint32_t)strlen(ini), 1) != SMC_OK)
             logf_("couldn't put game.ini on the card: %s/%s", sys, local_game);
@@ -827,6 +836,7 @@ static int begin(const struct smc_bus *b, const struct smc_sync_cfg *cfg, struct
 }
 
 static int end(void) {
+    smc_gamedb_close();
     if (nroms)
         save_ids();
     free(roms);
@@ -1062,6 +1072,11 @@ int smc_game_info(const struct smc_bus *b, const char *sys, int card, const char
                 if (g == text || (g && g[-1] == '\n')) {
                     g += 3;
                     snprintf(gi->id, sizeof(gi->id), "%.*s", (int)strcspn(g, "\n"), g);
+                }
+                char *nm = strstr(text, "\nname=");
+                if (nm) {
+                    nm += 6;
+                    snprintf(gi->name, sizeof(gi->name), "%.*s", (int)strcspn(nm, "\n"), nm);
                 }
                 char *t = strstr(text, "title=");
                 if (t) {

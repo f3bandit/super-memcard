@@ -28,6 +28,9 @@ struct smc_sync_cfg {
     /* Games folders to find each save's game in (/media/fat/games, /media/usb0/games ...), NULL-terminated; the
      * saves then go on the card under their game's ID (docs/09). NULL: under their file names, as before. */
     const char *const *games_dirs;
+    /* Folder with libretro's game lists (<list>.dat, smc_gamedb.h; tools/gamedb/fetch.sh), for each game's official
+     * name in game.ini. NULL: no names. */
+    const char *gamedb_dir;
 };
 
 struct smc_sync_report {
@@ -78,7 +81,8 @@ uint32_t smc_crc32(const uint8_t *p, size_t n, uint32_t crc);
 struct smc_game_info {
     char id[65];         /* game ID: the game's own code (NSME, SLUS-00594, GM 00001009-00) or CRC-xxxxxxxx; the
                           * card folder may add the ROM's CRC (NSME-1A2B3C4D) */
-    char title[65];      /* the name in the game's header ("" if it has none); the official name: game lists, later */
+    char name[128];      /* the official name ("Super Mario 64 (USA)"), from the game lists ("" if not known) */
+    char title[65];      /* the name in the game's header ("" if it has none) */
     char save_name[256]; /* the save's file name it came from on a SuperStation (Main's name for the game) */
     uint32_t time;       /* when its newest save was made (Unix time, UTC; 0: not known) */
     int files;           /* save files */

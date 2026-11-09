@@ -526,9 +526,12 @@ static struct smc_sync_report run_sync_games(int which) {
     snprintf(saves[which], 400, "%s/saves", ss[which]);
     snprintf(state[which], 400, "%s/state", ss[which]);
     snprintf(games[which], 400, "%s/games", ss[which]);
+    static char lists[2][400];
     dirs[which][0] = games[which];
     dirs[which][1] = NULL;
-    struct smc_sync_cfg cfg = {saves[which], state[which], smc_console_systems, SMC_HOST_TEST, slog, dirs[which]};
+    snprintf(lists[which], 400, "%s/lists", ss[which]);
+    struct smc_sync_cfg cfg = {saves[which], state[which], smc_console_systems, SMC_HOST_TEST, slog, dirs[which],
+                               lists[which]};
     struct smc_sync_report r;
     CHECK_EQ(smc_sync(&vbus, &cfg, &r), 0);
     return r;
@@ -543,6 +546,15 @@ static void t_sync_by_game_id(void) {
     make_n64(p, false);
     snprintf(p, sizeof(p), "%s/games/N64/Ultra/Super Mario 64 (USA).v64", ss[1]);
     make_n64(p, true);
+    /* a game list (libretro's format) that knows the game by its ROM's CRC */
+    char dat[600], line[300];
+    snprintf(p, sizeof(p), "%s/games/N64/Mario.z64", ss[0]);
+    char f0[65], t0[65];
+    CHECK_EQ(smc_game_id_of("N64", p, f0, t0), 0);
+    snprintf(line, sizeof(line), "clrmamepro (\n\tname \"Nintendo - Nintendo 64\"\n)\n\ngame (\n\tname \"Super Mario 64 "
+             "(USA)\"\n\tregion \"USA\"\n\trom ( name \"x.z64\" size 4096 crc %s serial \"NSME\" )\n)\n", strrchr(f0, '-') + 1);
+    snprintf(dat, sizeof(dat), "%s/lists/Nintendo - Nintendo 64.dat", ss[0]);
+    put_file(dat, (const uint8_t *)line, strlen(line));
     put_save(0, "N64/Mario.eep", eep, sizeof(eep));
     snprintf(p, sizeof(p), "%s/saves/N64/Mario.eep", ss[0]);
     struct utimbuf ut = {1700000000, 1700000000};
@@ -556,7 +568,7 @@ static void t_sync_by_game_id(void) {
     char ini[64] = {0};
     snprintf(cp, sizeof(cp), "SuperMemCard/N64/Card1/%s/game.ini", folder);
     CHECK_EQ(read_file_at(cp, 0, ini, 29), 0);
-    CHECK(strncmp(ini, "id=NSME\ntitle=SUPER MARIO 64\n", 29) == 0);
+    CHECK(strncmp(ini, "id=NSME\ntitle=SUPER MARIO 64\nname=Super Mario 64 (USA)\n", 29) == 0);
     /* the other SuperStation gets it under its own ROM's name, with the save's time */
     CHECK_EQ(run_sync_games(1).pulled, 1);
     CHECK_EQ(get_save(1, "N64/Super Mario 64 (USA).eep", got, sizeof(got)), sizeof(eep));
@@ -579,6 +591,7 @@ static void t_sync_by_game_id(void) {
     CHECK_EQ(smc_game_info(&vbus, "N64", 0, game, &gi), SMC_OK);
     CHECK(strcmp(gi.id, "NSME") == 0);
     CHECK(strcmp(gi.title, "SUPER MARIO 64") == 0);
+    CHECK(strcmp(gi.name, "Super Mario 64 (USA)") == 0); /* from the game list */
     CHECK(strcmp(gi.save_name, "Super Mario 64 (USA)") == 0); /* the name it last came from */
     CHECK_EQ(gi.files, 1);
     CHECK(gi.has_icon);
