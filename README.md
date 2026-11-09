@@ -1,7 +1,12 @@
 # Super MemCard
 
-Saves from every SuperStation One core on the Retro Remake SD memory card in a front port, so they
-live on the card instead of the SS1's SD card and survive a Console Mode reinstall or a new SD card.
+Game saves from MiSTer console cores on the SuperStation One, kept on the Retro Remake SD memory card in
+a front port as a redundant backup, so they survive a Console Mode reinstall or a new SD card:
+
+- **phase 1, any core**: the host (Main) copies a game's save to and from the card at game start and
+  end. Cores are unchanged; only Main changes (Phosphor's, then Console Mode's);
+- **phase 2, custom MiSTer/SS1 cores**: cores rebuilt with a card driver in `sys/` save to the card
+  while the game runs (the N64 Controller Pak on the card is the first one).
 The card stays a normal PS1 memory card on a real PS1/PS2, in Console Mode and in the PSX core.
 
 Target: Console Mode. Developed and tested on Phosphor first (its Main is an open fork of Main_MiSTer),
@@ -29,9 +34,10 @@ then handed to Retro Remake as a set: protocol spec, `sys/` and Main patches, ca
    file per system and game on its SD card, so there's no 15-block limit.
 2. **Game ID from the host, no BIOS patches**: Main knows exactly which file it loaded (path / hash),
    and the PSX core already reads the disc ID. The host tells the card "system N64, game NUS-NSME-USA".
-3. **One change for all cores**: every MiSTer core shares the `sys/` framework, and save reads/writes
-   already go through Main (`hps_io`). So: the card driver goes into `sys/` once (`card_sector.sv`
-   from SS1_MemCard_MiSTer), Main sends save I/O to the card, and cores are rebuilt with the new `sys/`.
+3. **Main first, then `sys/`**: every core's save reads and writes already go through Main (`hps_io`),
+   so phase 1 is a change to Main alone and works with stock cores. For phase 2, every MiSTer core
+   shares the `sys/` framework: the card driver goes into `sys/` once (`card_sector.sv` from
+   SS1_MemCard_MiSTer) and the custom cores are rebuilt with it.
 4. **Speed**: the PS1 card bus does ~20-25 KB/s (a 128 KB save takes ~5 s), so the host keeps the save
    in memory and writes changes back to the card in the background.
 5. **Safety**: the card is where saves live, so a mirror is kept (SS1 SD card / NVMe / NAS); losing
