@@ -1,0 +1,21 @@
+# The virtual card on every push: sd2psXtd's PS1 card code, stock and with Super MemCard, and the phase 1 sync.
+name: Virtual card tests
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch sd2psXtd
+        run: sim/card/get-firmware.sh
+      - name: Stock firmware
+        run: make -C sim/card -s && sim/card/build/test_card
+      - name: With Super MemCard
+        run: make -C sim/card -s SMC=1 && sim/card/build-smc/test_card
+      - name: With Super MemCard, AddressSanitizer
+        run: make -C sim/card -s SMC=1 SAN=address B=build-smc-asan && sim/card/build-smc-asan/test_card
