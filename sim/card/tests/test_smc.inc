@@ -4,7 +4,47 @@
 
 static void bus_sel(void *c, bool s) { (void)c; vcard_select(s); }
 static uint8_t bus_x(void *c, uint8_t o, bool last, bool *ack) { (void)c; return vcard_xfer(o, last, ack); }
-static const struct smc_bus vbus = {NULL, bus_sel, bus_x};
+static const struct smc_bus vbus = {NULL, bus_sel, bus_x, NULL};
+
+/* the front ports' way: a whole frame per call (phosphor-menu PH_RAW), here done byte by byte on the
+ * virtual card, stopping after the first byte without an ACK like the FPGA does */
+static int bus_frame_cb(void *c, const uint8_t *out, uint8_t *in, int len) {
+    (void)c;
+    int k;
+    vcard_select(true);
+    for (k = 0; k < len; k++) {
+        bool ack = false;
+        in[k] = vcard_xfer(out[k], k + 1 == len, &ack);
+        if (!ack && k + 1 < len) {
+            k++;
+            break;
+        }
+    }
+    vcard_select(false);
+    return k;
+}
+static const struct smc_bus fbus = {NULL, NULL, NULL, bus_frame_cb};
+static void fill(uint8_t *d, size_t n, int seed);
+
+static void t_smc_frame_transport(void) {
+    /* the same round trip through whole-frame calls */
+    static uint8_t save[8192], back[8192];
+    struct smc_file f;
+    fill(save, sizeof(save), 31);
+    CHECK_EQ(smc_hello(&fbus, SMC_HOST_TEST, 0, NULL), 1);
+    CHECK_EQ(smc_select(&fbus, "SNES", "Frames"), 0);
+    CHECK_EQ(smc_write_file(&fbus, "save.sav", save, sizeof(save), 3), SMC_OK);
+    CHECK_EQ(smc_select(&fbus, "SNES", "Frames"), 1);
+    CHECK_EQ(smc_info(&fbus, 0, &f), SMC_OK);
+    CHECK_EQ(f.gen, 3);
+    CHECK_EQ(smc_read_file(&fbus, 0, f.size, back), SMC_OK);
+    CHECK(memcmp(save, back, sizeof(save)) == 0);
+    vcard_stop();
+    CHECK_EQ(vcard_start(sd), 0);
+    bus_wake();
+    /* before Hello, Select stops at the command byte */
+    CHECK_EQ(smc_select(&fbus, "SNES", "Frames"), SMC_E_NO_REPLY);
+}
 
 static void fill(uint8_t *d, size_t n, int seed) {
     for (size_t i = 0; i < n; i++)
@@ -318,6 +358,7 @@ static void t_smc_longest_names(void) {
 }
 
 #define SMC_TESTS \
+    {"SMC: whole-frame transport (the front ports' way)", t_smc_frame_transport, true, NULL}, \
     {"SMC: slow SD card (2.7 ms a write), 128 KB save", t_smc_slow_sd_card, true, NULL}, \
     {"SMC: Commit refuses a save with blocks missing", t_smc_commit_checks_every_block, true, NULL}, \
     {"SMC: longest system, game and file names", t_smc_longest_names, true, NULL}, \

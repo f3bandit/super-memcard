@@ -9,6 +9,22 @@ enum { GOOD = 0x47, BAD_CHECKSUM = 0x4E, NOT_FOUND = 0x4F };
 #define RETRIES 3
 
 int smc_frame(const struct smc_bus *b, uint8_t cmd, const uint8_t *req, int rlen, uint8_t *ans, int alen) {
+    if (b->frame) {
+        uint8_t out[2 + 256], in[2 + 256];
+        int n = 2 + rlen + alen;
+        if (n > (int)sizeof(out))
+            return SMC_E_BAD;
+        out[0] = 0x81;
+        out[1] = cmd;
+        if (rlen)
+            memcpy(out + 2, req, (size_t)rlen);
+        memset(out + 2 + rlen, 0, (size_t)alen);
+        int got = b->frame(b->ctx, out, in, n);
+        if (got < n)
+            return SMC_E_NO_REPLY; /* stopped early: a byte wasn't ACKed */
+        memcpy(ans, in + 2 + rlen, (size_t)alen);
+        return SMC_OK;
+    }
     bool ack = false;
     int rc = SMC_OK;
     b->select(b->ctx, true);

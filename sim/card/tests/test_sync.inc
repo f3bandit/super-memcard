@@ -213,7 +213,7 @@ static uint8_t never(void *c, uint8_t o, bool l, bool *ack) { (void)c; (void)o; 
 static void t_sync_no_card(void) {
     sync_setup();
     put_save(0, "SNES/Super Metroid (USA).sav", sA, sizeof(sA));
-    struct smc_bus none = {NULL, bus_sel, never};
+    struct smc_bus none = {NULL, bus_sel, never, NULL};
     char saves[400], state[400];
     snprintf(saves, sizeof(saves), "%s/saves", ss[0]);
     snprintf(state, sizeof(state), "%s/state", ss[0]);

@@ -16,6 +16,11 @@ struct smc_bus {
      * for an ACK. The ACK after a Super MemCard request can be milliseconds late (SD access):
      * the bus must wait at least SMC_ACK_TIMEOUT_MS for it. */
     uint8_t (*xfer)(void *ctx, uint8_t out, bool last, bool *ack);
+    /* Optional, used instead of select/xfer when set: a whole frame in one go, as the SS1's front
+     * ports do it (phosphor-menu PH_RAW). Sends out[0..len-1] in one select, puts the card's byte for
+     * each into in[k], stops after the first byte that isn't ACKed (the last one never is). Returns
+     * the bytes exchanged (0: nothing answered), <0 on a transport error. */
+    int (*frame)(void *ctx, const uint8_t *out, uint8_t *in, int len);
 };
 #define SMC_ACK_TIMEOUT_MS 100
 
