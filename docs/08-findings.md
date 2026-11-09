@@ -5,13 +5,18 @@ the design depends on. Newest first. Each entry says where it came from so it ca
 
 ## 2026-11-09
 
-### The memory card manager doesn't write to cards
+### The memory card manager doesn't write to cards (a marker is planned)
 
 SS1 Tool, Phosphor and ps1_memcard_lib recognise a card by the saves on it (common save names / all, 0.5 or more =
 the same card) and don't keep a version identical to the card's latest; nothing is written to the card
 (`ps1_memcard_lib/src/mclib.c`, SS1 Tool `memcard.go`). Block 0 frames 56-62 are unused by the PS1 format
 (`mcformat.go`), but they're not used for a Super MemCard marker: they travel with the image and can be wiped.
-Decided: a Super MemCard card gives its own card ID in Hello's answer instead (05 §2).
+Decided: a Super MemCard card gives its own card ID in Hello's answer (05 §2).
+
+Matching by save names goes wrong on nearly empty cards (1 save + 2 new = 33%, a new card), empty cards (always a
+new card), reorganised cards, and different cards holding the same games (merged). So the manager gets a marker
+for card identity (block 0 frame 56, written once, save names as the fallback): on the SS1 Tool / Phosphor todo
+list, to be tested first for invisibility on the PSX core, Console Mode and a real PS1/PS2.
 
 ### Decided: the core sends Hello on its first card poll
 
