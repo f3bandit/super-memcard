@@ -5,6 +5,23 @@ the design depends on. Newest first. Each entry says where it came from so it ca
 
 ## 2026-11-09
 
+### Super MemCard commands work in the virtual card
+
+`firmware/` adds 81 60-68 to sd2psXtd (`ps1_supermemcard.c`, `ps1_supermemcard_bus.inc`, a 4-file patch applied by
+`firmware/apply.sh`); `host/smc.c` is the host side. `make SMC=1` builds the virtual card with it: all 15 PS1 tests
+still pass, plus 9 Super MemCard tests (Hello and card ID, off until Hello and after power-off, SNES round trip,
+N64 eep + Controller Pak + 128 KB FlashRAM, power cut mid-save keeps the old save, unsafe names, list, PS1 card
+unaffected). ASan: nothing in the new code.
+
+- Bug fixed on the way: `git apply` run inside another git repo (the build copy lives inside super-memcard) skips
+  every path silently and exits 0. `apply.sh` uses `patch` and checks the result.
+- Game IDs are Main's save names, so they have spaces and brackets ("Super Metroid (USA)"); the card accepts what
+  FAT accepts and refuses path separators, `..` and trailing dots or spaces (FAT drops those, so two names could
+  land in one folder).
+- Core 1 never touches the SD card: it collects a request, core 0 does the file work, core 1 sends the answer. The
+  ACK of a request's last byte is therefore late by the SD access time; only Super MemCard hosts send these
+  commands, and the host library waits up to 100 ms.
+
 ### The memory card manager doesn't write to cards (a marker is planned)
 
 SS1 Tool, Phosphor and ps1_memcard_lib recognise a card by the saves on it (common save names / all, 0.5 or more =

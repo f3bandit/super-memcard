@@ -241,6 +241,7 @@ static void t_controller_combo_next_card(void) {
     CHECK(strcmp(vcard_card_path(), "MemoryCards/PS1/Card2/Card2-1.mcd") == 0);
 }
 
+#ifndef WITH_SUPERMEMCARD
 static void t_stock_card_ignores_81_6x(void) {
     /* Super MemCard's commands are 81 60..67. Stock firmware doesn't ACK the command byte, so
      * the host knows it has a plain card and falls back to PS1-only (05 design). */
@@ -255,6 +256,7 @@ static void t_stock_card_ignores_81_6x(void) {
     uint8_t r[9];
     CHECK_EQ(mc_get_id(r), 0);
 }
+#endif
 
 static void t_ps1_session_leaves_super_memcard_alone(void) {
     /* Rule 1: Super MemCard keeps other systems' saves on the same SD card. A PS1 (or the SS1
@@ -343,6 +345,12 @@ static void t_sector_out_of_range(void) {
     CHECK_EQ(mc_read(0, r), MC_GOOD);
 }
 
+#ifdef WITH_SUPERMEMCARD
+#include "test_smc.inc"
+#else
+#define SMC_TESTS
+#endif
+
 /* ---- runner ---- */
 
 struct test {
@@ -363,13 +371,16 @@ static const struct test tests[] = {
     {"game ID switches to the game's card", t_game_id_switches_card, true},
     {"game ID setting off: stays on Card1", t_game_id_off, false},
     {"controller combo L1+L2+R1+R2+Up: next card", t_controller_combo_next_card, true},
+#ifndef WITH_SUPERMEMCARD
     {"stock card doesn't ACK 81 60..6F", t_stock_card_ignores_81_6x, true},
+#endif
     {"PS1 session leaves SuperMemCard/ byte for byte", t_ps1_session_leaves_super_memcard_alone, true},
     {"power cut after a write: old or new sector, never a mix", t_power_cut_after_write, true},
     {"card picked by the combo is kept after power-off", t_controller_combo_survives_power_off, true},
     {"write past sector 3FF: end byte FF, nothing changed", t_sector_out_of_range, true,
      "without PSRAM, ps1_mc_data_interface_write_byte() writes past the 128 KB card image in RAM "
      "(up to 8 MB past it) and the card answers 47"},
+    SMC_TESTS
 };
 
 int main(int argc, char **argv) {

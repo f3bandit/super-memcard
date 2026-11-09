@@ -1,6 +1,14 @@
 # The virtual card: sd2psXtd's PS1 card code, unchanged, built for the PC.
 #   ./get-firmware.sh && make test
 FW      ?= firmware
+# SMC=1: with Super MemCard (../../firmware applied to a copy of the firmware), in build-smc
+ifeq ($(SMC),1)
+B       ?= build-smc
+FWSRC   = $(B)/fw
+DEFS    = -DWITH_SUPERMEMCARD=1
+else
+FWSRC   = $(FW)
+endif
 CC      ?= cc
 OPT     ?= -O2 -g
 # SAN=address (or thread, undefined) for a sanitizer build, in its own build folder
@@ -12,7 +20,7 @@ endif
 # 10-byte buffer, a bug in the firmware that only overflows for IDs of 10+ digits.
 CFLAGS  = $(OPT) -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -std=gnu11 -Wall -Wno-unused-function -Wno-unused-variable -Wno-unused-but-set-variable \
            -Wno-format-truncation -Wno-stringop-truncation -Wno-array-bounds \
-           -Istubs -Ihost -I$(FW)/src -I$(FW)/src/ps1 -I$(FW)/ext/inih -I$(FW)/ext/ESP8266SdFatWrapper/include
+           -Istubs -Ihost $(DEFS) -I$(FWSRC)/src -I$(FWSRC)/src/ps1 -I$(FWSRC)/ext/inih -I$(FWSRC)/ext/ESP8266SdFatWrapper/include
 ifdef DEBUG
 CFLAGS  += -DDEBUG_USB_UART
 endif
@@ -23,6 +31,9 @@ LDFLAGS += $(OPT) -no-pie -pthread \
 FW_SRC  = src/ps1.c src/ps1/ps1_memory_card.c src/ps1/ps1_mc_data_interface.c src/ps1/ps1_dirty.c \
           src/ps1/ps1_cardman.c src/ps1/ps1_mmce.c src/ps1/ps1_empty_card.c src/card_config.c \
           src/util.c src/game_db/game_db.c src/bigmem.c ext/inih/ini.c
+ifeq ($(SMC),1)
+FW_SRC += src/ps1/ps1_supermemcard.c
+endif
 HOST_SRC = host/vcard.c host/vcard_wire.c host/sd_host.c host/firmware_host.c
 B       ?= build
 FW_OBJ  = $(addprefix $(B)/fw/,$(FW_SRC:.c=.o))
@@ -35,21 +46,38 @@ all: $(B)/test_card $(B)/vcardd
 ss1:
 	$(MAKE) B=build-ss1 CC=arm-linux-gnueabihf-gcc LDFLAGS_STATIC=-static
 
+$(B)/smc_host.o: ../../host/smc.c ../../host/smc.h
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -fno-pie -c $< -o $@
+
+$(B)/tests/test_card.o: tests/test_smc.inc
+
 $(B)/vcardd: $(B)/host/vcardd.o $(HOST_OBJ) $(FW_OBJ)
 	$(CC) $^ $(LDFLAGS) $(LDFLAGS_STATIC) -o $@
 
-$(B)/fw/%.o: $(FW)/%.c
+$(B)/fw/.ready: $(wildcard ../../firmware/ps1/* ../../firmware/patches/*)
+	rm -rf $(B)/fw && mkdir -p $(B)/fw && cp -r $(FW)/src $(FW)/ext $(FW)/CMakeLists.txt $(B)/fw/
+	../../firmware/apply.sh $(B)/fw
+	touch $@
+
+ifeq ($(SMC),1)
+$(FW_OBJ): $(B)/fw/.ready
+endif
+
+$(B)/fw/%.o: $(FWSRC)/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -fno-pie -c $< -o $@
-$(B)/%.o: %.c
+$(B)/%.o: %.c $(if $(filter 1,$(SMC)),$(B)/fw/.ready)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -fno-pie -c $< -o $@
 
-$(B)/test_card: $(B)/tests/test_card.o $(B)/tests/bus.o $(B)/host/vcard_client.o $(HOST_OBJ) $(FW_OBJ)
+$(B)/test_card: $(B)/tests/test_card.o $(B)/tests/bus.o $(B)/host/vcard_client.o $(B)/smc_host.o $(HOST_OBJ) $(FW_OBJ)
 	$(CC) $^ $(LDFLAGS) $(LDFLAGS_STATIC) -o $@
 
 test: $(B)/test_card
 	$(B)/test_card
+	$(MAKE) SMC=1
+	build-smc/test_card
 
 clean:
 	rm -rf $(B)

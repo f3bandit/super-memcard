@@ -39,6 +39,15 @@ static uint64_t mono_us(void) {
 }
 /* The card's clock starts at boot, like the RP2040 timer. */
 uint64_t time_us_64(void) { return mono_us() - t0; }
+uint64_t get_rand_64(void) {
+    uint64_t v = 0;
+    FILE *f = fopen("/dev/urandom", "rb");
+    if (!f || fread(&v, sizeof(v), 1, f) != 1)
+        v = mono_us() * 0x9E3779B97F4A7C15ull;
+    if (f)
+        fclose(f);
+    return v;
+}
 void sleep_us(uint64_t us) { usleep((useconds_t)us); }
 void sleep_ms(uint32_t ms) { usleep((useconds_t)ms * 1000u); }
 static _Thread_local host_timer_hw_t timer_regs;

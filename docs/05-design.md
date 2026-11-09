@@ -15,16 +15,26 @@ get stuck in.
 Same bus, same speed and the same 128-byte blocks as the PS1 protocol, so the SS1's existing driver
 (`card_sector.sv` / `phosphor_ext.sv`) only needs the new command byte.
 
-| Bytes | Command | Answer |
+Built and tested in the virtual card (`firmware/`, `sim/card`, version 1). Every frame is `81 6x`, the request
+bytes, then the answer clocked out with `00`s. The card ACKs each request byte; the ACK of the last one comes once
+the card has the answer (an SD access, so up to tens of milliseconds late: Super MemCard hosts wait for it).
+
+| Cmd | Request | Answer |
 |---|---|---|
-| `81 60 'S' 'M' VER HOST CAPS` | **Hello**: the host speaks Super MemCard; who it is (`HOST`: Phosphor Main, Console Mode, a core's `sys/` driver) and what it can do (`CAPS`) | `'S' 'M'`, the card's version, its features, its **card ID** (made once, kept in `SuperMemCard/card.ini` on the card's SD card), free space; a card without it answers nothing (the host then treats it as a plain PS1 card) |
-| `81 61 SYS LEN ID…` | **Select** a save set: system (1 byte, table below) and game ID (`SLUS-00067`, `NSME-USA`, a CRC32 in hex…) | how many files, sizes, each file's generation number (§5) |
-| `81 62 FILE MSB LSB` | **Read** block N (128 bytes) of file FILE of the selected set | `MSB LSB [128] CHK 47`, as a PS1 read |
-| `81 63 FILE MSB LSB [128] CHK` | **Write** block N | `47` good / `4E` bad checksum / `FF` out of space |
-| `81 64 FILE SIZE…` | **Create / resize** a file | `47` / `FF` |
-| `81 65 FILE GEN` | **Commit**: this file is complete; stores its generation number | `47` once it's on the SD card |
-| `81 66` | **Status**: blocks still waiting for the SD card | count (0 = safe to remove) |
-| `81 67 SYS` | **List** the games of a system (one per call, paged) | game IDs, sizes, generations |
+| `60` **Hello** | `'S' 'M' ver host caps` | `'S' 'M' ver features id[8] free_kb[4]` (16) |
+| `61` **Select** | `syslen sys idlen id`: system = Main's save folder name (`SNES`, `TGFX16`), game ID = Main's save name (`Super Metroid (USA)`) or a serial | `status nfiles` |
+| `68` **Info** | `file` | `status name[16] size[4] gen[4]` |
+| `62` **Read** | `file blk_hi blk_lo` | `data[128] chk end` (as a PS1 read; chk = XOR of blk bytes and data) |
+| `64` **Create** | `size[4] namelen name` | `status file`: starts writing `<name>.new` |
+| `63` **Write** | `file blk_hi blk_lo data[128] chk` | `end`: `47` good, `4E` bad checksum, `FF` failed |
+| `65` **Commit** | `file gen[4]` | `end`: `<name>.new` replaces `<name>`, generation saved |
+| `66` **Status** | | `pending[2]` (0: every write is already on the SD card) |
+| `67` **List** | `syslen sys idx[2]` | `status id[32]`: the idx-th game the card has for that system |
+
+Status bytes: `47` good, `4F` not found, `53` no game selected, `FF` failed. Before a Hello, `61`-`68` aren't
+ACKed (exactly like stock firmware). Names that could leave `SuperMemCard/` (`/`, `\`, `:`, `..`, leading or
+trailing dots and spaces) are refused. A save only replaces the previous one at Commit, so a card pulled or powered
+off mid-save keeps the old one whole (tested).
 
 ### Who sends Hello, and when
 
@@ -69,8 +79,8 @@ SuperMemCard/<SYSTEM>/<game ID>/<file>        SuperMemCard/N64/NSME-USA/save.eep
 SuperMemCard/<SYSTEM>/<game ID>/meta.ini      file names, sizes, generations, game name
 ```
 
-Systems: one byte each from a table in the spec (SNES, N64, GBA, Genesis, Saturn, PSX (only for its
-non-card saves), Arcade…), named after Main's core names.
+Systems are named, not numbered: Main's save folder names, which don't always match the core's name
+(TurboGrafx16 saves to `TGFX16`, 08).
 
 The card firmware uses PS1 mode's design (02): the selected files are loaded into RAM, writes mark dirty
 blocks, a background task writes them to the SD card, and a flush happens before any switch.
