@@ -1,12 +1,12 @@
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index 0b8258a..d6052bb 100644
+index 0b8258a..56d0747 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
 @@ -11,6 +11,7 @@ set(CMAKE_C_STANDARD 11)
  set(CMAKE_CXX_STANDARD 17)
  
  option(SD2PSX_WITH_PSRAM "Build SD2PSX with PSRAM support" ON)
-+option(SD2PSX_WITH_SUPERMEMCARD "Super MemCard commands in PS1 mode (81 60-68)" ON)
++option(SD2PSX_WITH_SUPERMEMCARD "Super MemCard commands in PS1 mode (81 60-69)" ON)
  option(SD2PSX_WITH_GUI   "Build SD2PSX with GUI support" ON)
  option(SD2PSX_WITH_LED   "Build SD2PSX with LED support" OFF)
  option(DEBUG_USB_UART "Activate UART over USB for debugging" OFF)
@@ -20,6 +20,59 @@ index 0b8258a..d6052bb 100644
  
  if (SD2PSX_WITH_GUI)
      target_compile_definitions(sd2psx_common PUBLIC "WITH_GUI=1")
+diff --git a/src/gui.c b/src/gui.c
+index d9c8dcb..31a9cb9 100644
+--- a/src/gui.c
++++ b/src/gui.c
+@@ -34,6 +34,9 @@
+ #include "ui_menu.h"
+ #include "ui_theme_mono.h"
+ #include "version/version.h"
++#if WITH_SUPERMEMCARD
++#include "ps1/ps1_supermemcard.h"
++#endif
+ 
+ #if LOG_LEVEL_GUI == 0
+     #define log(x...)
+@@ -351,6 +354,10 @@ static void evt_scr_main(lv_event_t *event) {
+                 ui_state = UI_STATE_MAIN;
+             } else {
+                 if (settings_get_mode(true) == MODE_PS1) {
++#if WITH_SUPERMEMCARD
++                    /* while an SS1 core has named its system, the buttons pick that system's card */
++                    if (!ps1_supermemcard_card_key((key == INPUT_KEY_NEXT || key == INPUT_KEY_ENTER) ? 1 : -1))
++#endif
+                     switch (key) {
+                         case INPUT_KEY_PREV: ps1_mmce_prev_ch(true); break;
+                         case INPUT_KEY_NEXT: ps1_mmce_next_ch(true); break;
+@@ -1238,8 +1245,27 @@ void gui_task(void) {
+             static ps1_cardman_state_t cardman_state = PS1_CM_STATE_NORMAL;
+             static char card_idx_s[8];
+             static char card_channel_s[8];
++#if WITH_SUPERMEMCARD
++            static uint32_t smc_seq = 0;
++#endif
+ 
+ 
++#if WITH_SUPERMEMCARD
++            if (ps1_supermemcard_mode_system()[0]) {
++                /* an SS1 core named its system: its virtual card (the PS1 card is still there for a PS1) */
++                if (smc_seq != ps1_supermemcard_mode_seq() || refresh_gui) {
++                    smc_seq = ps1_supermemcard_mode_seq();
++                    lv_label_set_text(main_header, "SuperStation");
++                    snprintf(card_idx_s, sizeof(card_idx_s), "%d", ps1_supermemcard_mode_card());
++                    lv_label_set_text(scr_main_idx_lbl, card_idx_s);
++                    lv_label_set_text(scr_main_channel_lbl, "-");
++                    snprintf(card_name, sizeof(card_name), "%s saves", ps1_supermemcard_mode_system());
++                    lv_label_set_text(src_main_title_lbl, card_name);
++                    displayed_card_idx = -1; /* the PS1 card is drawn again when the system mode ends */
++                    time_screen = time_us_64();
++                }
++            } else
++#endif
+             if (displayed_card_idx != ps1_cardman_get_idx() || displayed_card_channel != ps1_cardman_get_channel() || cardman_state != ps1_cardman_get_state() ||
+                 refresh_gui) {
+                 lv_label_set_text(main_header, "PS1 Memory Card");
 diff --git a/src/ps1.c b/src/ps1.c
 index 0801f76..8798f69 100644
 --- a/src/ps1.c
@@ -45,7 +98,7 @@ index 0801f76..8798f69 100644
  #if WITH_GUI
      gui_task();
 diff --git a/src/ps1/CMakeLists.txt b/src/ps1/CMakeLists.txt
-index 1544627..a15737c 100644
+index 1544627..a5d4c41 100644
 --- a/src/ps1/CMakeLists.txt
 +++ b/src/ps1/CMakeLists.txt
 @@ -5,6 +5,7 @@ add_library(ps1_card STATIC
@@ -56,8 +109,19 @@ index 1544627..a15737c 100644
  )
  
  target_include_directories(ps1_card PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+@@ -19,6 +20,10 @@ target_link_libraries(ps1_card
+                             sd_fat
+                             )
+ 
++if (SD2PSX_WITH_SUPERMEMCARD)
++    target_link_libraries(ps1_card PRIVATE pico_rand)   # the card ID (ps1_supermemcard.c)
++endif()
++
+ if (SD2PSX_WITH_PSRAM)
+     target_link_libraries(ps1_card PRIVATE
+             psram)
 diff --git a/src/ps1/ps1_memory_card.c b/src/ps1/ps1_memory_card.c
-index e780419..80750c1 100644
+index e780419..32e53fe 100644
 --- a/src/ps1/ps1_memory_card.c
 +++ b/src/ps1/ps1_memory_card.c
 @@ -134,6 +134,10 @@ static void __time_critical_func(ps1_mc_respond)(uint8_t ch) {
@@ -71,12 +135,21 @@ index e780419..80750c1 100644
  /*
    Send Reply Comment
    81h  N/A   Memory card address
-@@ -467,6 +471,9 @@ static void __time_critical_func(mc_main_loop)(void) {
+@@ -464,9 +468,18 @@ static void __time_critical_func(mc_main_loop)(void) {
+                 case 0x25: mc_mmce_next_index(); break;
+                 case 0x27: mc_mmce_reset(); break;
+                 case 'B': mc_cmd_read(true); break;
++#if WITH_SUPERMEMCARD
++                case 'R': ps1_supermemcard_ps1_used(); mc_cmd_read(false); break;
++                case 'S': mc_cmd_get_card_id(); break;
++                case 'W': ps1_supermemcard_ps1_used(); mc_cmd_write(); break;
++#else
                  case 'R': mc_cmd_read(false); break;
                  case 'S': mc_cmd_get_card_id(); break;
                  case 'W': mc_cmd_write(); break;
++#endif
 +#if WITH_SUPERMEMCARD
-+                case 0x60 ... 0x68: mc_supermemcard(ch); break;
++                case 0x60 ... 0x69: mc_supermemcard(ch); break;
 +#endif
                  default: DPRINTF("Unknown command: 0x%.02x\n", ch); break;
              }

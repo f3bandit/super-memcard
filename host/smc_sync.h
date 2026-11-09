@@ -10,7 +10,12 @@
  *                                           overwritten; reported so the frontend can ask
  *
  * What was last synced is kept per card, in <state>/<card ID>/synced.txt (another card starts
- * from nothing: everything on either side is copied over, nothing is assumed). */
+ * from nothing: everything on either side is copied over, nothing is assumed).
+ *
+ * Each system has virtual cards on the card (1..99, picked with the card's buttons while that system's
+ * core runs). The local saves of a system belong to one of them (<state>/<card ID>/cards.txt). When the
+ * card says another one is now in use, the local saves go to the old card first, are moved aside to
+ * <state>/<card ID>/cards/<sys>/Card<old>/, and the new card's saves come in; nothing is deleted. */
 #pragma once
 #include "smc.h"
 
@@ -26,10 +31,16 @@ struct smc_sync_report {
     bool card;   /* a Super MemCard card answered */
     char card_id[17];
     int pushed, pulled, unchanged, conflicts, skipped, failed;
+    int switched; /* systems moved to another virtual card (the card's buttons) */
 };
 
 /* The 15 console cores' save folders (cores/cores.tsv; names from each core's CONF_STR). */
 extern const char *const smc_console_systems[];
+
+/* The save folder (system) of a game core about to be loaded, from its .rbf path ("_Console/SNES_20250101.rbf"
+ * -> "SNES"), for Core; NULL for any other core. Not PSX: the PSX core uses the PS1 card itself, so the card's
+ * buttons stay the PS1 card's. */
+const char *smc_core_system(const char *rbf);
 
 /* 0 on success (including "no Super MemCard card": report.card is false), <0 if the sync stopped. */
 int smc_sync(const struct smc_bus *b, const struct smc_sync_cfg *cfg, struct smc_sync_report *rep);

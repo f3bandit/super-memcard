@@ -130,12 +130,15 @@ module tb;
 			start_frame(8'h60); put("S"); put("M"); put(8'd1); put(8'd1); put(8'd0); zeros(16); raw_frame(0, fl);
 			check("Hello: whole frame answered", rst[7:0], 23);
 			check("Hello: 'S' 'M'", {fr[7], fr[8]}, 16'h534D);
-			check("Hello: card version 1", fr[9], 1);
+			check("Hello: card version 2", fr[9], 2);
 
-			// 3. Select SNES / Bus Test
-			start_frame(8'h61); put_str("SNES", 4); put_str("Bus Test", 8); zeros(2); raw_frame(0, fl);
+			// 3. Core: SNES is running (card 1); Select SNES / Bus Test on its current card
+			start_frame(8'h69); put_str("SNES", 4); put(8'h01); zeros(2); raw_frame(0, fl);
+			check("Core: answered", rst[7:0], fl);
+			check("Core: 47, card 1", {fr[fl - 2], fr[fl - 1]}, 16'h4701);
+			start_frame(8'h61); put_str("SNES", 4); put_str("Bus Test", 8); put(8'h00); zeros(3); raw_frame(0, fl);
 			check("Select: answered", rst[7:0], fl);
-			check("Select: 47, no files yet", {fr[fl - 2], fr[fl - 1]}, 16'h4700);
+			check("Select: 47, no files yet, card 1", {fr[fl - 3], fr[fl - 2], fr[fl - 1]}, 24'h470001);
 
 			// 4. Create save.sav, 256 bytes
 			start_frame(8'h64); put(0); put(0); put(8'h01); put(0); put_str("save.sav", 8); zeros(2); raw_frame(0, fl);

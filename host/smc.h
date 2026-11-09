@@ -50,9 +50,15 @@ struct smc_file {
  * 1: a Super MemCard card (filled in), 0: a plain PS1 card or no card, <0: error. */
 int smc_hello(const struct smc_bus *b, uint8_t host, uint8_t caps, struct smc_card *card);
 
-/* Select system (Main's save folder name, e.g. "SNES", "TGFX16") and game ID. Returns the number
- * of save files the card has for it (0..16), or <0. */
+/* Select system (Main's save folder name, e.g. "SNES", "TGFX16") and game ID on the system's current
+ * virtual card. Returns the number of save files the card has for it (0..16), or <0. */
 int smc_select(const struct smc_bus *b, const char *sys, const char *game);
+/* The same on virtual card `card` (1..99; 0: the system's current one); *card_out gets the card used. */
+int smc_select_card(const struct smc_bus *b, const char *sys, const char *game, int card, int *card_out);
+/* Core: the system's current virtual card (1..99), or <0. running: this system's core is running now,
+ * so the card shows it and its buttons pick this system's card; sys NULL with running: none is (the
+ * buttons are the PS1 card's again). running false only asks. */
+int smc_core(const struct smc_bus *b, const char *sys, bool running);
 /* File `idx` (0..n-1) of the selected game. */
 int smc_info(const struct smc_bus *b, int idx, struct smc_file *f);
 /* Read file `idx` whole into buf (at least f.size bytes). */
@@ -65,8 +71,12 @@ int smc_pending(const struct smc_bus *b);
 /* The idx-th game ID the card has for a system (sys "." : the idx-th system); SMC_E_NOT_FOUND past
  * the end. */
 int smc_list(const struct smc_bus *b, const char *sys, int idx, char game[65]);
+/* The same on virtual card `card` (0: the system's current one). */
+int smc_list_card(const struct smc_bus *b, const char *sys, int card, int idx, char game[65]);
 #define SMC_SYS_MAX 32
 #define SMC_GAME_MAX 64
+#define SMC_CARDS_MAX 99
+#define SMC_PROTOCOL 2 /* 2: Core and virtual cards */
 
 /* A whole command frame (81 cmd, request, answer); exposed for tests. Returns SMC_OK or
  * SMC_E_NO_REPLY. */

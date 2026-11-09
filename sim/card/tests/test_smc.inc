@@ -1,4 +1,4 @@
-/* Super MemCard tests (build with SMC=1): the card firmware's 81 60..68 commands, driven through
+/* Super MemCard tests (build with SMC=1): the card firmware's 81 60..69 commands, driven through
  * the host library (../../host/smc.c) the SS1 will use. Included by test_card.c. */
 #include "../../../host/smc.h"
 
@@ -72,7 +72,7 @@ static void t_smc_hello_and_card_id(void) {
     struct smc_card c1, c2;
     /* no bus_wake: Hello itself asks twice, for the dropped first command after power-up */
     CHECK_EQ(smc_hello(&vbus, SMC_HOST_TEST, 0, &c1), 1);
-    CHECK_EQ(c1.version, 1);
+    CHECK_EQ(c1.version, 2);
     CHECK_EQ(strlen(c1.id), 16);
     char ini[64];
     CHECK_EQ(read_file_at("SuperMemCard/card.ini", 0, ini, 20), 0);
@@ -107,8 +107,8 @@ static void t_smc_save_round_trip(void) {
     CHECK_EQ(smc_read_file(&vbus, 0, f.size, back), SMC_OK);
     CHECK(memcmp(save, back, sizeof(save)) == 0);
     /* on the card's SD card, outside every .mcd */
-    CHECK_EQ(file_size("SuperMemCard/SNES/Super Metroid (USA)/save.sav"), sizeof(save));
-    CHECK_EQ(read_file_at("SuperMemCard/SNES/Super Metroid (USA)/save.sav", 0, back, sizeof(save)), 0);
+    CHECK_EQ(file_size("SuperMemCard/SNES/Card1/Super Metroid (USA)/save.sav"), sizeof(save));
+    CHECK_EQ(read_file_at("SuperMemCard/SNES/Card1/Super Metroid (USA)/save.sav", 0, back, sizeof(save)), 0);
     CHECK(memcmp(save, back, sizeof(save)) == 0);
     /* and still there after a power-off */
     vcard_stop();
@@ -357,6 +357,113 @@ static void t_smc_longest_names(void) {
     CHECK(memcmp(d, back, sizeof(d)) == 0);
 }
 
+
+static void t_smc_virtual_cards(void) {
+    /* each system has virtual cards; Select and List take one, 0 meaning the system's current card */
+    static uint8_t save[1000], back[1000];
+    fill(save, sizeof(save), 21);
+    int card = -1;
+    CHECK_EQ(smc_hello(&vbus, SMC_HOST_TEST, 0, NULL), 1);
+    CHECK_EQ(smc_core(&vbus, "SNES", false), 1); /* a fresh card: card 1 */
+    CHECK_EQ(smc_select_card(&vbus, "SNES", "Chrono Trigger (USA)", 2, &card), 0);
+    CHECK_EQ(card, 2);
+    CHECK_EQ(smc_write_file(&vbus, "save.srm", save, sizeof(save), 1), SMC_OK);
+    CHECK_EQ(file_size("SuperMemCard/SNES/Card2/Chrono Trigger (USA)/save.srm"), sizeof(save));
+    CHECK_EQ(smc_select_card(&vbus, "SNES", "Chrono Trigger (USA)", 0, &card), 0); /* card 1 hasn't it */
+    CHECK_EQ(card, 1);
+    char game[65];
+    CHECK_EQ(smc_list_card(&vbus, "SNES", 2, 0, game), SMC_OK);
+    CHECK(strcmp(game, "Chrono Trigger (USA)") == 0);
+    CHECK_EQ(smc_list_card(&vbus, "SNES", 0, 0, game), SMC_E_NOT_FOUND);
+    CHECK_EQ(smc_list_card(&vbus, "SNES", 1, 0, game), SMC_E_NOT_FOUND);
+    CHECK_EQ(smc_select_card(&vbus, "SNES", "x", 100, NULL), SMC_E_BAD);
+    /* asking doesn't change anything: the buttons are still the PS1 card's */
+    CHECK_EQ(smc_core(&vbus, "SNES", false), 1);
+    vcard_key(VKEY_ENTER);
+    vcard_settle();
+    usleep(1700 * 1000); /* the PS1 card switches 1.5 s after the last press */
+    vcard_settle();
+    CHECK(strcmp(vcard_card_path(), "MemoryCards/PS1/Card2/Card2-1.mcd") == 0);
+}
+
+static void t_smc_core_buttons_pick_the_card(void) {
+    /* Core: the SNES core runs, so the card's buttons pick SNES's card, not the PS1 card */
+    static uint8_t save[600];
+    fill(save, sizeof(save), 22);
+    CHECK_EQ(smc_hello(&vbus, SMC_HOST_TEST, 0, NULL), 1);
+    CHECK_EQ(smc_core(&vbus, "SNES", true), 1);
+    vcard_key(VKEY_ENTER);
+    vcard_key(VKEY_ENTER);
+    vcard_key(VKEY_BACK);  /* 2 */
+    CHECK_EQ(smc_core(&vbus, "SNES", false), 2);
+    int card = 0;
+    CHECK_EQ(smc_select_card(&vbus, "SNES", "Super Metroid (USA)", 0, &card), 0);
+    CHECK_EQ(card, 2);
+    CHECK_EQ(smc_write_file(&vbus, "save.sav", save, sizeof(save), 1), SMC_OK);
+    CHECK_EQ(file_size("SuperMemCard/SNES/Card2/Super Metroid (USA)/save.sav"), sizeof(save));
+    /* saved on the card after 1.5 s without presses; the PS1 card didn't move */
+    usleep(1700 * 1000);
+    vcard_settle();
+    char ini[32] = {0};
+    CHECK_EQ(read_file_at("SuperMemCard/SNES/card.ini", 0, ini, 7), 0);
+    CHECK(strncmp(ini, "card=2\n", 7) == 0);
+    CHECK(strcmp(vcard_card_path(), CARD1) == 0);
+    /* other systems keep their own */
+    CHECK_EQ(smc_core(&vbus, "NES", false), 1);
+    /* never below card 1 */
+    vcard_key(VKEY_BACK);
+    vcard_key(VKEY_BACK);
+    vcard_key(VKEY_PREV);
+    CHECK_EQ(smc_core(&vbus, "SNES", false), 1);
+    /* kept after a power-off, and the buttons are the PS1 card's again until a core names its system */
+    usleep(1700 * 1000);
+    vcard_settle();
+    vcard_stop();
+    CHECK_EQ(vcard_start(sd), 0);
+    CHECK_EQ(smc_hello(&vbus, SMC_HOST_TEST, 0, NULL), 1);
+    CHECK_EQ(smc_core(&vbus, "SNES", false), 1);
+    CHECK_EQ(smc_core(&vbus, "SNES", true), 1);
+    vcard_key(VKEY_NEXT);
+    CHECK_EQ(smc_core(&vbus, "SNES", false), 2);
+    usleep(1700 * 1000);
+    vcard_stop();
+    CHECK_EQ(vcard_start(sd), 0);
+    CHECK_EQ(smc_hello(&vbus, SMC_HOST_TEST, 0, NULL), 1);
+    CHECK_EQ(smc_core(&vbus, "SNES", false), 2);
+    vcard_key(VKEY_ENTER);
+    usleep(1700 * 1000);
+    vcard_settle();
+    CHECK(strcmp(vcard_card_path(), "MemoryCards/PS1/Card2/Card2-1.mcd") == 0);
+}
+
+static void t_smc_ps1_use_ends_system_mode(void) {
+    /* a PS1 game reading the card (the stock PSX core after an SNES game): the buttons are the PS1 card's */
+    uint8_t d[128];
+    CHECK_EQ(smc_hello(&vbus, SMC_HOST_TEST, 0, NULL), 1);
+    CHECK_EQ(smc_core(&vbus, "GBA", true), 1);
+    CHECK_EQ(mc_read(0, d), MC_GOOD);
+    vcard_settle();
+    vcard_key(VKEY_ENTER);
+    CHECK_EQ(smc_core(&vbus, "GBA", false), 1);
+    usleep(1700 * 1000);
+    vcard_settle();
+    CHECK(strcmp(vcard_card_path(), "MemoryCards/PS1/Card2/Card2-1.mcd") == 0);
+    /* and Core "." does it too (the first command after a card switch can go unanswered: ask again) */
+    int rc = SMC_E_NO_REPLY;
+    for (int t = 0; t < 3 && rc == SMC_E_NO_REPLY; t++) {
+        bus_wake();
+        usleep(20 * 1000);
+        rc = smc_core(&vbus, "GBA", true);
+    }
+    CHECK_EQ(rc, 1);
+    CHECK_EQ(smc_core(&vbus, NULL, true), 0);
+    vcard_key(VKEY_BACK);
+    CHECK_EQ(smc_core(&vbus, "GBA", false), 1);
+    usleep(1700 * 1000);
+    vcard_settle();
+    CHECK(strcmp(vcard_card_path(), CARD1) == 0);
+}
+
 #define SMC_TESTS \
     {"SMC: whole-frame transport (the front ports' way)", t_smc_frame_transport, true, NULL}, \
     {"SMC: slow SD card (2.7 ms a write), 128 KB save", t_smc_slow_sd_card, true, NULL}, \
@@ -370,4 +477,7 @@ static void t_smc_longest_names(void) {
     {"SMC: new save replaces the old one only at Commit", t_smc_new_save_replaces_old_only_at_commit, true, NULL}, \
     {"SMC: bad checksum and unsafe names refused", t_smc_bad_checksum_and_names, true, NULL}, \
     {"SMC: list a system's games", t_smc_list_games, true, NULL}, \
-    {"SMC: PS1 card unaffected", t_smc_ps1_unaffected, true, NULL},
+    {"SMC: PS1 card unaffected", t_smc_ps1_unaffected, true, NULL}, \
+    {"SMC: virtual cards per system", t_smc_virtual_cards, true, NULL}, \
+    {"SMC: Core: the buttons pick the system's card", t_smc_core_buttons_pick_the_card, true, NULL}, \
+    {"SMC: a PS1 read ends the system mode", t_smc_ps1_use_ends_system_mode, true, NULL},

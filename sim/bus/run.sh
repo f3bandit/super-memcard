@@ -40,7 +40,7 @@ vvp -n -M. -mvcard_vpi "$work/tb_bus.vvp" $args | tee "$work/out.txt"
 # what reached the SD card
 kill -TERM $vpid; wait $vpid || true
 if [ -z "$STOCK" ]; then
-f=$(find "$work/sd/SuperMemCard" -path '*SNES/Bus Test/save.sav' 2>/dev/null | head -1)
+f=$(find "$work/sd/SuperMemCard" -path '*SNES/Card1/Bus Test/save.sav' 2>/dev/null | head -1)
 python3 - "$f" <<'EOF' | tee -a "$work/out.txt"
 import sys
 p = sys.argv[1]

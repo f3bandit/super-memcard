@@ -10,3 +10,4 @@ uint8_t vcs_xfer_ctrl(uint8_t cmd, uint8_t dat, bool last, bool *ack);
 void vcs_settle(void);
 const char *vcs_card_path(void);
 uint8_t vcs_peek(void); /* the byte queued for the next transfer, FF when none */
+void vcs_key(int key);   /* the card's buttons on its main screen (vcard_wire.h OP_KEY) */

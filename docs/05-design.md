@@ -15,23 +15,24 @@ get stuck in.
 Same bus, same speed and the same 128-byte blocks as the PS1 protocol, so the SS1's existing driver
 (`card_sector.sv` / `phosphor_ext.sv`) only needs the new command byte.
 
-Built and tested in the virtual card (`firmware/`, `sim/card`, version 1). Every frame is `81 6x`, the request
+Built and tested in the virtual card (`firmware/`, `sim/card`, version 2: version 1 had no Core and no virtual cards). Every frame is `81 6x`, the request
 bytes, then the answer clocked out with `00`s. The card ACKs each request byte; the ACK of the last one comes once
 the card has the answer (an SD access, so up to tens of milliseconds late: Super MemCard hosts wait for it).
 
 | Cmd | Request | Answer |
 |---|---|---|
 | `60` **Hello** | `'S' 'M' ver host caps` | `'S' 'M' ver features id[8] free_kb[4]` (16) |
-| `61` **Select** | `syslen sys idlen id`: system = Main's save folder name (`SNES`, `TGFX16`), game ID = Main's save name (`Super Metroid (USA)`) or a serial | `status nfiles` |
+| `61` **Select** | `syslen sys idlen id card`: system = Main's save folder name (`SNES`, `TGFX16`), game ID = Main's save name (`Super Metroid (USA)`) or a serial, card = the system's virtual card 1-99 (0: its current one) | `status nfiles card` |
 | `68` **Info** | `file` | `status name[16] size[4] gen[4]` |
 | `62` **Read** | `file blk_hi blk_lo` | `data[128] chk end` (as a PS1 read; chk = XOR of blk bytes and data) |
 | `64` **Create** | `size[4] namelen name` | `status file`: starts writing `<name>.new` |
 | `63` **Write** | `file blk_hi blk_lo data[128] chk` | `end`: `47` good, `4E` bad checksum, `FF` failed |
 | `65` **Commit** | `file gen[4]` | `end`: `<name>.new` replaces `<name>`, generation saved |
 | `66` **Status** | | `pending[2]` (0: every write is already on the SD card) |
-| `67` **List** | `syslen sys idx[2]` | `status id[32]`: the idx-th game the card has for that system |
+| `67` **List** | `syslen sys card idx[2]` | `status id[64]`: the idx-th game the card has for that system on that virtual card (0: current); sys `.`: the idx-th system |
+| `69` **Core** | `syslen sys flags` | `status card`: the system's current virtual card. Flags bit 0: this system's core is running now (the card shows it, its buttons pick this system's card); sys `.` with bit 0: none is. Without bit 0 it only asks |
 
-Status bytes: `47` good, `4F` not found, `53` no game selected, `FF` failed. Before a Hello, `61`-`68` aren't
+Status bytes: `47` good, `4F` not found, `53` no game selected, `FF` failed. Before a Hello, `61`-`69` aren't
 ACKed (exactly like stock firmware). Names that could leave `SuperMemCard/` (`/`, `\`, `:`, `..`, leading or
 trailing dots and spaces) are refused. A save only replaces the previous one at Commit, so a card pulled or powered
 off mid-save keeps the old one whole (tested).
@@ -75,9 +76,28 @@ sides what they have:
 On the card's SD card (rule 3):
 
 ```
-SuperMemCard/<SYSTEM>/<game ID>/<file>        SuperMemCard/N64/NSME-USA/save.eep, cpak1.cpk
-SuperMemCard/<SYSTEM>/<game ID>/meta.ini      file names, sizes, generations, game name
+SuperMemCard/card.ini                                 id=<card ID>
+SuperMemCard/<SYSTEM>/card.ini                        card=<N>: the system's current virtual card
+SuperMemCard/<SYSTEM>/Card<N>/<game ID>/<file>        SuperMemCard/N64/Card1/NSME-USA/save.eep, cpak1.cpk
+SuperMemCard/<SYSTEM>/Card<N>/<game ID>/meta.ini      file names and generations
 ```
+
+### Virtual cards, and which core is running
+
+Like PS1 mode's Card1, Card2..., every system has virtual cards (1-99): one set of saves per card, for two
+players, or a second playthrough. The card can't know what an SS1 is running, so the core says it: **Core** with
+the system and bit 0 set, when the game starts (phase 1: Main from the menu core, just before it loads the game
+core; phase 2: the core's own card driver at its first poll). From then on the card's main screen shows
+`SuperStation`, the system and its card number, and its four buttons step that system's card up or down (the PS1
+card doesn't move). The choice is saved on the card 1.5 s after the last press, as PS1 mode waits before switching.
+
+That system mode ends at a power-off, a Core `.`, or the first PS1 read or write (a PS1 game, the stock PSX core
+or a memory card manager using the card): the buttons then pick the PS1 card exactly as before (rule 1).
+
+The host keeps track of which virtual card its local saves came from. When the card says another one is in use
+(the player pressed the buttons), the local saves first go to the old card, then are moved aside (not deleted:
+`<state>/<card ID>/cards/<SYSTEM>/Card<old>/`) and the new card's saves come in. If the old card couldn't take
+every save (no answer, or both sides changed), nothing moves until it can.
 
 Systems are named, not numbered: Main's save folder names, which don't always match the core's name
 (TurboGrafx16 saves to `TGFX16`, 08).
@@ -91,7 +111,7 @@ blocks, a background task writes them to the SD card, and a flush happens before
 
 Both frontends can reach the card from their menu core (04).
 
-1. **Game start**, before the core loads: Hello → Select (system, game ID from Main's `/tmp/GAMEID`,
+1. **Game start**, before the core loads: Hello → Core (the system, running) → Select (system, game ID from Main's `/tmp/GAMEID`,
    or the same calculation done before loading) → if the card's generation is newer than the
    mirror's, read the files into `saves/<core>/` (the files Main mounts, 01).
 2. The game plays exactly as today: Main writes the save to the SD card as the core saves.
@@ -125,19 +145,21 @@ Main Menu
    └─ Safe to remove      "Yes" or "Saving N blocks"
 ```
 
-On the **main screen**, while an SS1 is talking to the card:
+On the **main screen**, while an SS1 core has named its system (Core), built as:
 
 ```
 ┌────────────────────────────┐
-│ SuperStation   ● saving    │   header: SuperStation; "● saving" while blocks are waiting
-│ N64  NSME-USA              │   the system and game selected
-│ Super Mario 64             │   from the game database (sd2psXtd's game_db) when it knows it
-│ PS1 card: Card1 ch 1       │   the PS1 card is still there and still the one a PS1 sees
+│ SuperStation               │   header
+│ Card                     2 │   the system's virtual card: the buttons step it (1-99)
+│ Channel                  - │
+│ SNES saves                 │   the system
 └────────────────────────────┘
 ```
 
-When the card goes back to plain PS1 use (no SS1 traffic for a while, or a power cycle), the main screen
-is the normal PS1 one.
+It uses the PS1 screen's own labels, so it looks like the PS1 screen with the card number. Later: the game selected
+(from sd2psXtd's game_db where it knows it) and "● saving" while blocks are waiting.
+
+When the system mode ends (a PS1 read or write, Core `.`, or a power cycle), the main screen is the normal PS1 one.
 
 Deleting saves is **not** in the card's menu: deletes happen on the SS1 (or a PC), where there's a
 proper screen and a backup; the card only shows.

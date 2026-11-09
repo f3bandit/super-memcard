@@ -5,7 +5,7 @@
 #include <string.h>
 #include <unistd.h>
 
-enum { C_HELLO = 0x60, C_SELECT, C_READ, C_WRITE, C_CREATE, C_COMMIT, C_STATUS, C_LIST, C_INFO };
+enum { C_HELLO = 0x60, C_SELECT, C_READ, C_WRITE, C_CREATE, C_COMMIT, C_STATUS, C_LIST, C_INFO, C_CORE };
 enum { GOOD = 0x47, BAD_CHECKSUM = 0x4E, NOT_FOUND = 0x4F };
 #define RETRIES 3
 
@@ -63,7 +63,7 @@ static uint32_t be32(const uint8_t *p) { return (uint32_t)p[0] << 24 | (uint32_t
 static void put32(uint8_t *p, uint32_t v) { p[0] = v >> 24; p[1] = v >> 16; p[2] = v >> 8; p[3] = (uint8_t)v; }
 
 int smc_hello(const struct smc_bus *b, uint8_t host, uint8_t caps, struct smc_card *card) {
-    const uint8_t req[5] = {'S', 'M', 1, host, caps};
+    const uint8_t req[5] = {'S', 'M', SMC_PROTOCOL, host, caps};
     uint8_t a[16];
     int rc = SMC_E_NO_REPLY;
     for (int i = 0; i < 2 && rc == SMC_E_NO_REPLY; i++) {
@@ -97,15 +97,38 @@ static int put_name(uint8_t *p, const char *s, size_t max) {
     return (int)n + 1;
 }
 
-int smc_select(const struct smc_bus *b, const char *sys, const char *game) {
-    uint8_t req[2 + SMC_SYS_MAX + SMC_GAME_MAX], a[2];
+int smc_select_card(const struct smc_bus *b, const char *sys, const char *game, int card, int *card_out) {
+    uint8_t req[3 + SMC_SYS_MAX + SMC_GAME_MAX], a[3];
+    if (card < 0 || card > SMC_CARDS_MAX)
+        return SMC_E_BAD;
     int n = put_name(req, sys, SMC_SYS_MAX);
     if (n < 0)
         return SMC_E_BAD;
     int m = put_name(req + n, game, SMC_GAME_MAX);
     if (m < 0)
         return SMC_E_BAD;
-    int rc = smc_frame(b, C_SELECT, req, n + m, a, 2);
+    req[n + m] = (uint8_t)card;
+    int rc = smc_frame(b, C_SELECT, req, n + m + 1, a, 3);
+    if (rc)
+        return rc;
+    if (a[0] != GOOD)
+        return SMC_E_BAD;
+    if (card_out)
+        *card_out = a[2];
+    return a[1];
+}
+
+int smc_select(const struct smc_bus *b, const char *sys, const char *game) {
+    return smc_select_card(b, sys, game, 0, NULL);
+}
+
+int smc_core(const struct smc_bus *b, const char *sys, bool running) {
+    uint8_t req[2 + SMC_SYS_MAX], a[2];
+    int n = put_name(req, sys ? sys : ".", SMC_SYS_MAX);
+    if (n < 0)
+        return SMC_E_BAD;
+    req[n] = running ? 1 : 0;
+    int rc = smc_frame(b, C_CORE, req, n + 1, a, 2);
     if (rc)
         return rc;
     return a[0] == GOOD ? a[1] : SMC_E_BAD;
@@ -201,13 +224,20 @@ int smc_pending(const struct smc_bus *b) {
 }
 
 int smc_list(const struct smc_bus *b, const char *sys, int idx, char game[65]) {
-    uint8_t req[3 + SMC_SYS_MAX], a[1 + SMC_GAME_MAX];
+    return smc_list_card(b, sys, 0, idx, game);
+}
+
+int smc_list_card(const struct smc_bus *b, const char *sys, int card, int idx, char game[65]) {
+    uint8_t req[4 + SMC_SYS_MAX], a[1 + SMC_GAME_MAX];
+    if (card < 0 || card > SMC_CARDS_MAX)
+        return SMC_E_BAD;
     int n = put_name(req, sys, SMC_SYS_MAX);
     if (n < 0)
         return SMC_E_BAD;
-    req[n] = (uint8_t)(idx >> 8);
-    req[n + 1] = (uint8_t)idx;
-    int rc = smc_frame(b, C_LIST, req, n + 2, a, 1 + SMC_GAME_MAX);
+    req[n] = (uint8_t)card;
+    req[n + 1] = (uint8_t)(idx >> 8);
+    req[n + 2] = (uint8_t)idx;
+    int rc = smc_frame(b, C_LIST, req, n + 3, a, 1 + SMC_GAME_MAX);
     if (rc)
         return rc;
     if (a[0] != GOOD)

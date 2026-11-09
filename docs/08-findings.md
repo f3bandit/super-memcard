@@ -5,6 +5,52 @@ the design depends on. Newest first. Each entry says where it came from so it ca
 
 ## 2026-11-09
 
+### Virtual cards per system, and Core (protocol version 2)
+
+Built and tested in the virtual card. A core (Main, for now) names the running system with **Core** (`81 69`); while
+it's named, the card's buttons step that system's virtual card (1-99) instead of the PS1 card, and the choice is
+saved in `SuperMemCard/<SYSTEM>/card.ini`. Saves moved to `SuperMemCard/<SYSTEM>/Card<N>/<game>/` (version 1 had no
+`Card<N>` level; nothing outside the test bench used it). Select and List take a card number (0: current).
+
+- The PS1 card is untouched: without a Core the buttons do what they always did (tested), and the first PS1 read or
+  write, or a Core `.`, gives them back to the PS1 card (tested).
+- The card's screen and buttons are `src/gui.c` (`evt_scr_main`, `gui_task`): patched, but sim/card doesn't build the
+  GUI, so the virtual card presses the buttons through the same three lines (`host/vcard.c`, new wire op `OP_KEY`).
+  The GUI patch is compile-checked on real firmware (next entry), not run.
+- Sync: the state now has a card column (old 5-column lines read as card 1) and `cards.txt` (which virtual card each
+  system's local saves belong to). Switching cards puts the local saves on the old card first and moves them aside,
+  never deletes; with a conflict or a failure on the old card it waits (tested).
+- Like after a PS1 card switch, the first command after one can go unanswered; tests ask again.
+
+### Virtual cards on the SS1: picked during a game, switched at the next menu
+
+On the SS1 with the test Main (phosphor-main `supermemcard`, bind-mounted) and vcardd version 2, saves in
+`supermemcard_test/`: Main sends Core just before it loads a console core (`fpga_load_rbf`, the system from the
+.rbf's name; not PSX), and Core `.` after the menu's sync.
+
+1. Sync at menu start: 5 test saves to card 1.
+2. SNES core loaded: "SNES core: its card 1". A press of the card's button (vcardd's `OP_KEY`): `SNES/card.ini`
+   says `card=2` 1.5 s later.
+3. Back to the menu: "SNES: card 1 -> card 2"; both SNES saves moved aside into the state folder, the other systems
+   untouched. In the menu the buttons moved the PS1 card again (Core `.` worked), and back.
+4. SNES again, card 1 picked, menu: "SNES: card 2 -> card 1", both saves back from card 1: every test save byte for
+   byte as before.
+
+Restored after: installed Main and menu core (md5 checked, running the installed Main), `saves/` and `config/`
+unchanged, vcardd off, no bind mounts left. The earlier test card and state (version 1 layout) are kept as
+`supermemcard_test/card_v1_*`, `state_v1_*`.
+
+### The real card firmware builds with Super MemCard (and a bug that only the real build showed)
+
+`firmware/build.sh` builds sd2psXtd (pinned commit, submodules) with the patch for the RP2040, as sd2psXtd's own CI
+does; in CI for SD2PSX (with the screen) and PMC+ (without). Both link: `sd2psx.uf2`, `pmc+.uf2`.
+
+- **Bug, fixed:** `ps1_supermemcard.c` uses `get_rand_64()` (the card ID) from `pico/rand.h`, and the `ps1_card`
+  library didn't link `pico_rand`: the real build stopped with "pico/rand.h: No such file". The virtual card has its
+  own stub of it, so only the real build could find this. The patch now adds `pico_rand` to `src/ps1/CMakeLists.txt`.
+- Locally, CMake's own fetch of picotool failed ("not our ref" in one of its submodules); building picotool from
+  the fetched source and passing `-Dpicotool_DIR` worked. CI fetches it normally.
+
 ### The front-port logic and the card firmware work together, bit by bit (layer 2)
 
 `sim/bus` runs Phosphor's front-port RTL (phosphor-menu `phosphor_ext`, `card_sector`, `sio_byte`, pinned at the

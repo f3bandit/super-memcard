@@ -20,6 +20,13 @@ void ps1_memory_card_exit(void);
 void ps1_mc_data_interface_flush(void);
 void ps1_cardman_close(void);
 void ps1_cardman_flush(void);
+void ps1_mmce_next_ch(bool delay);
+void ps1_mmce_prev_ch(bool delay);
+void ps1_mmce_next_idx(bool delay);
+void ps1_mmce_prev_idx(bool delay);
+#if WITH_SUPERMEMCARD
+bool ps1_supermemcard_card_key(int delta);
+#endif
 void game_db_init(void);
 extern int ps1_dirty_activity;
 void host_sd_set_root(const char *root);
@@ -214,6 +221,28 @@ uint8_t vcs_xfer_ctrl(uint8_t cmd, uint8_t dat, bool last, bool *ack) { return x
 static pthread_t core0;
 static atomic_bool booted, running;
 static atomic_uint loops;
+static atomic_int key_pending = -1;
+
+/* The card's main screen with the card in PS1 mode, as src/gui.c evt_scr_main (with the Super MemCard
+ * patch) does it; run on core 0, where the GUI runs. */
+static void main_screen_key(int key) {
+    enum { PREV, NEXT, BACK, ENTER };
+#if WITH_SUPERMEMCARD
+    if (!ps1_supermemcard_card_key((key == NEXT || key == ENTER) ? 1 : -1))
+#endif
+    switch (key) {
+        case PREV: ps1_mmce_prev_ch(true); break;
+        case NEXT: ps1_mmce_next_ch(true); break;
+        case BACK: ps1_mmce_prev_idx(true); break;
+        case ENTER: ps1_mmce_next_idx(true); break;
+    }
+}
+
+void vcs_key(int key) {
+    atomic_store(&key_pending, key);
+    while (atomic_load(&key_pending) >= 0)
+        usleep(200);
+}
 static void *core0_main(void *arg) {
     (void)arg;
     core_num = 0;
@@ -221,6 +250,11 @@ static void *core0_main(void *arg) {
     ps1_init();
     atomic_store(&booted, true);
     while (atomic_load(&running)) {
+        int k = atomic_load(&key_pending);
+        if (k >= 0) {
+            main_screen_key(k);
+            atomic_store(&key_pending, -1);
+        }
         ps1_task();
         atomic_fetch_add(&loops, 1);
         usleep(100);
