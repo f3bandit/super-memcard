@@ -1,0 +1,75 @@
+[submodule "cores/NES"]
+	path = cores/NES
+	url = https://github.com/MiSTer-devel/NES_MiSTer
+	branch = master
+	shallow = true
+[submodule "cores/SNES"]
+	path = cores/SNES
+	url = https://github.com/MiSTer-devel/SNES_MiSTer
+	branch = master
+	shallow = true
+[submodule "cores/N64"]
+	path = cores/N64
+	url = https://github.com/MiSTer-devel/N64_MiSTer
+	branch = main
+	shallow = true
+[submodule "cores/Gameboy"]
+	path = cores/Gameboy
+	url = https://github.com/MiSTer-devel/Gameboy_MiSTer
+	branch = master
+	shallow = true
+[submodule "cores/GBA"]
+	path = cores/GBA
+	url = https://github.com/MiSTer-devel/GBA_MiSTer
+	branch = master
+	shallow = true
+[submodule "cores/SMS"]
+	path = cores/SMS
+	url = https://github.com/MiSTer-devel/SMS_MiSTer
+	branch = master
+	shallow = true
+[submodule "cores/Genesis"]
+	path = cores/Genesis
+	url = https://github.com/MiSTer-devel/Genesis_MiSTer
+	branch = master
+	shallow = true
+[submodule "cores/MegaDrive"]
+	path = cores/MegaDrive
+	url = https://github.com/MiSTer-devel/MegaDrive_MiSTer
+	branch = main
+	shallow = true
+[submodule "cores/MegaCD"]
+	path = cores/MegaCD
+	url = https://github.com/MiSTer-devel/MegaCD_MiSTer
+	branch = master
+	shallow = true
+[submodule "cores/S32X"]
+	path = cores/S32X
+	url = https://github.com/MiSTer-devel/S32X_MiSTer
+	branch = main
+	shallow = true
+[submodule "cores/Saturn"]
+	path = cores/Saturn
+	url = https://github.com/MiSTer-devel/Saturn_MiSTer
+	branch = main
+	shallow = true
+[submodule "cores/TurboGrafx16"]
+	path = cores/TurboGrafx16
+	url = https://github.com/MiSTer-devel/TurboGrafx16_MiSTer
+	branch = master
+	shallow = true
+[submodule "cores/Jaguar"]
+	path = cores/Jaguar
+	url = https://github.com/MiSTer-devel/Jaguar_MiSTer
+	branch = master
+	shallow = true
+[submodule "cores/NeoGeo"]
+	path = cores/NeoGeo
+	url = https://github.com/MiSTer-devel/NeoGeo_MiSTer
+	branch = master
+	shallow = true
+[submodule "cores/PSX"]
+	path = cores/PSX
+	url = https://github.com/MiSTer-devel/PSX_MiSTer
+	branch = main
+	shallow = true

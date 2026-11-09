@@ -1,0 +1,16 @@
+# core	project (.qpf)	systems
+NES	NES	NES, Famicom, Famicom Disk System
+SNES	SNES	SNES, Super Famicom
+N64	N64	Nintendo 64
+Gameboy	Gameboy	Game Boy, Game Boy Color
+GBA	GBA	Game Boy Advance
+SMS	SMS	Master System, Game Gear
+Genesis	Genesis	Genesis / Mega Drive (older core)
+MegaDrive	MegaDrive	Mega Drive / Genesis (newer core)
+MegaCD	MegaCD	Sega CD / Mega CD
+S32X	S32X	32X
+Saturn	Saturn	Saturn
+TurboGrafx16	TurboGrafx16	PC Engine, TurboGrafx-16, CD-ROM², SuperGrafx
+Jaguar	Jaguar	Atari Jaguar
+NeoGeo	NeoGeo	Neo Geo MVS/AES, Neo Geo CD
+PSX	PSX	PlayStation

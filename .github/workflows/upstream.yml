@@ -1,0 +1,29 @@
+# Every day: for each console core whose MiSTer-devel upstream moved past our pin, push a branch
+# upstream/<core> with the new pin, open a pull request, and start that core's build with our
+# patches on it. Merging the PR takes the new upstream version.
+name: Watch upstream cores
+
+on:
+  schedule:
+    - cron: "41 7 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Open a pull request per moved core
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name f3bandit
+          git config user.email 4943324+f3bandit@users.noreply.github.com
+          tools/cores.sh pr-all
