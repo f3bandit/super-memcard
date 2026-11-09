@@ -7,7 +7,7 @@ unchanged, and what Super MemCard needs from it is small.
 
 - **Media › Memory Cards** reads and writes front-port cards with `@memcard read/write`: those are
   PS1 commands, which always reach the PS1 card (05 §1). Same results as today.
-- **The PSX core** uses its card images in `saves/PSX`, or a real card through the front port as a PS1 card.
+- **The PSX core** keeps using its card images in `saves/PSX` (01).
 - **A real PS1/PS2** with the card: unchanged, round trip included (rule 1).
 
 ## What Console Mode would add (Retro Remake's side)

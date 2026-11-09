@@ -36,7 +36,7 @@ selected with the port's select line). src/ps1/ps1_memory_card.c, `mc_main_loop(
 
 The `0x2x` commands are the MemCard PRO / MMCE game ID protocol that ODEs and BIOS patches use; a
 real PS1 never sends them. The firmware can also watch the controller on the same bus for button
-combos (`mc_read_controller()`, Select+L1+R1+L2+R2 with the D-pad switch cards and channels).
+combos (`mc_read_controller()`: hold L1+L2+R1+R2, then Up/Down switch card, Left/Right channel, Select the boot card).
 
 ## Where the data goes
 
