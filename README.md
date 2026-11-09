@@ -19,6 +19,7 @@ then handed to Retro Remake as a set: protocol spec, `sys/` and Main patches, ca
 | [docs/05-design.md](docs/05-design.md) | Super MemCard: the protocol, the host, the card's menu |
 | [docs/06-console-mode.md](docs/06-console-mode.md) | how it works with Console Mode |
 | [docs/07-virtual-ss1.md](docs/07-virtual-ss1.md) | testing without an SS1: virtual card, bus simulation, virtual Main |
+| [sim/card](sim/card/README.md) | the virtual card (layer 1, working): sd2psXtd's PS1 code on a PC, with tests |
 
 ## How it works
 

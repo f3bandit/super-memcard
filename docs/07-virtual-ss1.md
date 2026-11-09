@@ -12,6 +12,8 @@ or in GitHub Actions on every push. The real SS1 stays the final check, not the 
 
 ## 1. Virtual card
 
+Working: [sim/card](../sim/card/README.md), with what the tests have found in the firmware so far.
+
 sd2psXtd's PS1 code is plain C: `ps1_memory_card.c` (protocol), `ps1_cardman.c` (card files), `ps1_dirty.c`
 (SD write-back), `ps1_mmce.c` (game ID / card switching). Built for Linux with two stand-ins:
 
