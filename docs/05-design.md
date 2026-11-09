@@ -17,7 +17,7 @@ Same bus, same speed and the same 128-byte blocks as the PS1 protocol, so the SS
 
 | Bytes | Command | Answer |
 |---|---|---|
-| `81 60 'S' 'M' VER` | **Hello**: the host speaks Super MemCard | `'S' 'M'`, the card's version, free space; a card without it answers nothing (the host then treats it as a plain PS1 card) |
+| `81 60 'S' 'M' VER HOST CAPS` | **Hello**: the host speaks Super MemCard; who it is (`HOST`: Phosphor Main, Console Mode, a core's `sys/` driver) and what it can do (`CAPS`) | `'S' 'M'`, the card's version, its features, free space; a card without it answers nothing (the host then treats it as a plain PS1 card) |
 | `81 61 SYS LEN ID…` | **Select** a save set: system (1 byte, table below) and game ID (`SLUS-00067`, `NSME-USA`, a CRC32 in hex…) | how many files, sizes, each file's generation number (§5) |
 | `81 62 FILE MSB LSB` | **Read** block N (128 bytes) of file FILE of the selected set | `MSB LSB [128] CHK 47`, as a PS1 read |
 | `81 63 FILE MSB LSB [128] CHK` | **Write** block N | `47` good / `4E` bad checksum / `FF` out of space |
@@ -25,6 +25,31 @@ Same bus, same speed and the same 128-byte blocks as the PS1 protocol, so the SS
 | `81 65 FILE GEN` | **Commit**: this file is complete; stores its generation number | `47` once it's on the SD card |
 | `81 66` | **Status**: blocks still waiting for the SD card | count (0 = safe to remove) |
 | `81 67 SYS` | **List** the games of a system (one per call, paged) | game IDs, sizes, generations |
+
+### Who sends Hello, and when
+
+The **core** sends Hello the first time it polls the card: a custom game core through its `sys/` card driver
+(phase 2), or the menu core on Main's behalf (phase 1, Phosphor's or Console Mode's). Its answer tells both
+sides what they have:
+
+| on the SS1 | the card sees | result |
+|---|---|---|
+| a custom (approved) core or menu core | Hello with its `HOST` and `CAPS` | the features that host is allowed (e.g. everything for a Console Mode approved core) |
+| a stock core, the stock PSX core | no Hello, only PS1 commands | a plain PS1 card |
+| a real PS1 / PS2 | no Hello | a plain PS1 card |
+
+| the host gets | it knows |
+|---|---|
+| Hello answered `'S' 'M' …` | a Super MemCard card: version and features |
+| no ACK on the command byte, twice | a stock card (sd2psXtd doesn't ACK `81 60`–`6F`, tested) or no card: PS1 only |
+
+- **Ask twice.** The first command after the card powers up or switches card can go unanswered (08, finding 4),
+  so one missing reply means "ask again"; only a second one means a plain card.
+- **Features only add commands.** The card stays powered while the SS1 changes core, so features can still be on
+  when a stock core loads after an approved one. That's harmless because no feature changes what the PS1
+  commands do (§1); the card drops back to plain PS1 at power-off or reset (rule 2).
+- Hello identifies the host; it isn't a lock (any core could send the same bytes). It picks features, it doesn't
+  protect anything.
 
 On the card's SD card (rule 3):
 

@@ -5,6 +5,13 @@ the design depends on. Newest first. Each entry says where it came from so it ca
 
 ## 2026-11-09
 
+### Decided: the core sends Hello on its first card poll
+
+Hello carries who the host is (Phosphor Main, Console Mode, a core's `sys/` driver) and what it can do, so the
+card knows it's on an approved core and turns on that host's features; stock cores, the stock PSX core and a
+real PS1 never send it, so the card stays a plain PS1 card for them. Sent twice if the first gets no reply
+(finding 4 below). Details in 05 §2.
+
 ### The virtual card runs on the SS1
 
 - `make ss1` builds `vcardd` and `test_card` for the SS1 (armv7, **static**, so MiSTer Linux's glibc 2.31 doesn't
