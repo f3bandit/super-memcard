@@ -40,8 +40,11 @@ the identity above.
 | the rest (NES, TurboGrafx-16, Jaguar, older carts) | CRC32 as No-Intro counts it | `CRC-1A2B3C4D` |
 | no ROM found for the save | the save's name, as before | |
 
-Neo Geo saves are already named after the game's set name, so they stay as they are. Header IDs can be shared
-by revisions of one game (N64 Rev 1 keeps its code); their saves are compatible, so they share a save set.
+Neo Geo saves are already named after the game's set name, so they stay as they are. Homebrew's placeholder product
+numbers (`GM 00000000-00`) aren't IDs: those games fall back to the CRC. Checked on the SS1's own games
+(N64, GBA, Genesis, 32X, SMS, SNES, Game Boy, NES, TurboGrafx-16, PlayStation .cue): an N64 ROM takes about a
+second to identify over USB, once (kept in `ids.txt`); finding another SuperStation's ROM for a save set reads only
+headers until the code matches.
 
 `host/smc_ident.c` is phosphord's code, copied. Identities are cached per file (path, size, time) in the state
 folder, so a ROM is read once.
@@ -56,8 +59,12 @@ its own database (Phosphor's library) can answer the lookups itself instead (`sm
 
 ## 3. On the card
 
-When the game is known, its save set is named after its **game ID** (`SuperMemCard/N64/Card1/NSME/`), and
-`game.ini` beside the saves records what it is:
+When the game is known, its save set is filed under its **game ID**: for a cartridge with a code, the code with its
+ROM's CRC32 (`SuperMemCard/N64/Card1/NSME-1A2B3C4D/`), for a disc its product code, else `CRC-<crc32>`. The CRC is
+there because hacks and revisions keep the original's code but may not take its save: on the SS1, *Castlevania: Aria
+of Sorrow* and a hack of it both say `A2CE` (now `A2CE-35536183` and `A2CE-C647E8A8`), while two copies of
+*Pokemon Emerald* under different file names are one save set (`BPEE-1F1C08FB`). `game.ini` beside the saves records
+what it is; the game ID a frontend shows is its `id`, the game's own code:
 
 ```
 id=NSME

@@ -92,7 +92,14 @@ static int sega16(FILE *f, char *id, char *title) {
         return -1; /* not a plain .bin/.md (e.g. an interleaved .smd): the CRC then */
     text(title, 65, h + 0x150, 48);
     text(id, 65, h + 0x180, 14);
-    return id[0] && strcmp(id, "GM XXXXXXXX-XX") ? 0 : -1;
+    /* homebrew and boot ROMs leave a placeholder (GM 00000000-00, GM XXXXXXXX-XX): not an ID, many games share it.
+     * Seen on the SS1's own games (08). */
+    int digits = 0, real = 0;
+    const char *rev = strrchr(id, '-'); /* -00: the revision */
+    for (const char *c = id + 2; *c && c != rev; c++)
+        if (isdigit((unsigned char)*c))
+            digits++, real |= *c != '0';
+    return id[0] && real && digits >= 4 ? 0 : -1;
 }
 
 static int bcd(unsigned v) { return (int)((v >> 4) * 10 + (v & 15)); }
@@ -150,7 +157,7 @@ static int gameboy(FILE *f, char *id, char *title) {
     return -1;
 }
 
-int smc_game_id_of(const char *sys, const char *path, char id[65], char title[65]) {
+int smc_game_header_id(const char *sys, const char *path, char id[65], char title[65]) {
     id[0] = title[0] = 0;
     FILE *f = fopen(path, "rb");
     if (!f)
@@ -174,8 +181,25 @@ int smc_game_id_of(const char *sys, const char *path, char id[65], char title[65
         if (id[0])
             return 0;
     }
-    /* no code in the game itself: phosphord's identity (disc product code, or the ROM's CRC32) */
+    id[0] = 0;
+    return -1;
+}
+
+int smc_game_id_of(const char *sys, const char *path, char id[65], char title[65]) {
+    char hid[65];
     struct smc_ident x;
+    if (smc_game_header_id(sys, path, hid, title) == 0) {
+        /* the game's code with its ROM's CRC: a hack or a revision keeps the code but may not take the original's
+         * save (Castlevania Aria of Sorrow and a hack of it both say A2CE, seen on the SS1), while two copies of one
+         * dump are one save set */
+        if (smc_ident_file(sys, path, &x) || !x.crc32[0])
+            return -1;
+        snprintf(id, 65, "%.40s-%s", hid, x.crc32);
+        for (char *p = id + strlen(hid); *p; p++)
+            *p = (char)toupper((unsigned char)*p);
+        return 0;
+    }
+    /* no code in the game itself: phosphord's identity (disc product code, or the ROM's CRC32) */
     if (smc_ident_file(sys, path, &x))
         return -1;
     if (x.serial[0])

@@ -475,29 +475,46 @@ static void make_nes(const char *path) {
 }
 
 static void t_game_ids_from_headers(void) {
-    char p[600], id[65], title[65], want[65];
+    /* the game's own code, and on the card that code with the ROM's CRC (one dump, any byte order: one save set) */
+    char p[600], id[65], id2[65], title[65], want[65];
     snprintf(p, sizeof(p), "%s-host/roms/a.z64", sd);
     make_n64(p, false);
-    CHECK_EQ(smc_game_id_of("N64", p, id, title), 0);
+    CHECK_EQ(smc_game_header_id("N64", p, id, title), 0);
     CHECK(strcmp(id, "NSME") == 0 && strcmp(title, "SUPER MARIO 64") == 0);
+    CHECK_EQ(smc_game_id_of("N64", p, id, title), 0);
+    snprintf(want, sizeof(want), "NSME-%08X", (unsigned)smc_crc32(rom, 4096, 0));
+    CHECK(strcmp(id, want) == 0);
     snprintf(p, sizeof(p), "%s-host/roms/b.v64", sd);
     make_n64(p, true);
-    CHECK_EQ(smc_game_id_of("N64", p, id, title), 0);
-    CHECK(strcmp(id, "NSME") == 0);
+    CHECK_EQ(smc_game_id_of("N64", p, id2, title), 0);
+    CHECK(strcmp(id, id2) == 0);
     snprintf(p, sizeof(p), "%s-host/roms/c.md", sd);
     make_genesis(p);
-    CHECK_EQ(smc_game_id_of("MegaDrive", p, id, title), 0);
+    CHECK_EQ(smc_game_header_id("MegaDrive", p, id, title), 0);
     CHECK(strcmp(id, "GM 00001009-00") == 0 && strcmp(title, "SONIC THE HEDGEHOG") == 0);
+    CHECK_EQ(smc_game_id_of("MegaDrive", p, id, title), 0);
+    CHECK(strncmp(id, "GM 00001009-00-", 15) == 0);
+    /* product numbers with a letter and dash in them (seen on the SS1), and homebrew's placeholder (not an ID) */
+    memcpy(rom + 0x180, "GM G-004130-00", 14);
+    put_file(p, rom, 0x400);
+    CHECK_EQ(smc_game_header_id("Genesis", p, id, title), 0);
+    CHECK(strcmp(id, "GM G-004130-00") == 0);
+    memcpy(rom + 0x180, "GM 00000000-00", 14);
+    put_file(p, rom, 0x400);
+    CHECK_EQ(smc_game_header_id("Genesis", p, id, title), -1);
+    CHECK_EQ(smc_game_id_of("Genesis", p, id, title), 0);
+    CHECK(strncmp(id, "CRC-", 4) == 0);
     snprintf(p, sizeof(p), "%s-host/roms/d.gba", sd);
     make_gba(p);
-    CHECK_EQ(smc_game_id_of("GBA", p, id, title), 0);
+    CHECK_EQ(smc_game_header_id("GBA", p, id, title), 0);
     CHECK(strcmp(id, "AMTE") == 0);
     snprintf(p, sizeof(p), "%s-host/roms/e.sms", sd);
     make_sms(p);
-    CHECK_EQ(smc_game_id_of("SMS", p, id, title), 0);
+    CHECK_EQ(smc_game_header_id("SMS", p, id, title), 0);
     CHECK(strcmp(id, "SMS-7069") == 0);
     snprintf(p, sizeof(p), "%s-host/roms/f.nes", sd);
     make_nes(p);
+    CHECK_EQ(smc_game_header_id("NES", p, id, title), -1);
     CHECK_EQ(smc_game_id_of("NES", p, id, title), 0);
     snprintf(want, sizeof(want), "CRC-%08X", (unsigned)smc_crc32(rom + 16, 0x8000, 0)); /* the header left out */
     CHECK(strcmp(id, want) == 0);
@@ -531,9 +548,14 @@ static void t_sync_by_game_id(void) {
     struct utimbuf ut = {1700000000, 1700000000};
     CHECK(utime(p, &ut) == 0);
     CHECK_EQ(run_sync_games(0).pushed, 1);
-    CHECK_EQ(file_size("SuperMemCard/N64/Card1/NSME/save.eep"), sizeof(eep));
+    char folder[65], t[65], cp[300];
+    snprintf(p, sizeof(p), "%s/games/N64/Mario.z64", ss[0]);
+    CHECK_EQ(smc_game_id_of("N64", p, folder, t), 0); /* NSME-<crc> */
+    snprintf(cp, sizeof(cp), "SuperMemCard/N64/Card1/%s/save.eep", folder);
+    CHECK_EQ(file_size(cp), sizeof(eep));
     char ini[64] = {0};
-    CHECK_EQ(read_file_at("SuperMemCard/N64/Card1/NSME/game.ini", 0, ini, 29), 0);
+    snprintf(cp, sizeof(cp), "SuperMemCard/N64/Card1/%s/game.ini", folder);
+    CHECK_EQ(read_file_at(cp, 0, ini, 29), 0);
     CHECK(strncmp(ini, "id=NSME\ntitle=SUPER MARIO 64\n", 29) == 0);
     /* the other SuperStation gets it under its own ROM's name, with the save's time */
     CHECK_EQ(run_sync_games(1).pulled, 1);

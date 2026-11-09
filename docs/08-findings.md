@@ -17,9 +17,11 @@ SuperStations is one save set, and each gets the save under its own ROM's name w
   it, and the card has no clock at all. The time travels with the save (Commit `time[4]`, Info) and is put back on
   the file when it's copied to another SuperStation. Whether the SS1's clock is right (network time, a clock chip)
   is still to check: a wrong clock gives wrong dates.
+- Checked on the SS1's own games: the codes read right (N64 `NO7E` TWINE, GBA `AW2E`, Genesis `GM T-95106-00`,
+  PSX `SLUS-00633`). Two things changed from it: hacks keep the original's code (*Aria of Sorrow* and its
+  *Persephone* hack are both `A2CE`), so a cartridge's save set is filed as code-CRC (`A2CE-35536183`), the code
+  alone shown; and homebrew/boot ROMs carry `GM 00000000-00`, which now falls back to the CRC.
 - The identification is phosphord's (`host/smc_ident.c`, copied); the header codes are new (`host/smc_gameid.c`).
-  The header offsets are from the formats' documentation and tested only on made-up headers so far: to check
-  against real ROMs on the SS1.
 
 ### Deleting saves, and settling "both changed"
 

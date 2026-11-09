@@ -455,9 +455,20 @@ static const char *local_for_id(const char *sys, const char *id) {
     if (!C->games_dirs)
         return NULL;
     index_system(sys);
-    for (int i = 0; i < nroms; i++)
-        if (!strcmp(roms[i].sys, sys) && id_of(&roms[i]) == 0 && !strcmp(roms[i].id, id))
+    for (int i = 0; i < nroms; i++) {
+        if (strcmp(roms[i].sys, sys))
+            continue;
+        /* a cartridge with a code: only ROMs with that code are hashed (reading a header is quick, a whole ROM isn't) */
+        const char *dash = strrchr(id, '-');
+        if (!roms[i].known && dash && strncmp(id, "CRC-", 4) && dash - id <= 20) {
+            char hid[65], t[65];
+            if (smc_game_header_id(sys, roms[i].path, hid, t) != 0 || strlen(hid) != (size_t)(dash - id) ||
+                strncmp(hid, id, (size_t)(dash - id)))
+                continue;
+        }
+        if (id_of(&roms[i]) == 0 && !strcmp(roms[i].id, id))
             return roms[i].base;
+    }
     return NULL;
 }
 
@@ -690,6 +701,11 @@ static int sync_game(const struct smc_bus *b, const char *sys, int card, const c
     /* and what the game is, for a frontend's save list (game name, ID) */
     char gid[65], title[65], ini[200];
     if (!has_ini && rep->pushed > pushed && card_id_for(sys, local_game, gid, title) && !strcmp(gid, id)) {
+        /* the game ID shown is the game's own code (NSME), not the folder's code-CRC */
+        char hid[65], t2[65];
+        struct rom *r = rom_for(sys, local_game);
+        if (r && smc_game_header_id(sys, r->path, hid, t2) == 0)
+            snprintf(gid, sizeof(gid), "%s", hid);
         snprintf(ini, sizeof(ini), "id=%s\ntitle=%s\n", gid, title);
         if (smc_select_card(b, sys, id, card, NULL) < 0 ||
             smc_write_file(b, GAME_INI, (const uint8_t *)ini, (uint32_t)strlen(ini), 1) != SMC_OK)
@@ -1042,6 +1058,11 @@ int smc_game_info(const struct smc_bus *b, const char *sys, int card, const char
             if (!strcmp(f.name, NAME_TXT))
                 snprintf(gi->save_name, sizeof(gi->save_name), "%s", text);
             else {
+                char *g = strstr(text, "id=");
+                if (g == text || (g && g[-1] == '\n')) {
+                    g += 3;
+                    snprintf(gi->id, sizeof(gi->id), "%.*s", (int)strcspn(g, "\n"), g);
+                }
                 char *t = strstr(text, "title=");
                 if (t) {
                     t += 6;
