@@ -153,6 +153,8 @@ void pio_sm_drain_tx_fifo(PIO p, uint sm) { pio_sm_clear_fifos(p, sm); }
 
 /* ---- the bus ---- */
 
+static atomic_uint loops; /* passes of core 0's main loop */
+
 enum { SM_CMD = 0, SM_DAT = 1, SM_CTRL = 2 };
 static bool sel;
 static bool have_reply; /* dat_writer pulled a byte (and ACKed): it goes out on the next byte */
@@ -188,8 +190,12 @@ static uint8_t xfer(uint8_t cmd, int dat, bool last, bool *ack) {
     pthread_mutex_unlock(&bus);
 
     /* The card ACKs a byte by queueing its next reply. The PS1 gives up after ~100 us;
-     * a PC thread can be descheduled, so wait longer, and only briefly for the last byte. */
+     * a PC thread can be descheduled, so wait longer, and only briefly for the last byte.
+     * And only once the card has had the CPU for a while (its main loop went round): on a busy
+     * PC (CI, other simulations) 100 ms of wall time can pass with the card's threads never
+     * running, and a byte the card would have ACKed looked unanswered (08). */
     uint64_t deadline = mono_us() + (last ? 2000 : 100000);
+    unsigned start = atomic_load(&loops), passes = last ? 2 : 20;
     bool a = false;
     for (;;) {
         pthread_mutex_lock(&bus);
@@ -198,7 +204,7 @@ static uint8_t xfer(uint8_t cmd, int dat, bool last, bool *ack) {
             have_reply = a = true;
         }
         pthread_mutex_unlock(&bus);
-        if (a || mono_us() > deadline)
+        if (a || (mono_us() > deadline && atomic_load(&loops) - start >= passes))
             break;
         sched_yield();
     }
@@ -220,7 +226,6 @@ uint8_t vcs_xfer_ctrl(uint8_t cmd, uint8_t dat, bool last, bool *ack) { return x
 
 static pthread_t core0;
 static atomic_bool booted, running;
-static atomic_uint loops;
 static atomic_int key_pending = -1;
 
 /* The card's main screen with the card in PS1 mode, as src/gui.c evt_scr_main (with the Super MemCard

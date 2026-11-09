@@ -24,6 +24,12 @@ saved in `SuperMemCard/<SYSTEM>/card.ini`. Saves moved to `SuperMemCard/<SYSTEM>
 - In CI one run lost a whole system in the sync (`game names over 64 characters`: nothing pushed); not seen in 15
   local runs. The likeliest cause is a missed Core frame (the sync then skips that system), so `smc_core()` now asks
   twice, as Hello does (Core changes nothing when repeated). CI now prints the sync log to confirm next time.
+- The next CI run failed other tests the same way (a Create or Commit frame unanswered). Version 1 does the same on
+  this PC with two CPU hogs running, so it's the virtual card's harness, not version 2: it gave up on an ACK after
+  100 ms of wall time even when the card's threads hadn't run at all in that time. It now also waits until the
+  card's main loop has gone round 20 times (2 for a frame's last byte). Each test may take 3 minutes (was 1).
+  With two hogs spinning on both of this PC's cores the big-save tests still run past that: the card's threads get
+  almost no CPU there, which CI's runners don't do.
 
 ### Virtual cards on the SS1: picked during a game, switched at the next menu
 

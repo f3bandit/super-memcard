@@ -426,7 +426,7 @@ int main(int argc, char **argv) {
         fflush(stdout);
         pid_t pid = fork();
         if (pid == 0) {
-            alarm(60);
+            alarm(180); /* a slow or busy PC (CI) runs the big saves slowly */
             host_settings()->ps1_game_id = tests[i].game_id;
             /* the card process reads this at its first SD write */
             if (strstr(tests[i].name, "slow SD"))
