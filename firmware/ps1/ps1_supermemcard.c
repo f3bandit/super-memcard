@@ -35,7 +35,7 @@ int ps1_supermemcard_req_len(uint8_t cmd, const uint8_t *r, int have) {
     case SMC_HELLO: return 5;
     case SMC_SELECT:
         if (have < 1) return 1;
-        if (r[0] == 0 || r[0] > SMC_ID_LEN) return -1;
+        if (r[0] == 0 || r[0] > SMC_SYS_LEN) return -1;
         if (have < 2 + r[0]) return 2 + r[0];
         if (r[1 + r[0]] == 0 || r[1 + r[0]] > SMC_ID_LEN) return -1;
         return 2 + r[0] + r[1 + r[0]];
@@ -49,7 +49,7 @@ int ps1_supermemcard_req_len(uint8_t cmd, const uint8_t *r, int have) {
     case SMC_STATUS: return 0;
     case SMC_LIST:
         if (have < 1) return 1;
-        if (r[0] == 0 || r[0] > SMC_ID_LEN) return -1;
+        if (r[0] == 0 || r[0] > SMC_SYS_LEN) return -1;
         return 1 + r[0] + 2;
     case SMC_INFO: return 1;
     default: return -1;
@@ -83,7 +83,7 @@ struct file {
 };
 
 static char card_id[17];
-static char set_dir[96];
+static char set_dir[16 + SMC_SYS_LEN + SMC_ID_LEN];
 static bool have_set;
 static struct file files[SMC_MAX_FILES];
 static int nfiles;
@@ -130,7 +130,7 @@ static int fd_for(int f, bool new_copy) {
     if (open_file == f && open_new == new_copy)
         return open_fd;
     close_open();
-    char p[128];
+    char p[192];
     path_of(p, sizeof(p), f, new_copy);
     open_fd = sd_open(p, new_copy ? O_RDWR : O_RDONLY);
     if (open_fd >= 0) {
@@ -144,7 +144,7 @@ static uint32_t be32(const uint8_t *p) { return (uint32_t)p[0] << 24 | (uint32_t
 static void put32(uint8_t *p, uint32_t v) { p[0] = v >> 24; p[1] = v >> 16; p[2] = v >> 8; p[3] = (uint8_t)v; }
 
 static void mkdirs(const char *dir) {
-    char p[128];
+    char p[192];
     snprintf(p, sizeof(p), "%s", dir);
     for (char *s = p; *s; s++)
         if (*s == '/') {
@@ -170,7 +170,7 @@ static int read_text(const char *path, char *buf, int max) {
 
 /* write a small text file whole: to <path>.new, then rename over <path> */
 static bool write_text(const char *path, const char *text) {
-    char tmp[136];
+    char tmp[200];
     snprintf(tmp, sizeof(tmp), "%s.new", path);
     int fd = sd_open(tmp, O_RDWR | O_CREAT | O_TRUNC);
     if (fd < 0)
@@ -239,7 +239,7 @@ static void select_set(const char *sys, const char *id) {
     snprintf(set_dir, sizeof(set_dir), ROOT "/%s/%s", sys, id);
 
     static char meta[SMC_MAX_FILES * (SMC_NAME_LEN + 16)];
-    char p[128];
+    char p[192];
     snprintf(p, sizeof(p), "%s/meta.ini", set_dir);
     if (read_text(p, meta, sizeof(meta)) < 0)
         meta[0] = 0;
@@ -297,7 +297,7 @@ static int do_command(uint8_t cmd, const uint8_t *r, int len, uint8_t *a) {
         return 16;
 
     case SMC_SELECT: {
-        char sys[SMC_ID_LEN + 1], id[SMC_ID_LEN + 1];
+        char sys[SMC_SYS_LEN + 1], id[SMC_ID_LEN + 1];
         int sl = r[0], il = r[1 + sl];
         if (!take_name(sys, sizeof(sys), r + 1, sl, false) || !take_name(id, sizeof(id), r + 2 + sl, il, false)) {
             have_set = false;
@@ -388,7 +388,7 @@ static int do_command(uint8_t cmd, const uint8_t *r, int len, uint8_t *a) {
         }
         close_open();
         mkdirs(set_dir);
-        char p[128];
+        char p[192];
         path_of(p, sizeof(p), f, true);
         int fd = sd_open(p, O_RDWR | O_CREAT | O_TRUNC);
         if (fd < 0)
@@ -415,7 +415,7 @@ static int do_command(uint8_t cmd, const uint8_t *r, int len, uint8_t *a) {
         if (!file_ok(f) || !files[f].writing)
             return 1;
         close_open();
-        char p[128], np[128];
+        char p[192], np[128];
         path_of(p, sizeof(p), f, false);
         path_of(np, sizeof(np), f, true);
         if (sd_exists(p))
@@ -436,20 +436,26 @@ static int do_command(uint8_t cmd, const uint8_t *r, int len, uint8_t *a) {
         return 2;
 
     case SMC_LIST: {
-        char sys[SMC_ID_LEN + 1], dir[64];
+        /* the idx-th game of a system, or with sys "." the idx-th system */
+        char sys[SMC_SYS_LEN + 1], dir[16 + SMC_SYS_LEN];
         int sl = r[0], want = r[1 + sl] << 8 | r[2 + sl];
-        memset(a, 0, 33);
+        bool systems = sl == 1 && r[1] == '.';
+        memset(a, 0, 1 + SMC_ID_LEN);
         a[0] = SMC_NOT_FOUND;
-        if (!take_name(sys, sizeof(sys), r + 1, sl, false))
-            return 33;
-        snprintf(dir, sizeof(dir), ROOT "/%s", sys);
+        if (systems)
+            snprintf(dir, sizeof(dir), ROOT);
+        else if (take_name(sys, sizeof(sys), r + 1, sl, false))
+            snprintf(dir, sizeof(dir), ROOT "/%s", sys);
+        else
+            return 1 + SMC_ID_LEN;
         int d = sd_open(dir, O_RDONLY);
         if (d < 0)
-            return 33;
+            return 1 + SMC_ID_LEN;
         int it = sd_iterate_dir(d, -1), i = 0;
         while (it != -1) {
             char name[SMC_ID_LEN + 2];
-            if (sd_is_dir(it) && sd_get_name(it, name, sizeof(name)) && strlen(name) <= SMC_ID_LEN && i++ == want) {
+            if (sd_is_dir(it) && sd_get_name(it, name, sizeof(name)) && strlen(name) <= SMC_ID_LEN && name[0] != '.' &&
+                i++ == want) {
                 a[0] = SMC_GOOD;
                 memcpy(a + 1, name, strlen(name));
                 break;
@@ -459,7 +465,7 @@ static int do_command(uint8_t cmd, const uint8_t *r, int len, uint8_t *a) {
         if (it != -1)
             sd_close(it);
         sd_close(d);
-        return 33;
+        return 1 + SMC_ID_LEN;
     }
     }
     return 0;

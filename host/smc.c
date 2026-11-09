@@ -65,9 +65,9 @@ int smc_hello(const struct smc_bus *b, uint8_t host, uint8_t caps, struct smc_ca
     return 1;
 }
 
-static int put_name(uint8_t *p, const char *s) {
+static int put_name(uint8_t *p, const char *s, size_t max) {
     size_t n = strlen(s);
-    if (n == 0 || n > 32)
+    if (n == 0 || n > max)
         return -1;
     p[0] = (uint8_t)n;
     memcpy(p + 1, s, n);
@@ -75,11 +75,11 @@ static int put_name(uint8_t *p, const char *s) {
 }
 
 int smc_select(const struct smc_bus *b, const char *sys, const char *game) {
-    uint8_t req[66], a[2];
-    int n = put_name(req, sys);
+    uint8_t req[2 + SMC_SYS_MAX + SMC_GAME_MAX], a[2];
+    int n = put_name(req, sys, SMC_SYS_MAX);
     if (n < 0)
         return SMC_E_BAD;
-    int m = put_name(req + n, game);
+    int m = put_name(req + n, game, SMC_GAME_MAX);
     if (m < 0)
         return SMC_E_BAD;
     int rc = smc_frame(b, C_SELECT, req, n + m, a, 2);
@@ -177,19 +177,19 @@ int smc_pending(const struct smc_bus *b) {
     return rc ? rc : (a[0] << 8 | a[1]);
 }
 
-int smc_list(const struct smc_bus *b, const char *sys, int idx, char game[33]) {
-    uint8_t req[36], a[33];
-    int n = put_name(req, sys);
+int smc_list(const struct smc_bus *b, const char *sys, int idx, char game[65]) {
+    uint8_t req[3 + SMC_SYS_MAX], a[1 + SMC_GAME_MAX];
+    int n = put_name(req, sys, SMC_SYS_MAX);
     if (n < 0)
         return SMC_E_BAD;
     req[n] = (uint8_t)(idx >> 8);
     req[n + 1] = (uint8_t)idx;
-    int rc = smc_frame(b, C_LIST, req, n + 2, a, 33);
+    int rc = smc_frame(b, C_LIST, req, n + 2, a, 1 + SMC_GAME_MAX);
     if (rc)
         return rc;
     if (a[0] != GOOD)
         return SMC_E_NOT_FOUND;
-    memcpy(game, a + 1, 32);
-    game[32] = 0;
+    memcpy(game, a + 1, SMC_GAME_MAX);
+    game[SMC_GAME_MAX] = 0;
     return SMC_OK;
 }

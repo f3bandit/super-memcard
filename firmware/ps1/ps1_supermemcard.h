@@ -16,7 +16,7 @@ enum {
     SMC_CREATE = 0x64, /* size[4] namelen name                 -> status file (2) */
     SMC_COMMIT = 0x65, /* file gen[4]                          -> end (1) */
     SMC_STATUS = 0x66, /* (none)                               -> pending_hi pending_lo (2) */
-    SMC_LIST   = 0x67, /* syslen sys idx_hi idx_lo             -> status id[32] (33) */
+    SMC_LIST   = 0x67, /* syslen sys idx_hi idx_lo             -> status id[64] (65); sys "." lists systems */
     SMC_INFO   = 0x68, /* file                                 -> status name[16] size[4] gen[4] (25) */
 };
 
@@ -28,9 +28,10 @@ enum { SMC_HOST_PHOSPHOR = 1, SMC_HOST_CONSOLE_MODE = 2, SMC_HOST_CORE = 3, SMC_
 
 #define SMC_MAX_FILES   16
 #define SMC_NAME_LEN    16    /* file names: save.eep, cpak1.cpk ... */
-#define SMC_ID_LEN      32    /* system and game IDs */
+#define SMC_SYS_LEN     32    /* system: Main's save folder name */
+#define SMC_ID_LEN      64    /* game ID: Main's save name (longer ones are shortened by the host) */
 #define SMC_MAX_FILE    (1024 * 1024)
-#define SMC_MAX_REQ     (4 + 128 + 4 + SMC_ID_LEN * 2)
+#define SMC_MAX_REQ     (4 + 128 + 4 + SMC_SYS_LEN + SMC_ID_LEN)
 #define SMC_MAX_ANS     130
 
 /* core 1 (bus) */

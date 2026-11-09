@@ -57,8 +57,11 @@ int smc_read_file(const struct smc_bus *b, int idx, uint32_t size, uint8_t *buf)
 int smc_write_file(const struct smc_bus *b, const char *name, const uint8_t *data, uint32_t size, uint32_t gen);
 /* Blocks still waiting for the card's SD card (0: safe to remove). */
 int smc_pending(const struct smc_bus *b);
-/* The idx-th game ID the card has for a system; SMC_E_NOT_FOUND past the end. */
-int smc_list(const struct smc_bus *b, const char *sys, int idx, char game[33]);
+/* The idx-th game ID the card has for a system (sys "." : the idx-th system); SMC_E_NOT_FOUND past
+ * the end. */
+int smc_list(const struct smc_bus *b, const char *sys, int idx, char game[65]);
+#define SMC_SYS_MAX 32
+#define SMC_GAME_MAX 64
 
 /* A whole command frame (81 cmd, request, answer); exposed for tests. Returns SMC_OK or
  * SMC_E_NO_REPLY. */

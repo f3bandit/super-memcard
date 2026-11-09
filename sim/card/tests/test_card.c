@@ -347,8 +347,10 @@ static void t_sector_out_of_range(void) {
 
 #ifdef WITH_SUPERMEMCARD
 #include "test_smc.inc"
+#include "test_sync.inc"
 #else
 #define SMC_TESTS
+#define SYNC_TESTS
 #endif
 
 /* ---- runner ---- */
@@ -381,6 +383,7 @@ static const struct test tests[] = {
      "without PSRAM, ps1_mc_data_interface_write_byte() writes past the 128 KB card image in RAM "
      "(up to 8 MB past it) and the card answers 47"},
     SMC_TESTS
+    SYNC_TESTS
 };
 
 int main(int argc, char **argv) {
@@ -424,8 +427,8 @@ int main(int argc, char **argv) {
             if (WIFSIGNALED(st))
                 printf("    killed by signal %d\n", WTERMSIG(st));
         }
-        char rm[300];
-        snprintf(rm, sizeof(rm), "rm -rf '%s'", sd);
+        char rm[700];
+        snprintf(rm, sizeof(rm), "rm -rf '%s' '%s-host'", sd, sd);
         if (system(rm) != 0) {
         }
     }

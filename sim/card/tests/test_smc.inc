@@ -187,7 +187,7 @@ static void t_smc_bad_checksum_and_names(void) {
 
 static void t_smc_list_games(void) {
     uint8_t d[128];
-    char game[33];
+    char game[65];
     fill(d, sizeof(d), 8);
     CHECK_EQ(smc_hello(&vbus, SMC_HOST_TEST, 0, NULL), 1);
     const char *games[] = {"Alpha", "Bravo", "Charlie"};
@@ -207,6 +207,20 @@ static void t_smc_list_games(void) {
     }
     CHECK_EQ(seen, 7);
     CHECK_EQ(smc_list(&vbus, "Saturn", 0, game), SMC_E_NOT_FOUND);
+    /* systems: "." */
+    CHECK_EQ(smc_select(&vbus, "SNES", "Long name: Legend of Zelda, The - A Link to the Past (USA)"), SMC_E_BAD);
+    CHECK_EQ(smc_select(&vbus, "SNES", "Legend of Zelda, The - A Link to the Past (USA) (Rev 1)"), 0);
+    CHECK_EQ(smc_write_file(&vbus, "save.sav", d, sizeof(d), 1), SMC_OK);
+    int sys = 0;
+    for (int i = 0; i < 10; i++) {
+        int rc = smc_list(&vbus, ".", i, game);
+        if (rc == SMC_E_NOT_FOUND)
+            break;
+        sys |= strcmp(game, "MegaDrive") == 0 ? 1 : strcmp(game, "SNES") == 0 ? 2 : 4;
+    }
+    CHECK_EQ(sys, 3);
+    CHECK_EQ(smc_list(&vbus, "SNES", 0, game), SMC_OK);
+    CHECK(strcmp(game, "Legend of Zelda, The - A Link to the Past (USA) (Rev 1)") == 0);
 }
 
 static void t_smc_ps1_unaffected(void) {
