@@ -48,6 +48,12 @@ sides what they have:
 - **Features only add commands.** The card stays powered while the SS1 changes core, so features can still be on
   when a stock core loads after an approved one. That's harmless because no feature changes what the PS1
   commands do (§1); the card drops back to plain PS1 at power-off or reset (rule 2).
+- **Why the core asks rather than the card announcing itself:** on the PS1 card bus the host clocks every byte
+  and the card only answers the byte being clocked; it can't start a message. Every place the card could hide
+  one (the FLAG byte, the ID reply `5A 5D 5C 5D 04 00 00 80`, an extra ACK after a command's last byte) is read
+  by a real PS1, the stock PSX core and Console Mode's memory card manager, so it would break rule 1; and the
+  card can't answer the address byte `81` itself, because it only knows the frame is for it once that byte has
+  arrived. So the card's "message" is its answer to Hello.
 - Hello identifies the host; it isn't a lock (any core could send the same bytes). It picks features, it doesn't
   protect anything.
 
