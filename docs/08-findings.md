@@ -5,6 +5,30 @@ the design depends on. Newest first. Each entry says where it came from so it ca
 
 ## 2026-11-09
 
+### Raw card frames on the SS1's front ports; a real Sony card ignores Super MemCard
+
+phosphor-menu (branch `supermemcard`) has raw frames in its front-port extension (version 2: `PH_RAW` 87,
+`PH_RAW_STATUS` 88): up to 255 bytes in one select through `card_sector`'s own byte engine, each reply kept,
+stopping after the first byte without an ACK, with a per-frame ACK wait up to ~168 ms. phosphor-main has
+`card_raw P MS HEX` and `phosphor_card_raw()`; the sync uses the card in front port 1 or 2 that answers Hello.
+Simulated (iverilog, also in CI) and run on the SS1 with the original Sony card in front port 1 (backed up first,
+all 1024 sectors identical to the backup afterwards):
+
+- **A Sony card ignores Super MemCard's commands**: for `81 60` (Hello) and every `81 61`-`68` it stops after the
+  command byte (FLAG 08 back, no ACK), and reads normally afterwards. With it in the port, the sync finds no
+  Super MemCard card and changes nothing. (Closes the open test in 05.)
+- A sector read as a raw frame: 140 bytes, data equal to the backup, end byte 47.
+- This Sony card doesn't answer `81 53` (get ID) either: it predates that command. A host must not use get-ID to
+  find a card.
+- **The first frame after the ports are switched on gets no answer**; Main now waits 50 ms after switching them on,
+  and holds them on for a whole sync instead of switching per frame.
+- **After the Sony card refuses a command, the next frame sometimes gets no answer at all** (seen with 0-20 ms
+  between them, never with 50-100 ms; plain reads back to back are fine). A real PS1 never sends a refused
+  command, so it has never mattered before. Hello now waits 60 ms before its second try, and the sync leaves a
+  plain card alone for 100 ms after.
+- The first build of the core missed HDMI timing by 42 ps (the `phosphor` branch has +0.49 ns); the only sizeable
+  new logic, a multiplier for the ACK wait, became a shift (the wait is sent in units of 1024 clocks).
+
 ### Phase 1 works end to end on the SS1
 
 With the test Main and the virtual card, on the real SS1 (all reached only through Main's command interface):
