@@ -21,6 +21,8 @@ static void __time_critical_func(mc_supermemcard)(uint8_t cmd) {
         return; /* no Hello yet: ignore, like stock firmware */
 
     int n = 0, need = ps1_supermemcard_req_len(cmd, smc_req, 0);
+    if (need < 0)
+        return; /* Super MemCard off in the card's menu: not even the command byte is ACKed */
     while (n < need) {
         respondOrNextCmd(0x00);
         receiveOrNextCmd(&smc_req[n]);

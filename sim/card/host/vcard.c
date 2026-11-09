@@ -26,6 +26,8 @@ void ps1_mmce_next_idx(bool delay);
 void ps1_mmce_prev_idx(bool delay);
 #if WITH_SUPERMEMCARD
 bool ps1_supermemcard_card_key(int delta);
+uint32_t ps1_supermemcard_count_free(void);
+void ps1_supermemcard_set_enabled(bool on);
 #endif
 void game_db_init(void);
 extern int ps1_dirty_activity;
@@ -231,7 +233,12 @@ static atomic_int key_pending = -1;
 /* The card's main screen with the card in PS1 mode, as src/gui.c evt_scr_main (with the Super MemCard
  * patch) does it; run on core 0, where the GUI runs. */
 static void main_screen_key(int key) {
-    enum { PREV, NEXT, BACK, ENTER };
+    enum { PREV, NEXT, BACK, ENTER, MENU_FREE, MENU_SAVES_OFF, MENU_SAVES_ON };
+#if WITH_SUPERMEMCARD
+    /* the SuperStation menu's items, as src/gui.c's evt_smc_* call them */
+    if (key == MENU_FREE) { ps1_supermemcard_count_free(); return; }
+    if (key == MENU_SAVES_OFF || key == MENU_SAVES_ON) { ps1_supermemcard_set_enabled(key == MENU_SAVES_ON); return; }
+#endif
 #if WITH_SUPERMEMCARD
     if (!ps1_supermemcard_card_key((key == NEXT || key == ENTER) ? 1 : -1))
 #endif

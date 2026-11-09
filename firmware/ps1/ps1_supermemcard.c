@@ -4,6 +4,7 @@
  * called from the main loop, carries it out on the SD card and posts the answer back.
  *
  *   SuperMemCard/card.ini                              id=<16 hex digits>, made once
+ *   SuperMemCard/settings.ini                          saves=0: Super MemCard off (the card menu)
  *   SuperMemCard/<system>/card.ini                     card=<N>: the system's current virtual card (1..99)
  *   SuperMemCard/<system>/Card<N>/<game ID>/<file>     a save file (system: Main's save folder name)
  *   SuperMemCard/<system>/Card<N>/<game ID>/<file>.new a save being written, until Commit
@@ -29,10 +30,17 @@ static uint8_t mb_cmd, mb_req[SMC_MAX_REQ], mb_ans[SMC_MAX_ANS];
 static int mb_len, mb_alen;
 static uint32_t posted, done; /* sequence numbers, accessed with __atomic */
 static bool active;           /* a Hello since power-up */
+static int enabled;           /* 0: not read yet, 1: on, 2: off (settings.ini); read by core 1 */
+static uint32_t free_kb = 0xFFFFFFFFu, written_kb; /* counted in the menu; KB written since */
+static uint64_t last_cmd_at;
 
 bool ps1_supermemcard_active(void) { return __atomic_load_n(&active, __ATOMIC_ACQUIRE); }
+/* core 1: a Hello is only collected while Super MemCard is on: off, 81 60 isn't ACKed, as stock firmware */
+static bool hello_allowed(void) { return __atomic_load_n(&enabled, __ATOMIC_ACQUIRE) == 1; }
 
 int ps1_supermemcard_req_len(uint8_t cmd, const uint8_t *r, int have) {
+    if (cmd == SMC_HELLO && !hello_allowed())
+        return -1; /* off (or settings not read yet): not a command, nothing ACKed */
     switch (cmd) {
     case SMC_HELLO: return 5;
     case SMC_SELECT:
@@ -366,7 +374,8 @@ static int do_command(uint8_t cmd, const uint8_t *r, int len, uint8_t *a) {
             sscanf(card_id + i * 2, "%2x", &v);
             a[4 + i] = (uint8_t)v;
         }
-        put32(a + 12, 0xFFFFFFFFu); /* free space: not known through the SD wrapper */
+        /* free space: as counted in the card's menu, less what Super MemCard wrote since (FFFFFFFF: not counted) */
+        put32(a + 12, free_kb == 0xFFFFFFFFu ? free_kb : (written_kb < free_kb ? free_kb - written_kb : 0));
         return 16;
 
     case SMC_SELECT: {
@@ -493,6 +502,7 @@ static int do_command(uint8_t cmd, const uint8_t *r, int len, uint8_t *a) {
         sd_close(fd);
         files[f].writing = true;
         files[f].new_size = size;
+        written_kb += (size + 1023) / 1024;
         a[0] = SMC_GOOD;
         a[1] = (uint8_t)f;
         return 2;
@@ -566,7 +576,35 @@ static int do_command(uint8_t cmd, const uint8_t *r, int len, uint8_t *a) {
     return 0;
 }
 
+static void load_settings(void) {
+    char buf[64];
+    bool off = read_text(ROOT "/settings.ini", buf, sizeof(buf)) > 0 && strstr(buf, "saves=0") != NULL;
+    __atomic_store_n(&enabled, off ? 2 : 1, __ATOMIC_RELEASE);
+}
+
+bool ps1_supermemcard_enabled(void) { return __atomic_load_n(&enabled, __ATOMIC_ACQUIRE) != 2; }
+
+void ps1_supermemcard_set_enabled(bool on) {
+    sd_mkdir(ROOT);
+    write_text(ROOT "/settings.ini", on ? "saves=1\n" : "saves=0\n");
+    __atomic_store_n(&enabled, on ? 1 : 2, __ATOMIC_RELEASE);
+    if (!on) {
+        __atomic_store_n(&active, false, __ATOMIC_RELEASE); /* until the next Hello, after it's on again */
+        set_mode("");
+    }
+}
+
+uint32_t ps1_supermemcard_count_free(void) {
+    free_kb = sd_free_kb();
+    written_kb = 0;
+    return free_kb;
+}
+
+bool ps1_supermemcard_busy(void) { return last_cmd_at && time_us_64() < last_cmd_at + 1500 * 1000; }
+
 void ps1_supermemcard_task(void) {
+    if (!__atomic_load_n(&enabled, __ATOMIC_ACQUIRE))
+        load_settings();
     /* a PS1 game is using the card: the buttons are the PS1 card's again */
     if (mode_sys[0] && __atomic_load_n(&ps1_used, __ATOMIC_ACQUIRE))
         set_mode("");
@@ -577,5 +615,6 @@ void ps1_supermemcard_task(void) {
     if (seq == __atomic_load_n(&done, __ATOMIC_ACQUIRE))
         return;
     mb_alen = do_command(mb_cmd, mb_req, mb_len, mb_ans);
+    last_cmd_at = time_us_64();
     __atomic_store_n(&done, seq, __ATOMIC_RELEASE);
 }

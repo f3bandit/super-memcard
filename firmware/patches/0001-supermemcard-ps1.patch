@@ -20,8 +20,40 @@ index 0b8258a..56d0747 100644
  
  if (SD2PSX_WITH_GUI)
      target_compile_definitions(sd2psx_common PUBLIC "WITH_GUI=1")
+diff --git a/ext/ESP8266SdFatWrapper/include/sd.h b/ext/ESP8266SdFatWrapper/include/sd.h
+index f8897ad..72bf3a8 100644
+--- a/ext/ESP8266SdFatWrapper/include/sd.h
++++ b/ext/ESP8266SdFatWrapper/include/sd.h
+@@ -92,3 +92,7 @@ int sd_seek64(int fd, int64_t offset, int whence);
+ uint64_t sd_tell64(int fd);
+ 
+ sd_cid_t sd_get_CID(void);
++#if WITH_SUPERMEMCARD
++/* free space in KB (scans the FAT: seconds on a big card) */
++uint32_t sd_free_kb(void);
++#endif
+diff --git a/ext/ESP8266SdFatWrapper/src/sd.cpp b/ext/ESP8266SdFatWrapper/src/sd.cpp
+index 2a42b2b..4721ec6 100644
+--- a/ext/ESP8266SdFatWrapper/src/sd.cpp
++++ b/ext/ESP8266SdFatWrapper/src/sd.cpp
+@@ -310,6 +310,15 @@ extern "C" int sd_seek64(int fd, int64_t offset, int whence) {
+     return 1;
+ }
+ 
++#if WITH_SUPERMEMCARD
++extern "C" uint32_t sd_free_kb(void) {
++    uint32_t clusters = sd.freeClusterCount();
++    if (clusters == 0xFFFFFFFFu)
++        return 0xFFFFFFFFu;
++    return (uint32_t)((uint64_t)clusters * sd.bytesPerCluster() / 1024u);
++}
++#endif
++
+ extern "C" sd_cid_t sd_get_CID(void) {
+     cid_t cid;
+     sd_cid_t out_cid;
 diff --git a/src/gui.c b/src/gui.c
-index d9c8dcb..31a9cb9 100644
+index d9c8dcb..27bdbf5 100644
 --- a/src/gui.c
 +++ b/src/gui.c
 @@ -34,6 +34,9 @@
@@ -45,12 +77,93 @@ index d9c8dcb..31a9cb9 100644
                      switch (key) {
                          case INPUT_KEY_PREV: ps1_mmce_prev_ch(true); break;
                          case INPUT_KEY_NEXT: ps1_mmce_next_ch(true); break;
-@@ -1238,8 +1245,27 @@ void gui_task(void) {
+@@ -489,6 +496,31 @@ static void evt_ps1_gameid(lv_event_t *event) {
+     lv_event_stop_bubbling(event);
+ }
+ 
++#if WITH_SUPERMEMCARD
++static lv_obj_t *lbl_smc_saves, *lbl_smc_space, *lbl_smc_safe;
++
++static void evt_smc_saves(lv_event_t *event) {
++    bool on = !ps1_supermemcard_enabled();
++    ps1_supermemcard_set_enabled(on);
++    lv_label_set_text(lbl_smc_saves, on ? "Yes" : "No");
++    lv_event_stop_bubbling(event);
++}
++
++static void evt_smc_space(lv_event_t *event) {
++    /* counting the free space reads the whole FAT: only when asked here */
++    char text[24];
++    uint32_t kb = ps1_supermemcard_count_free();
++    if (kb == 0xFFFFFFFFu)
++        snprintf(text, sizeof(text), "?");
++    else if (kb >= 10u * 1024 * 1024)
++        snprintf(text, sizeof(text), "%lu GB", (unsigned long)(kb / (1024 * 1024)));
++    else
++        snprintf(text, sizeof(text), "%lu MB", (unsigned long)(kb / 1024));
++    lv_label_set_text(lbl_smc_space, text);
++    lv_event_stop_bubbling(event);
++}
++#endif
++
+ static void evt_ps1_controllercombo(lv_event_t *event) {
+     bool current = settings_get_ps1_controllercombo();
+     settings_set_ps1_controllercombo(!current);
+@@ -976,6 +1008,27 @@ static void create_menu_screen(void) {
+         }
+     }
+ 
++#if WITH_SUPERMEMCARD
++    /* SuperStation submenu: Super MemCard (github.com/f3bandit/super-memcard docs/05-design.md §4) */
++    lv_obj_t *smc_page = ui_menu_subpage_create(menu, NULL);
++    ui_header_create(smc_page, "SuperStation", false);
++    {
++        cont = ui_menu_cont_create_nav(smc_page);
++        ui_label_create_grow_scroll(cont, "Saves");
++        lbl_smc_saves = ui_label_create(cont, ps1_supermemcard_enabled() ? " Yes" : " No");
++        lv_obj_add_event_cb(cont, evt_smc_saves, LV_EVENT_CLICKED, NULL);
++
++        cont = ui_menu_cont_create_nav(smc_page);
++        ui_label_create_grow_scroll(cont, "Free");
++        lbl_smc_space = ui_label_create(cont, " Count");
++        lv_obj_add_event_cb(cont, evt_smc_space, LV_EVENT_CLICKED, NULL);
++
++        cont = ui_menu_cont_create_nav(smc_page);
++        ui_label_create_grow_scroll(cont, "Safe to remove");
++        lbl_smc_safe = ui_label_create(cont, " Yes");
++    }
++
++#endif
+     /* Info submenu */
+     lv_obj_t *info_page = ui_menu_subpage_create(menu, NULL);
+     ui_header_create(info_page, "Info", false);
+@@ -1041,6 +1094,13 @@ static void create_menu_screen(void) {
+         ui_label_create(cont, ">");
+         ui_menu_set_load_page_event(menu, cont, display_page);
+ 
++#if WITH_SUPERMEMCARD
++        cont = ui_menu_cont_create_nav(main_page);
++        ui_label_create_grow(cont, "SuperStation");
++        ui_label_create(cont, ">");
++        ui_menu_set_load_page_event(menu, cont, smc_page);
++
++#endif
+         cont = ui_menu_cont_create_nav(main_page);
+         ui_label_create_grow_scroll(cont, "Info");
+         ui_label_create(cont, ">");
+@@ -1238,11 +1298,41 @@ void gui_task(void) {
              static ps1_cardman_state_t cardman_state = PS1_CM_STATE_NORMAL;
              static char card_idx_s[8];
              static char card_channel_s[8];
 +#if WITH_SUPERMEMCARD
 +            static uint32_t smc_seq = 0;
++            static bool smc_busy = false;
++            if (smc_busy != ps1_supermemcard_busy()) {
++                /* "Saving" while an SS1 is writing saves to the card (and "Safe to remove" says so) */
++                smc_busy = !smc_busy;
++                lv_label_set_text(lbl_smc_safe, smc_busy ? " Saving" : " Yes");
++                refresh_gui = true;
++            }
 +#endif
  
  
@@ -59,7 +172,7 @@ index d9c8dcb..31a9cb9 100644
 +                /* an SS1 core named its system: its virtual card (the PS1 card is still there for a PS1) */
 +                if (smc_seq != ps1_supermemcard_mode_seq() || refresh_gui) {
 +                    smc_seq = ps1_supermemcard_mode_seq();
-+                    lv_label_set_text(main_header, "SuperStation");
++                    lv_label_set_text(main_header, smc_busy ? "SuperStation: saving" : "SuperStation");
 +                    snprintf(card_idx_s, sizeof(card_idx_s), "%d", ps1_supermemcard_mode_card());
 +                    lv_label_set_text(scr_main_idx_lbl, card_idx_s);
 +                    lv_label_set_text(scr_main_channel_lbl, "-");
@@ -72,7 +185,14 @@ index d9c8dcb..31a9cb9 100644
 +#endif
              if (displayed_card_idx != ps1_cardman_get_idx() || displayed_card_channel != ps1_cardman_get_channel() || cardman_state != ps1_cardman_get_state() ||
                  refresh_gui) {
++#if WITH_SUPERMEMCARD
++                lv_label_set_text(main_header, smc_busy ? "SuperStation: saving" : "PS1 Memory Card");
++#else
                  lv_label_set_text(main_header, "PS1 Memory Card");
++#endif
+                 displayed_card_idx = ps1_cardman_get_idx();
+                 displayed_card_channel = ps1_cardman_get_channel();
+                 folder_name = ps1_cardman_get_folder_name();
 diff --git a/src/ps1.c b/src/ps1.c
 index 0801f76..8798f69 100644
 --- a/src/ps1.c

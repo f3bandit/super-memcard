@@ -29,8 +29,9 @@ uint8_t vcard_xfer_ctrl(uint8_t cmd, uint8_t dat, bool last, bool *ack);
 
 /* Wait for the card to finish: card switches done and every written sector flushed to SD. */
 void vcard_settle(void);
-/* A press of the card's buttons on its main screen: 0 left, 1 right, 2 back, 3 enter. */
-enum { VKEY_PREV, VKEY_NEXT, VKEY_BACK, VKEY_ENTER };
+/* A press of the card's buttons on its main screen: 0 left, 1 right, 2 back, 3 enter; or an item of its
+ * SuperStation menu: count the free space, saves off, saves on. */
+enum { VKEY_PREV, VKEY_NEXT, VKEY_BACK, VKEY_ENTER, VMENU_FREE, VMENU_SAVES_OFF, VMENU_SAVES_ON };
 void vcard_key(int key);
 
 /* The card file the firmware has open, relative to the SD root ("" when none). */

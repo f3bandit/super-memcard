@@ -154,13 +154,17 @@ New items in the card's existing menu (03); everything else stays as it is.
 
 ```
 Main Menu
-├─ Boot Mode / PS1 Settings / PS2 Settings / Display / Info     (as now)
-└─ SuperStation  >
-   ├─ Saves on card       on / off        off: the card ignores Hello and is only a PS1/PS2 card
-   ├─ Browse          >   system list → game list (name, ID) → its files, sizes, last written
-   ├─ Space               used / free on the SD card
-   └─ Safe to remove      "Yes" or "Saving N blocks"
+├─ Boot Mode / PS1 Settings / PS2 Settings / Display     (as now)
+├─ SuperStation  >                                         built (firmware/patches, src/gui.c)
+│  ├─ Saves            Yes / No      No: the card doesn't even ACK 81 60, exactly a stock card (settings.ini)
+│  ├─ Free             Count         press: counts the SD card's free space (a FAT scan, seconds on a big card,
+│  │                                 so only when asked); Hello then reports it, less what was written since
+│  └─ Safe to remove   Yes / Saving  "Saving" while an SS1 is writing saves (a command in the last 1.5 s)
+└─ Info  >                                                 (as now)
 ```
+
+Not built yet: **Browse** (system list → game list → files), which needs pages filled when they open.
+While an SS1 writes saves the main screen's header says "SuperStation: saving", in the PS1 view too.
 
 On the **main screen**, while an SS1 core has named its system (Core), built as:
 

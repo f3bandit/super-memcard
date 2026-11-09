@@ -464,6 +464,50 @@ static void t_smc_ps1_use_ends_system_mode(void) {
     CHECK(strcmp(vcard_card_path(), CARD1) == 0);
 }
 
+static void t_smc_menu_saves_off(void) {
+    /* the card's menu: SuperStation > Saves: No. The card is then a stock card: 81 60 isn't even ACKed */
+    struct smc_card c;
+    CHECK_EQ(smc_hello(&vbus, SMC_HOST_TEST, 0, &c), 1);
+    vcard_key(VMENU_SAVES_OFF);
+    CHECK_EQ(smc_select(&vbus, "SNES", "x"), SMC_E_NO_REPLY);
+    usleep(60 * 1000);
+    uint8_t out[4] = {0x81, 0x60, 'S', 'M'};
+    bool ack[4];
+    CHECK_EQ(bus_frame(out, NULL, ack, 4), 2);
+    CHECK(!ack[1]);
+    usleep(60 * 1000);
+    CHECK_EQ(smc_hello(&vbus, SMC_HOST_TEST, 0, &c), 0);
+    char ini[16] = {0};
+    CHECK_EQ(read_file_at("SuperMemCard/settings.ini", 0, ini, 8), 0);
+    CHECK(strncmp(ini, "saves=0\n", 8) == 0);
+    uint8_t d[128];
+    CHECK_EQ(mc_read(0, d), MC_GOOD); /* the PS1 card as ever */
+    /* still off after a power-off, on again from the menu */
+    vcard_stop();
+    CHECK_EQ(vcard_start(sd), 0);
+    vcard_settle();
+    CHECK_EQ(smc_hello(&vbus, SMC_HOST_TEST, 0, &c), 0);
+    vcard_key(VMENU_SAVES_ON);
+    CHECK_EQ(smc_hello(&vbus, SMC_HOST_TEST, 0, &c), 1);
+}
+
+static void t_smc_free_space(void) {
+    /* Hello says FFFFFFFF until the menu has counted the free space, then that less what was written */
+    static uint8_t save[64 * 1024];
+    fill(save, sizeof(save), 31);
+    struct smc_card c;
+    CHECK_EQ(smc_hello(&vbus, SMC_HOST_TEST, 0, &c), 1);
+    CHECK_EQ(c.free_kb, 0xFFFFFFFFu);
+    vcard_key(VMENU_FREE);
+    CHECK_EQ(smc_hello(&vbus, SMC_HOST_TEST, 0, &c), 1);
+    CHECK(c.free_kb != 0xFFFFFFFFu && c.free_kb > 1024);
+    uint32_t before = c.free_kb;
+    CHECK(smc_select(&vbus, "GBA", "Space") >= 0);
+    CHECK_EQ(smc_write_file(&vbus, "save.sav", save, sizeof(save), 1), SMC_OK);
+    CHECK_EQ(smc_hello(&vbus, SMC_HOST_TEST, 0, &c), 1);
+    CHECK_EQ(c.free_kb, before - 64);
+}
+
 #define SMC_TESTS \
     {"SMC: whole-frame transport (the front ports' way)", t_smc_frame_transport, true, NULL}, \
     {"SMC: slow SD card (2.7 ms a write), 128 KB save", t_smc_slow_sd_card, true, NULL}, \
@@ -480,4 +524,6 @@ static void t_smc_ps1_use_ends_system_mode(void) {
     {"SMC: PS1 card unaffected", t_smc_ps1_unaffected, true, NULL}, \
     {"SMC: virtual cards per system", t_smc_virtual_cards, true, NULL}, \
     {"SMC: Core: the buttons pick the system's card", t_smc_core_buttons_pick_the_card, true, NULL}, \
-    {"SMC: a PS1 read ends the system mode", t_smc_ps1_use_ends_system_mode, true, NULL},
+    {"SMC: a PS1 read ends the system mode", t_smc_ps1_use_ends_system_mode, true, NULL}, \
+    {"SMC: card menu: saves off makes it a stock card", t_smc_menu_saves_off, true, NULL}, \
+    {"SMC: card menu: free space, then Hello reports it", t_smc_free_space, true, NULL},

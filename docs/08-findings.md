@@ -5,6 +5,18 @@ the design depends on. Newest first. Each entry says where it came from so it ca
 
 ## 2026-11-09
 
+### The card's SuperStation menu, free space, save icons
+
+- **Menu** (`src/gui.c` patch, built for SD2PSX and PMC+, not run on a card yet): Saves Yes/No, Free (count),
+  Safe to remove. Saves No makes it a stock card on the bus: the Hello request isn't collected, so `81 60` isn't
+  ACKed (tested, also after a power-off). Until the card has read `settings.ini` after power-up it answers no
+  Hello either; hosts ask twice anyway.
+- **Free space**: sd2psXtd's SD wrapper had no call for it; the patch adds `sd_free_kb()` (SdFat
+  `freeClusterCount()`). That scans the whole FAT, seconds on a big card, far over the bus's ACK wait, so Hello never
+  counts: it reports what the menu counted, less what was written since (tested), and FFFFFFFF before.
+- **Save icons**: 15 original system icons (`icons/`, `tools/icons/make_icons.py`), PS1 save-icon layout, put on
+  the card as `icon.bin` the first time a game goes there (tested). Per-game icons later.
+
 ### Virtual cards per system, and Core (protocol version 2)
 
 Built and tested in the virtual card. A core (Main, for now) names the running system with **Core** (`81 69`); while

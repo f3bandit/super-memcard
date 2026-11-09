@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/statvfs.h>
 #include <unistd.h>
 #include <stdlib.h>
 
@@ -225,6 +226,14 @@ int sd_get_stat(int fd, ps2_fileio_stat_t *const s) {
     (void)fd;
     memset(s, 0, sizeof(*s));
     return -1;
+}
+
+uint32_t sd_free_kb(void) {
+    struct statvfs v;
+    if (statvfs(root, &v) != 0)
+        return 0xFFFFFFFFu;
+    uint64_t kb = (uint64_t)v.f_bavail * v.f_frsize / 1024u;
+    return kb >= 0xFFFFFFFFu ? 0xFFFFFFFEu : (uint32_t)kb;
 }
 
 sd_cid_t sd_get_CID(void) {

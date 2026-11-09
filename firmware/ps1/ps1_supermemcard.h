@@ -66,3 +66,13 @@ uint32_t ps1_supermemcard_mode_seq(void);
  * system is running (the key then does what it always did). The choice is saved after 1.5 s without
  * presses, as PS1 mode waits before switching. */
 bool ps1_supermemcard_card_key(int delta);
+
+/* The card's SuperStation menu (src/gui.c). "Saves on card": off, the card ignores Hello and is only a PS1/PS2
+ * card, exactly like stock firmware (SuperMemCard/settings.ini, saves=0). */
+bool ps1_supermemcard_enabled(void);
+void ps1_supermemcard_set_enabled(bool on);
+/* Free space on the SD card in KB: counts it (seconds on a big card: only from the menu, never on the bus) and
+ * keeps it for Hello's answer, which says FFFFFFFF until it's been counted. */
+uint32_t ps1_supermemcard_count_free(void);
+/* A Super MemCard command was carried out in the last 1.5 s (the screen shows "saving"). */
+bool ps1_supermemcard_busy(void);
