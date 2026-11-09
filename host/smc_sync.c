@@ -37,6 +37,7 @@ const char *smc_core_system(const char *rbf) {
 #define MAX_ENTRIES 4096
 #define MAX_SAVE (1024 * 1024)
 #define NAME_TXT "name.txt"
+#define ICON_BIN "icon.bin" /* the game's save icon (docs/05-design.md): not a save, never copied back */
 
 /* ---- small helpers ---- */
 
@@ -399,9 +400,14 @@ static int sync_game(const struct smc_bus *b, const char *sys, int card, const c
                 local_game[files[i].size] = 0;
         }
 
+    bool has_icon = false;
+    int pushed = rep->pushed;
+    for (int i = 0; i < n; i++)
+        has_icon |= !strcmp(files[i].name, ICON_BIN);
+
     /* the card's files */
     for (int i = 0; i < n; i++) {
-        if (!strcmp(files[i].name, NAME_TXT))
+        if (!strcmp(files[i].name, NAME_TXT) || !strcmp(files[i].name, ICON_BIN))
             continue;
         struct entry *e = add(sys, card, local_game, files[i].name);
         if (!e)
@@ -418,10 +424,8 @@ static int sync_game(const struct smc_bus *b, const char *sys, int card, const c
     char dir[1024];
     snprintf(dir, sizeof(dir), "%s/%s", C->saves_dir, sys);
     DIR *d = opendir(dir);
-    if (!d)
-        return 0;
     struct dirent *de;
-    while ((de = readdir(d))) {
+    while (d && (de = readdir(d))) {
         char g[256], cfile[17];
         if (de->d_name[0] == '.' || !split_name(de->d_name, g, sizeof(g), cfile, sizeof(cfile)) || strcmp(g, local_game))
             continue;
@@ -436,7 +440,15 @@ static int sync_game(const struct smc_bus *b, const char *sys, int card, const c
             logf_("failed: %s/%s %s", sys, local_game, cfile);
         }
     }
-    closedir(d);
+    if (d)
+        closedir(d);
+    /* a game new on the card gets its system's icon, until games have their own (smc_icons.c) */
+    size_t ilen;
+    const uint8_t *icon = smc_system_icon(sys, &ilen);
+    if (!has_icon && rep->pushed > pushed && icon) {
+        if (smc_select_card(b, sys, id, card, NULL) < 0 || smc_write_file(b, ICON_BIN, icon, (uint32_t)ilen, 1) != SMC_OK)
+            logf_("couldn't put the icon on the card: %s/%s", sys, local_game);
+    }
     return 0;
 }
 

@@ -42,6 +42,10 @@ extern const char *const smc_console_systems[];
  * buttons stay the PS1 card's. */
 const char *smc_core_system(const char *rbf);
 
+/* The default save icon of a system as icon.bin bytes (smc_icons.c, made by tools/icons/make_icons.py), or NULL.
+ * The sync puts it beside a game's saves on the card the first time the game goes there. */
+const uint8_t *smc_system_icon(const char *sys, size_t *len);
+
 /* 0 on success (including "no Super MemCard card": report.card is false), <0 if the sync stopped. */
 int smc_sync(const struct smc_bus *b, const struct smc_sync_cfg *cfg, struct smc_sync_report *rep);
 

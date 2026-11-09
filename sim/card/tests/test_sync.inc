@@ -81,6 +81,12 @@ static void t_sync_to_card_then_unchanged(void) {
     CHECK_EQ(file_size("SuperMemCard/N64/Card1/Super Mario 64 (USA)/save.eep"), sizeof(eep));
     CHECK_EQ(file_size("SuperMemCard/N64/Card1/Super Mario 64 (USA)/save_1.cpk"), sizeof(cpk));
     CHECK_EQ(file_size("SuperMemCard/AO486"), -1);
+    /* each game new on the card got its system's icon (icon.bin, 168 bytes, magic SMIC) */
+    char magic[5] = {0};
+    CHECK_EQ(file_size("SuperMemCard/SNES/Card1/Super Metroid (USA)/icon.bin"), 168);
+    CHECK_EQ(read_file_at("SuperMemCard/SNES/Card1/Super Metroid (USA)/icon.bin", 0, magic, 4), 0);
+    CHECK(strcmp(magic, "SMIC") == 0);
+    CHECK_EQ(file_size("SuperMemCard/N64/Card1/Super Mario 64 (USA)/icon.bin"), 168);
     r = run_sync(0);
     CHECK_EQ(r.pushed, 0);
     CHECK_EQ(r.pulled, 0);
@@ -91,11 +97,11 @@ static void t_sync_to_card_then_unchanged(void) {
     r = run_sync(0);
     CHECK_EQ(r.pushed, 1);
     CHECK_EQ(r.unchanged, 2);
-    CHECK_EQ(smc_select(&vbus, "SNES", "Super Metroid (USA)"), 1);
+    CHECK_EQ(smc_select(&vbus, "SNES", "Super Metroid (USA)"), 2); /* icon.bin, save.sav (by name) */
     struct smc_file f;
-    CHECK_EQ(smc_info(&vbus, 0, &f), SMC_OK);
+    CHECK_EQ(smc_info(&vbus, 1, &f), SMC_OK);
     CHECK_EQ(f.gen, 2);
-    CHECK_EQ(smc_read_file(&vbus, 0, f.size, got), SMC_OK);
+    CHECK_EQ(smc_read_file(&vbus, 1, f.size, got), SMC_OK);
     CHECK(memcmp(got, sA, sizeof(sA)) == 0);
 }
 
@@ -157,10 +163,10 @@ static void t_sync_both_changed_keeps_both(void) {
     /* nothing overwritten: the local save is a2, the card still b2, and b2 kept beside */
     CHECK_EQ(get_save(0, "SMS/Phantasy Star (USA).sav", got, sizeof(got)), sizeof(a2));
     CHECK(memcmp(got, a2, sizeof(a2)) == 0);
-    CHECK_EQ(smc_select(&vbus, "SMS", "Phantasy Star (USA)"), 1);
+    CHECK_EQ(smc_select(&vbus, "SMS", "Phantasy Star (USA)"), 2); /* icon.bin, save.sav (by name) */
     struct smc_file f;
-    CHECK_EQ(smc_info(&vbus, 0, &f), SMC_OK);
-    CHECK_EQ(smc_read_file(&vbus, 0, f.size, got), SMC_OK);
+    CHECK_EQ(smc_info(&vbus, 1, &f), SMC_OK);
+    CHECK_EQ(smc_read_file(&vbus, 1, f.size, got), SMC_OK);
     CHECK(memcmp(got, b2, sizeof(b2)) == 0);
     char p[700];
     snprintf(p, sizeof(p), "%s/state/%s/conflicts/SMS/Card1/Phantasy Star (USA)/save.sav.gen%u", ss[0], r.card_id,

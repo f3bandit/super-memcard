@@ -80,7 +80,24 @@ SuperMemCard/card.ini                                 id=<card ID>
 SuperMemCard/<SYSTEM>/card.ini                        card=<N>: the system's current virtual card
 SuperMemCard/<SYSTEM>/Card<N>/<game ID>/<file>        SuperMemCard/N64/Card1/NSME-USA/save.eep, cpak1.cpk
 SuperMemCard/<SYSTEM>/Card<N>/<game ID>/meta.ini      file names and generations
+SuperMemCard/<SYSTEM>/Card<N>/<game ID>/icon.bin      the game's save icon (below)
 ```
+
+### Save icons
+
+Each game on the card has an icon for a frontend's save list (Console Mode's system menu), like a PS1 save's:
+`icon.bin` beside its saves, a normal file on the card that the sync never copies back as a save. For now it's the
+system's own default icon (`icons/`, drawn by `tools/icons/make_icons.py`: original shapes and the system's
+initials, no logos, no characters), put there the first time the game goes to the card; a game's own icon can
+replace it later (any host can write `icon.bin`).
+
+```
+icon.bin   'S' 'M' 'I' 'C', version 1, frames (1-3), width 16, height 16,
+           palette: 16 x u16 little-endian PS1 colour (r | g<<5 | b<<10, 5 bits each; colour 0 transparent),
+           frames x 128 bytes: 4 bits a pixel, left pixel in the low nibble, rows top to bottom
+```
+
+The same pixel layout as a PS1 save icon, so a frontend that draws PS1 icons draws these with the same code.
 
 ### Virtual cards, and which core is running
 
