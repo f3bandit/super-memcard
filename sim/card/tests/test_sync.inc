@@ -596,6 +596,13 @@ static void t_sync_by_game_id(void) {
     CHECK_EQ(gi.files, 1);
     CHECK(gi.has_icon);
     CHECK(gi.time > 1700000000u); /* the newer save, made just now */
+    /* a Mega Drive ROM is often .md (not a text file) */
+    snprintf(p, sizeof(p), "%s/games/MegaDrive/Sonic.md", ss[0]);
+    make_genesis(p);
+    put_save(0, "MegaDrive/Sonic.sav", sA, 8192);
+    CHECK_EQ(run_sync_games(0).pushed, 1);
+    CHECK_EQ(smc_list_card(&vbus, "MegaDrive", 1, 0, game), SMC_OK);
+    CHECK(strncmp(game, "GM 00001009-00-", 15) == 0);
     /* a game with no ROM here keeps the old naming */
     put_save(0, "N64/Homebrew.eep", eep, sizeof(eep));
     CHECK_EQ(run_sync_games(0).pushed, 1);

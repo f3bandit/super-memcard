@@ -5,6 +5,30 @@ the design depends on. Newest first. Each entry says where it came from so it ca
 
 ## 2026-11-09
 
+### Game IDs, names and times on the SS1, with its own games
+
+Test Main (bind-mounted) + vcardd + libretro's lists fetched onto the SS1 (`tools/gamedb/fetch.sh`, 19 lists, 14 MB),
+8 test saves named after games on the SS1's USB drive (saves in `supermemcard_test/`, the real ones untouched).
+
+- Filed as designed: `N64/Card1/NTEA-08FE81C7` "1080 Snowboarding (Japan, USA) (En,Ja)", `GBA/Card1/BPEE-1F1C08FB`
+  "Pokemon - Emerald Version (USA, Europe)", the Castlevania hack apart from the original (`A2CE-C647E8A8`, no
+  official name, header name `CASTLEVANIA2`), `NES/Card1/CRC-171251E3` "1942 (Japan, USA) (En)", TurboGrafx
+  `CRC-B03E0B32` "Aero Blasters (USA)"; a save with no ROM kept its name. Each save's time on the card.
+- A reinstall (saves and state gone): all 8 back byte for byte with their original time. One set whose `name.txt`
+  named no ROM here was found by game ID and came back under that ROM's name.
+- **Bugs found and fixed:**
+  - `.md` was skipped as a text file, but it's a Mega Drive ROM: that Genesis game had no ID.
+  - A save with no ROM made the sync hash every ROM of its system (549 SNES ROMs, ~100 s over USB) looking for
+    its ID; it now only looks for sets filed under a game ID.
+  - MiSTer's curl needs `--cacert /etc/ssl/certs/cacert.pem` to fetch over HTTPS (as Phosphor does).
+- The SS1's clock: a DS1307 clock chip and ntpd, right to the second, so save times are right. Times are kept in UTC;
+  a frontend shows them in local time.
+- Left as is: two copies of one dump under different names (`Pokemon - Emerald` and `Pokemon - Emerald Version`) share a
+  save set; restored on a fresh SuperStation it comes back under one of the two names only.
+
+Restored after: installed Main and menu core (running the installed Main), `saves/` and `config/` unchanged, vcardd off,
+no bind mounts.
+
 ### Saves filed by game ID, with their date and time
 
 Every save set on the card is now filed under its game's ID (the code in the game's own header; the disc product

@@ -7,9 +7,12 @@ set -e
 dir=${1:?usage: fetch.sh <folder>}
 LR=https://raw.githubusercontent.com/libretro/libretro-database/master/metadat
 mkdir -p "$dir"
+# MiSTer Linux's curl doesn't find its certificates by itself (as Phosphor does, give them)
+CA=
+[ -f /etc/ssl/certs/cacert.pem ] && CA="--cacert /etc/ssl/certs/cacert.pem"
 get() { # <no-intro|redump> <name>
 	url="$LR/$1/$(printf '%s' "$2" | sed 's/ /%20/g').dat"
-	if curl -fsSL "$url" -o "$dir/$2.dat.part"; then mv "$dir/$2.dat.part" "$dir/$2.dat"; echo "ok   $2"
+	if curl $CA -fsSL "$url" -o "$dir/$2.dat.part"; then mv "$dir/$2.dat.part" "$dir/$2.dat"; echo "ok   $2"
 	else rm -f "$dir/$2.dat.part"; echo "FAIL $2"; fi
 }
 for n in "Nintendo - Nintendo Entertainment System" "Nintendo - Family Computer Disk System" \

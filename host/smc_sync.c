@@ -299,7 +299,8 @@ static char indexed[64][SMC_SYS_MAX + 1];
 static int nindexed;
 
 static bool not_a_game(const char *n) {
-    static const char *const skip[] = {".txt", ".png", ".jpg", ".xml", ".ini", ".cfg", ".md", ".pdf", ".nfo",
+    /* not .md: that's a Mega Drive ROM (a Genesis game was missed for it on the SS1, 08) */
+    static const char *const skip[] = {".txt", ".png", ".jpg", ".xml", ".ini", ".cfg", ".pdf", ".nfo",
                                        ".sav", ".srm", ".mgl", ".json", NULL};
     const char *dot = strrchr(n, '.');
     if (n[0] == '.' || !dot)
@@ -641,18 +642,19 @@ static int sync_game(const struct smc_bus *b, const char *sys, int card, const c
                 local_game[files[i].size] = 0;
         }
 
-    /* this SuperStation's file name for the game: its own ROM with the same game ID, when name.txt names a ROM
-     * that isn't here */
-    if (C->games_dirs && !rom_for(sys, local_game)) {
-        const char *l = local_for_id(sys, id);
-        if (l)
-            snprintf(local_game, sizeof(local_game), "%s", l);
-    }
     bool has_icon = false, has_ini = false;
     int pushed = rep->pushed;
     for (int i = 0; i < n; i++) {
         has_icon |= !strcmp(files[i].name, ICON_BIN);
         has_ini |= !strcmp(files[i].name, GAME_INI);
+    }
+    /* this SuperStation's file name for the game: its own ROM with the same game ID, when name.txt names a ROM
+     * that isn't here. Only for a set filed under a game ID (game.ini): looking for a ROM by ID reads the system's
+     * ROMs, which for a save without a known game (no ROM anywhere) found nothing after hashing them all (08) */
+    if (C->games_dirs && has_ini && !rom_for(sys, local_game)) {
+        const char *l = local_for_id(sys, id);
+        if (l)
+            snprintf(local_game, sizeof(local_game), "%s", l);
     }
 
     /* the card's files */
