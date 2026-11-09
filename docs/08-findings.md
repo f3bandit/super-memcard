@@ -5,7 +5,21 @@ the design depends on. Newest first. Each entry says where it came from so it ca
 
 ## 2026-11-09
 
-### Phase 1 runs on the SS1 (test Main + vcardd)
+### Phase 1 works end to end on the SS1
+
+With the test Main and the virtual card, on the real SS1 (all reached only through Main's command interface):
+
+- **Leaving a game:** Chrono Trigger loaded by MGL on `/dev/MiSTer_cmd`; its save changed during the game; leaving
+  the game (`load_core menu.rbf`) restarts Main in the menu core and the sync sent it to the card (md5 equal).
+- **A reinstall:** test saves folder and sync state wiped, Main restarted: all 5 saves (SNES x2, N64 EEPROM +
+  Controller Pak, Genesis) came back from the card byte for byte in ~7 s.
+- Main creates a game's save file only when the game first saves, so a test without a player has to put the
+  save there itself; Main's own writing of saves is MiSTer's and untouched.
+- Phosphor's watchdog isn't consistent about restarting Main: once within seconds, once not within 15 s. The test
+  script starts Main itself if nothing has after 8 s.
+- Afterwards: the installed Main back, `saves/` and `config/` checked against their backups (unchanged).
+
+#### Before that: the test Main and the first run
 
 Phosphor's Main with `supermemcard.cpp` (phosphor-main branch `supermemcard`) syncs at every start in the menu
 core. On the SS1, with the virtual card (`vcardd`) and test saves in `supermemcard_test/`: SNES 8 KB, N64 EEPROM +
