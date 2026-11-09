@@ -194,6 +194,18 @@ static void t_mmce_ping(void) {
     CHECK_EQ(mmce_ping(), 0);
 }
 
+/* The first command after a card switch: the card restarts its loop and may miss it, and one
+ * wake isn't always enough (about 1 run in 20, 08). A host asks again, as here. */
+static int mc_write_after_switch(uint16_t sector, const uint8_t d[128]) {
+    int rc = MC_NO_REPLY;
+    for (int t = 0; t < 3 && rc == MC_NO_REPLY; t++) {
+        bus_wake();
+        usleep(20 * 1000);
+        rc = mc_write(sector, d, 0);
+    }
+    return rc;
+}
+
 static void t_game_id_switches_card(void) {
     bus_wake();
     CHECK_EQ(mmce_game_id("cdrom:\\SLUS_012.34;1"), 4 + 20 - 1); /* every byte but the last */
@@ -203,10 +215,9 @@ static void t_game_id_switches_card(void) {
     /* After a switch the card restarts its loop and, depending on timing, waits for SEL to
      * rise again: the first command may get no reply. The PS1 never notices (it polls the pad
      * on the same select); a host that only talks to the card must ask again. */
-    bus_wake();
     uint8_t d[128], f[128];
     pattern(d, 12);
-    CHECK_EQ(mc_write(20, d, 0), MC_GOOD);
+    CHECK_EQ(mc_write_after_switch(20, d), MC_GOOD);
     vcard_settle();
     CHECK_EQ(read_file_at("MemoryCards/PS1/SLUS-01234/SLUS-01234-1.mcd", 20 * 128, f, 128), 0);
     CHECK(memcmp(d, f, 128) == 0);
@@ -234,9 +245,17 @@ static void ctrl_poll(uint16_t sw) {
 static void t_controller_combo_next_card(void) {
     /* L1+L2+R1+R2 held, Up pressed and released: next card (03 menu doc) */
     enum { UP = 1 << 4, L2 = 1 << 8, R2 = 1 << 9, L1 = 1 << 10, R1 = 1 << 11 };
+    /* held for a few frames, then let go, as a PS1 polls (60 a second): one poll each was sometimes
+     * missed when the PC was busy (08) */
     bus_wake();
-    ctrl_poll(L1 | L2 | R1 | R2 | UP);
-    ctrl_poll(0);
+    for (int i = 0; i < 4; i++) {
+        ctrl_poll(L1 | L2 | R1 | R2 | UP);
+        usleep(16 * 1000);
+    }
+    for (int i = 0; i < 4; i++) {
+        ctrl_poll(0);
+        usleep(16 * 1000);
+    }
     vcard_settle();
     CHECK(strcmp(vcard_card_path(), "MemoryCards/PS1/Card2/Card2-1.mcd") == 0);
 }
@@ -282,13 +301,12 @@ static void t_ps1_session_leaves_super_memcard_alone(void) {
     }
     mmce_game_id("cdrom:\\SCUS_944.26;1");
     vcard_settle();
-    bus_wake(); /* first command after a card switch (see the game ID test) */
     /* format: header and an empty directory, as the BIOS writes it */
     memset(d, 0, sizeof(d));
     d[0] = 'M';
     d[1] = 'C';
     d[127] = 0x0E;
-    CHECK_EQ(mc_write(0, d, 0), MC_GOOD);
+    CHECK_EQ(mc_write_after_switch(0, d), MC_GOOD);
     for (int s = 1; s < 16; s++) {
         memset(d, 0, sizeof(d));
         d[0] = 0xA0;
@@ -325,9 +343,17 @@ static void t_power_cut_after_write(void) {
 static void t_controller_combo_survives_power_off(void) {
     /* the card number a combo picked is saved in the card's flash */
     enum { UP = 1 << 4, L2 = 1 << 8, R2 = 1 << 9, L1 = 1 << 10, R1 = 1 << 11 };
+    /* held for a few frames, then let go, as a PS1 polls (60 a second): one poll each was sometimes
+     * missed when the PC was busy (08) */
     bus_wake();
-    ctrl_poll(L1 | L2 | R1 | R2 | UP);
-    ctrl_poll(0);
+    for (int i = 0; i < 4; i++) {
+        ctrl_poll(L1 | L2 | R1 | R2 | UP);
+        usleep(16 * 1000);
+    }
+    for (int i = 0; i < 4; i++) {
+        ctrl_poll(0);
+        usleep(16 * 1000);
+    }
     vcard_settle();
     vcard_stop();
     CHECK_EQ(vcard_start(sd), 0);

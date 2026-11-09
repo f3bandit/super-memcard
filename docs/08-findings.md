@@ -5,6 +5,38 @@ the design depends on. Newest first. Each entry says where it came from so it ca
 
 ## 2026-11-09
 
+### The front-port logic and the card firmware work together, bit by bit (layer 2)
+
+`sim/bus` runs Phosphor's front-port RTL (phosphor-menu `phosphor_ext`, `card_sector`, `sio_byte`, pinned at the
+supermemcard commit) in Icarus Verilog, with sd2psXtd's own PS1 code (with Super MemCard, or stock) behind a
+bit-level card model (`vcard_bus.sv`, DAT on the falling clock, ACK after the byte) through a VPI bridge to vcardd
+(new wire op `OP_PEEK`: the byte the card queued for the next clock-out). Main's side is driven the way phosphor-main
+drives EXT_BUS.
+
+- With Super MemCard: PS1 sector read (PH_CARD and as a raw frame), Hello, Select, Create, two Writes, Commit, two
+  Reads, then the PS1 sector again: all right; `save.sav` lands on the SD card byte for byte. Port 2 empty answers
+  nothing. 1033 bytes on the bus, 1015 ACKed.
+- Stock firmware: Hello and Select stop at byte 2 (no ACK of the command byte), PS1 reads before and after work.
+- Runs in CI (`sim.yml`); `sh sim/bus/run.sh`, `STOCK=1 sh sim/bus/run.sh`. About a minute each: every byte the
+  card doesn't ACK (the controller polls on port 1) costs the bridge's real 100 ms wait.
+- Tooling: in Icarus, an automatic task's `output` argument written into an array element (`w(0, data[k])`) is
+  lost; go through a temporary. A string literal assigned to a wider reg is right-aligned.
+- Tooling: sim/card's Makefile didn't track headers, so a stale `build/vcardd` (from before `OP_PEEK`) failed every
+  stock read in the bus simulation. Now built with `-MMD -MP`.
+
+### The flaky PC test, found: the first write after a card switch
+
+Two tests (`game ID switches to the game's card`, `PS1 session leaves SuperMemCard/ byte for byte`) failed about
+1 run in 6 to 20: the first write after a game ID card switch got no reply even after one wake. The card restarts its
+loop after a switch (already noted in the test); a PS1 never notices because it polls the pad on the same select.
+The tests now ask again (up to 3 wakes, 20 ms apart), as a host must. Not a firmware change.
+
+With the PC busy (other simulations running) a third one showed: `controller combo L1+L2+R1+R2+Up: next card`
+sent the combo in one poll and the release in the next, and the firmware sometimes missed one. The test now holds
+the buttons for 4 polls and lets go for 4, 16 ms apart, as a PS1 polls. After both fixes: 0 failures in 40 stock
+runs and 10 Super MemCard runs. The simulations wait in real time (the bridge, the harness), so running several at
+once on a 2-core machine can still fail them; CI runs them one after another.
+
 ### How fast the SS1's front ports move a card's data
 
 Timed on the SS1 with the Sony card (read only): a 140-byte frame (one 128-byte block plus the command bytes)
@@ -168,5 +200,4 @@ own (it's in ColecoVision_MiSTer), not included.
 
 ### Open
 
-- One full test run in ten failed once on the PC before the post-switch fix; which test wasn't caught. Watch for
-  it in CI.
+- (Closed: the flaky PC test was the first write after a card switch, see above.)

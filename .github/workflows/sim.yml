@@ -19,3 +19,8 @@ jobs:
         run: make -C sim/card -s SMC=1 && sim/card/build-smc/test_card
       - name: With Super MemCard, AddressSanitizer
         run: make -C sim/card -s SMC=1 SAN=address B=build-smc-asan && sim/card/build-smc-asan/test_card
+      - name: Bus simulation (Phosphor's front-port RTL against the virtual card), with Super MemCard and stock
+        run: |
+          sudo apt-get install -y -q iverilog >/dev/null
+          sh sim/bus/run.sh
+          STOCK=1 sh sim/bus/run.sh

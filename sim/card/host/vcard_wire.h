@@ -4,7 +4,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-enum { OP_SELECT, OP_XFER, OP_XFER_CTRL, OP_SETTLE, OP_PATH, OP_STOP };
+enum { OP_SELECT, OP_XFER, OP_XFER_CTRL, OP_SETTLE, OP_PATH, OP_STOP, OP_PEEK };
+/* OP_PEEK: the byte the card has queued for the next transfer (FF: none), for a bit-level bus model */
 struct vcard_req { uint8_t op, a, b, last; };      /* SELECT a=selected; XFER a=cmd; XFER_CTRL a=cmd b=dat */
 struct vcard_rsp { uint8_t byte, ack; char path[256]; };
 

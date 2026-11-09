@@ -41,6 +41,11 @@ other end through VPI/DPI. Tests the timing that matters for software cards:
 - controllers aren't polled while a card operation is on the bus;
 - the new `81 6x` frames go through the same driver unchanged.
 
+Built: `sim/bus` (`sh sim/bus/run.sh`, `STOCK=1` for stock firmware), with the RTL fetched from phosphor-menu at a
+pinned commit. The card's ACK timing is not modelled from the firmware (a byte's ACK comes 3 µs after it in
+simulated time; the real wait is in the bridge), so late ACKs are tested by phosphor-menu's own `sim/` card model.
+Results in 08.
+
 ## 3. Virtual Main
 
 phosphor-main built for x86 with its FPGA layer swapped out:

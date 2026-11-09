@@ -14,6 +14,7 @@ bool vcard_handle(const struct vcard_req *q, struct vcard_rsp *r) {
     case OP_SETTLE: vcs_settle(); break;
     case OP_PATH: snprintf(r->path, sizeof(r->path), "%s", vcs_card_path()); break;
     case OP_STOP: vcs_stop(); return false;
+    case OP_PEEK: r->byte = vcs_peek(); break;
     }
     r->ack = ack;
     return true;

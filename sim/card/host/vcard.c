@@ -201,6 +201,12 @@ static uint8_t xfer(uint8_t cmd, int dat, bool last, bool *ack) {
 }
 
 uint8_t vcs_xfer(uint8_t cmd, bool last, bool *ack) { return xfer(cmd, -1, last, ack); }
+uint8_t vcs_peek(void) {
+    pthread_mutex_lock(&bus);
+    uint8_t v = have_reply ? (uint8_t)~reply : 0xFF;
+    pthread_mutex_unlock(&bus);
+    return v;
+}
 uint8_t vcs_xfer_ctrl(uint8_t cmd, uint8_t dat, bool last, bool *ack) { return xfer(cmd, dat, last, ack); }
 
 /* ---- core 0: the firmware's main loop (src/main.c runs ps1_task forever) ---- */
