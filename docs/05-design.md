@@ -17,7 +17,7 @@ Same bus, same speed and the same 128-byte blocks as the PS1 protocol, so the SS
 
 | Bytes | Command | Answer |
 |---|---|---|
-| `81 60 'S' 'M' VER HOST CAPS` | **Hello**: the host speaks Super MemCard; who it is (`HOST`: Phosphor Main, Console Mode, a core's `sys/` driver) and what it can do (`CAPS`) | `'S' 'M'`, the card's version, its features, free space; a card without it answers nothing (the host then treats it as a plain PS1 card) |
+| `81 60 'S' 'M' VER HOST CAPS` | **Hello**: the host speaks Super MemCard; who it is (`HOST`: Phosphor Main, Console Mode, a core's `sys/` driver) and what it can do (`CAPS`) | `'S' 'M'`, the card's version, its features, its **card ID** (made once, kept in `SuperMemCard/card.ini` on the card's SD card), free space; a card without it answers nothing (the host then treats it as a plain PS1 card) |
 | `81 61 SYS LEN ID…` | **Select** a save set: system (1 byte, table below) and game ID (`SLUS-00067`, `NSME-USA`, a CRC32 in hex…) | how many files, sizes, each file's generation number (§5) |
 | `81 62 FILE MSB LSB` | **Read** block N (128 bytes) of file FILE of the selected set | `MSB LSB [128] CHK 47`, as a PS1 read |
 | `81 63 FILE MSB LSB [128] CHK` | **Write** block N | `47` good / `4E` bad checksum / `FF` out of space |
@@ -54,6 +54,11 @@ sides what they have:
   by a real PS1, the stock PSX core and Console Mode's memory card manager, so it would break rule 1; and the
   card can't answer the address byte `81` itself, because it only knows the frame is for it once that byte has
   arrived. So the card's "message" is its answer to Hello.
+- **Card ID, not a marker in the card image.** Block 0 frames 56-62 of a PS1 card are unused and a core could
+  read them, but a marker there travels with the image (copied to a stock card, it still says "Super MemCard"),
+  can be wiped by a PS1 format or a PC tool, and two cards copied from one image would share it. So the card's
+  firmware says what it can do (Hello), and its ID comes in Hello's answer from the card's own SD card; nothing
+  is ever written into a `.mcd`. Backups of stock cards keep matching by the saves on them (ps1_memcard_lib).
 - Hello identifies the host; it isn't a lock (any core could send the same bytes). It picks features, it doesn't
   protect anything.
 

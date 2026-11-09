@@ -5,6 +5,14 @@ the design depends on. Newest first. Each entry says where it came from so it ca
 
 ## 2026-11-09
 
+### The memory card manager doesn't write to cards
+
+SS1 Tool, Phosphor and ps1_memcard_lib recognise a card by the saves on it (common save names / all, 0.5 or more =
+the same card) and don't keep a version identical to the card's latest; nothing is written to the card
+(`ps1_memcard_lib/src/mclib.c`, SS1 Tool `memcard.go`). Block 0 frames 56-62 are unused by the PS1 format
+(`mcformat.go`), but they're not used for a Super MemCard marker: they travel with the image and can be wiped.
+Decided: a Super MemCard card gives its own card ID in Hello's answer instead (05 §2).
+
 ### Decided: the core sends Hello on its first card poll
 
 Hello carries who the host is (Phosphor Main, Console Mode, a core's `sys/` driver) and what it can do, so the
