@@ -80,3 +80,9 @@ void ps1_supermemcard_set_enabled(bool on);
 uint32_t ps1_supermemcard_count_free(void);
 /* A Super MemCard command was carried out in the last 1.5 s (the screen shows "saving"). */
 bool ps1_supermemcard_busy(void);
+/* Browse: the systems with saves on the card (up to max), and a system's games on its current virtual card: their
+ * folders (game IDs) and names (game.ini's official name, else the header's, else the folder). */
+#define SMC_BROWSE_NAME 48
+int ps1_supermemcard_browse_systems(char (*out)[SMC_ID_LEN + 1], int max);
+int ps1_supermemcard_browse_games(const char *sys, int *card, char (*ids)[SMC_ID_LEN + 1],
+                                  char (*names)[SMC_BROWSE_NAME], int max);

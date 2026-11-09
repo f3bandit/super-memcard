@@ -388,6 +388,79 @@ static void select_set(const char *sys, const char *id, int card) {
 
 static bool file_ok(uint8_t f) { return have_set && f < nfiles; }
 
+/* ---- folders: the systems, a system's games (List, and the card's Browse menu) ---- */
+
+/* calls cb for each folder in dir (not .hidden ones, names up to SMC_ID_LEN) until it returns false; returns how many */
+static int each_dir(const char *dir, bool (*cb)(const char *name, int i, void *ctx), void *ctx) {
+    int d = sd_open(dir, O_RDONLY);
+    if (d < 0)
+        return 0;
+    int it = sd_iterate_dir(d, -1), i = 0;
+    while (it != -1) {
+        char name[SMC_ID_LEN + 2];
+        if (sd_is_dir(it) && sd_get_name(it, name, sizeof(name)) && strlen(name) <= SMC_ID_LEN && name[0] != '.') {
+            if (!cb(name, i++, ctx))
+                break;
+        }
+        it = sd_iterate_dir(d, it);
+    }
+    if (it != -1)
+        sd_close(it);
+    sd_close(d);
+    return i;
+}
+
+struct nth { int want; uint8_t *out; };
+static bool nth_cb(const char *name, int i, void *ctx) {
+    struct nth *n = ctx;
+    if (i != n->want)
+        return true;
+    memcpy(n->out, name, strlen(name));
+    return false;
+}
+
+struct names { char (*out)[SMC_ID_LEN + 1]; int max; };
+static bool names_cb(const char *name, int i, void *ctx) {
+    struct names *n = ctx;
+    if (i >= n->max)
+        return false;
+    snprintf(n->out[i], SMC_ID_LEN + 1, "%s", name);
+    return true;
+}
+
+int ps1_supermemcard_browse_systems(char (*out)[SMC_ID_LEN + 1], int max) {
+    struct names n = {out, max};
+    int got = each_dir(ROOT, names_cb, &n);
+    return got < max ? got : max;
+}
+
+int ps1_supermemcard_browse_games(const char *sys, int *card, char (*ids)[SMC_ID_LEN + 1],
+                                  char (*names)[SMC_BROWSE_NAME], int max) {
+    char dir[24 + SMC_SYS_LEN];
+    *card = current_card(sys);
+    snprintf(dir, sizeof(dir), ROOT "/%s/Card%d", sys, *card);
+    struct names n = {ids, max};
+    int got = each_dir(dir, names_cb, &n);
+    if (got > max)
+        got = max;
+    for (int i = 0; i < got; i++) {
+        /* game.ini's official name, else the name in the game's header, else its folder */
+        char p[200], ini[320], *v = NULL;
+        snprintf(p, sizeof(p), "%s/%s/game.ini", dir, ids[i]);
+        if (read_text(p, ini, sizeof(ini)) > 0) {
+            v = strstr(ini, "\nname=");
+            v = v && v[6] != '\n' && v[6] ? v + 6 : NULL;
+            if (!v && (v = strstr(ini, "title=")) != NULL)
+                v = v[6] != '\n' && v[6] ? v + 6 : NULL;
+        }
+        if (v)
+            snprintf(names[i], SMC_BROWSE_NAME, "%.*s", (int)strcspn(v, "\n"), v);
+        else
+            snprintf(names[i], SMC_BROWSE_NAME, "%s", ids[i]);
+    }
+    return got;
+}
+
 /* ---- the commands ---- */
 
 static int do_command(uint8_t cmd, const uint8_t *r, int len, uint8_t *a) {
@@ -614,23 +687,9 @@ static int do_command(uint8_t cmd, const uint8_t *r, int len, uint8_t *a) {
             snprintf(dir, sizeof(dir), ROOT "/%s/Card%d", sys, card ? card : current_card(sys));
         else
             return 1 + SMC_ID_LEN;
-        int d = sd_open(dir, O_RDONLY);
-        if (d < 0)
-            return 1 + SMC_ID_LEN;
-        int it = sd_iterate_dir(d, -1), i = 0;
-        while (it != -1) {
-            char name[SMC_ID_LEN + 2];
-            if (sd_is_dir(it) && sd_get_name(it, name, sizeof(name)) && strlen(name) <= SMC_ID_LEN && name[0] != '.' &&
-                i++ == want) {
-                a[0] = SMC_GOOD;
-                memcpy(a + 1, name, strlen(name));
-                break;
-            }
-            it = sd_iterate_dir(d, it);
-        }
-        if (it != -1)
-            sd_close(it);
-        sd_close(d);
+        struct nth n = {want, a + 1};
+        if (each_dir(dir, nth_cb, &n) > want)
+            a[0] = SMC_GOOD;
         return 1 + SMC_ID_LEN;
     }
     }

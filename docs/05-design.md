@@ -157,6 +157,8 @@ New items in the card's existing menu (03); everything else stays as it is.
 Main Menu
 ├─ Boot Mode / PS1 Settings / PS2 Settings / Display     (as now)
 ├─ SuperStation  >                                         built (firmware/patches, src/gui.c)
+│  ├─ Browse        >  systems > a system's games on its current card, by official name (game.ini), else the
+│  │                   header's name, else the game ID (up to 32 systems, 40 games a system)
 │  ├─ Saves            Yes / No      No: the card doesn't even ACK 81 60, exactly a stock card (settings.ini)
 │  ├─ Free             Count         press: counts the SD card's free space (a FAT scan, seconds on a big card,
 │  │                                 so only when asked); Hello then reports it, less what was written since
@@ -164,7 +166,7 @@ Main Menu
 └─ Info  >                                                 (as now)
 ```
 
-Not built yet: **Browse** (system list → game list → files), which needs pages filled when they open.
+Browse's pages are filled when they're opened (listing the card's folders, as List does).
 While an SS1 writes saves the main screen's header says "SuperStation: saving", in the PS1 view too.
 
 On the **main screen**, while an SS1 core has named its system (Core), built as:
