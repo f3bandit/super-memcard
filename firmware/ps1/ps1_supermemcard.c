@@ -205,7 +205,7 @@ static void load_card_id(void) {
 }
 
 static void save_meta(void) {
-    char text[SMC_MAX_FILES * (SMC_NAME_LEN + 16)], line[48], p[128];
+    char text[SMC_MAX_FILES * (SMC_NAME_LEN + 16)], line[48], p[192];
     text[0] = 0;
     for (int i = 0; i < nfiles; i++)
         if (files[i].exists) {
@@ -390,17 +390,12 @@ static int do_command(uint8_t cmd, const uint8_t *r, int len, uint8_t *a) {
         mkdirs(set_dir);
         char p[192];
         path_of(p, sizeof(p), f, true);
+        /* only an empty file: the blocks fill it as they come, and Commit checks it's complete. Nothing here
+         * may take time in proportion to the save's size: the host is waiting for this answer (an SD card
+         * written synchronously takes ~3 ms per 128 bytes; filling 8 KB here took 180 ms on the SS1) */
         int fd = sd_open(p, O_RDWR | O_CREAT | O_TRUNC);
         if (fd < 0)
             return 2;
-        static uint8_t zero[128];
-        for (uint32_t o = 0; o < size; o += 128) {
-            size_t n = size - o < 128 ? size - o : 128;
-            if (sd_write(fd, zero, n) != (int)n) {
-                sd_close(fd);
-                return 2;
-            }
-        }
         sd_close(fd);
         files[f].writing = true;
         files[f].new_size = size;
@@ -415,9 +410,15 @@ static int do_command(uint8_t cmd, const uint8_t *r, int len, uint8_t *a) {
         if (!file_ok(f) || !files[f].writing)
             return 1;
         close_open();
-        char p[192], np[128];
+        char p[192], np[192];
         path_of(p, sizeof(p), f, false);
         path_of(np, sizeof(np), f, true);
+        int nfd = sd_open(np, O_RDONLY);
+        int got = nfd >= 0 ? sd_filesize(nfd) : -1;
+        if (nfd >= 0)
+            sd_close(nfd);
+        if (got != (int)files[f].new_size)
+            return 1; /* not every block arrived: the previous save stays */
         if (sd_exists(p))
             sd_remove(p);
         if (sd_rename(np, p) != 0)

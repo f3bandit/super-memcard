@@ -9,6 +9,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <stdlib.h>
 
 #define MAX_FD 32
 
@@ -109,8 +110,17 @@ int sd_read(int fd, void *buf, size_t count) {
     return (x && x->fd >= 0) ? (int)read(x->fd, buf, count) : -1;
 }
 
+/* VCARD_SD_WRITE_US: time each write takes, to act like a slow SD card (the SS1 mounts its SD card with
+ * `sync`: ~2700 us per 128-byte write) */
+static long write_us = -1;
 int sd_write(int fd, void *buf, size_t count) {
     struct handle *x = get(fd);
+    if (write_us < 0) {
+        const char *e = getenv("VCARD_SD_WRITE_US");
+        write_us = e ? atol(e) : 0;
+    }
+    if (write_us > 0)
+        usleep((useconds_t)write_us);
     return (x && x->fd >= 0) ? (int)write(x->fd, buf, count) : -1;
 }
 

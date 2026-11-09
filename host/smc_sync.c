@@ -401,7 +401,10 @@ int smc_sync(const struct smc_bus *b, const struct smc_sync_cfg *cfg, struct smc
             char id[65];
             if (smc_list(b, sys, gi, id) != SMC_OK)
                 break;
-            sync_game(b, sys, id, id, rep);
+            if (sync_game(b, sys, id, id, rep) < 0) {
+                rep->failed++;
+                logf_("failed: %s/%s: the card didn't answer", sys, id);
+            }
         }
     }
     /* 2. local games the card doesn't have yet */
@@ -429,7 +432,10 @@ int smc_sync(const struct smc_bus *b, const struct smc_sync_cfg *cfg, struct smc
             if (ndone < 64)
                 snprintf(done[ndone++], 256, "%s", g);
             smc_game_id(g, id);
-            sync_game(b, *s, g, id, rep);
+            if (sync_game(b, *s, g, id, rep) < 0) {
+                rep->failed++;
+                logf_("failed: %s/%s: the card didn't answer", *s, g);
+            }
         }
         closedir(d);
     }

@@ -248,7 +248,79 @@ static void t_smc_ps1_unaffected(void) {
     CHECK_EQ(id[1], 0x5A);
 }
 
+static void t_smc_slow_sd_card(void) {
+    /* the SS1's SD card is mounted sync: ~2.7 ms per small write. A 128 KB save must still go through:
+     * no command may do work in proportion to the save's size before answering (08 findings) */
+    static uint8_t big[131072], back[131072];
+    fill(big, sizeof(big), 21);
+    struct smc_file f;
+    CHECK_EQ(smc_hello(&vbus, SMC_HOST_TEST, 0, NULL), 1);
+    CHECK_EQ(smc_select(&vbus, "N64", "Slow SD"), 0);
+    CHECK_EQ(smc_write_file(&vbus, "save.fla", big, sizeof(big), 1), SMC_OK);
+    CHECK_EQ(smc_select(&vbus, "N64", "Slow SD"), 1);
+    CHECK_EQ(smc_info(&vbus, 0, &f), SMC_OK);
+    CHECK_EQ(f.size, sizeof(big));
+    CHECK_EQ(smc_read_file(&vbus, 0, f.size, back), SMC_OK);
+    CHECK(memcmp(big, back, sizeof(big)) == 0);
+}
+
+static void t_smc_commit_checks_every_block(void) {
+    /* Create, write only some blocks, Commit: refused, the previous save stays */
+    static uint8_t v1[1024];
+    fill(v1, sizeof(v1), 22);
+    struct smc_file f;
+    CHECK_EQ(smc_hello(&vbus, SMC_HOST_TEST, 0, NULL), 1);
+    CHECK_EQ(smc_select(&vbus, "SNES", "Partial"), 0);
+    CHECK_EQ(smc_write_file(&vbus, "save.sav", v1, sizeof(v1), 1), SMC_OK);
+    uint8_t req[140] = {0, 0, 0x04, 0, 8, 's', 'a', 'v', 'e', '.', 's', 'a', 'v'}, a[2]; /* 1024 bytes */
+    CHECK_EQ(smc_frame(&vbus, 0x64, req, 13, a, 2), SMC_OK);
+    CHECK_EQ(a[0], 0x47);
+    req[0] = a[1];
+    req[1] = 0;
+    req[2] = 0;
+    memset(req + 3, 0xAA, 128);
+    uint8_t chk = 0;
+    for (int i = 0; i < 128; i++)
+        chk ^= req[3 + i];
+    req[131] = chk;
+    uint8_t e;
+    CHECK_EQ(smc_frame(&vbus, 0x63, req, 132, &e, 1), SMC_OK); /* only block 0 of 8 */
+    CHECK_EQ(e, 0x47);
+    uint8_t c[5] = {a[1], 0, 0, 0, 2};
+    CHECK_EQ(smc_frame(&vbus, 0x65, c, 5, &e, 1), SMC_OK);
+    CHECK_EQ(e, 0xFF);
+    CHECK_EQ(smc_select(&vbus, "SNES", "Partial"), 1);
+    CHECK_EQ(smc_info(&vbus, 0, &f), SMC_OK);
+    CHECK_EQ(f.gen, 1);
+    uint8_t back[1024];
+    CHECK_EQ(smc_read_file(&vbus, 0, f.size, back), SMC_OK);
+    CHECK(memcmp(v1, back, sizeof(v1)) == 0);
+}
+
+static void t_smc_longest_names(void) {
+    /* system 32, game 64, file 16 characters: every path on the card must still fit */
+    char sys[33], game[65];
+    memset(sys, 'S', 32), sys[32] = 0;
+    memset(game, 'G', 64), game[64] = 0;
+    uint8_t d[300], back[300];
+    fill(d, sizeof(d), 23);
+    struct smc_file f;
+    CHECK_EQ(smc_hello(&vbus, SMC_HOST_TEST, 0, NULL), 1);
+    CHECK_EQ(smc_select(&vbus, sys, game), 0);
+    CHECK_EQ(smc_write_file(&vbus, "sixteen_chars.ab", d, sizeof(d), 5), SMC_OK);
+    CHECK_EQ(smc_write_file(&vbus, "sixteen_chars.ab", d, sizeof(d), 6), SMC_OK); /* replaces: rename over */
+    CHECK_EQ(smc_select(&vbus, sys, game), 1);
+    CHECK_EQ(smc_info(&vbus, 0, &f), SMC_OK);
+    CHECK(strcmp(f.name, "sixteen_chars.ab") == 0);
+    CHECK_EQ(f.gen, 6);
+    CHECK_EQ(smc_read_file(&vbus, 0, f.size, back), SMC_OK);
+    CHECK(memcmp(d, back, sizeof(d)) == 0);
+}
+
 #define SMC_TESTS \
+    {"SMC: slow SD card (2.7 ms a write), 128 KB save", t_smc_slow_sd_card, true, NULL}, \
+    {"SMC: Commit refuses a save with blocks missing", t_smc_commit_checks_every_block, true, NULL}, \
+    {"SMC: longest system, game and file names", t_smc_longest_names, true, NULL}, \
     {"SMC: off until Hello", t_smc_off_until_hello, true, NULL}, \
     {"SMC: Hello, card ID kept on the card", t_smc_hello_and_card_id, true, NULL}, \
     {"SMC: plain PS1 card again after power-off", t_smc_off_after_power_off, true, NULL}, \

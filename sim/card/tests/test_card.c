@@ -402,6 +402,9 @@ int main(int argc, char **argv) {
         if (pid == 0) {
             alarm(60);
             host_settings()->ps1_game_id = tests[i].game_id;
+            /* the card process reads this at its first SD write */
+            if (strstr(tests[i].name, "slow SD"))
+                setenv("VCARD_SD_WRITE_US", "2700", 1);
             if (vcard_start(sd) != 0)
                 _exit(2);
             tests[i].fn();

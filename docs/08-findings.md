@@ -5,6 +5,27 @@ the design depends on. Newest first. Each entry says where it came from so it ca
 
 ## 2026-11-09
 
+### Phase 1 runs on the SS1 (test Main + vcardd)
+
+Phosphor's Main with `supermemcard.cpp` (phosphor-main branch `supermemcard`) syncs at every start in the menu
+core. On the SS1, with the virtual card (`vcardd`) and test saves in `supermemcard_test/`: SNES 8 KB, N64 EEPROM +
+Controller Pak, Genesis 16 KB all reached the card byte for byte; a second run leaves unchanged saves alone.
+The test Main runs bind-mounted over the installed binary's path (`supermemcard_test/main_test.sh`): Phosphor's
+watchdog restarts Main within seconds of it stopping, so swapping the process loses that race; the bind mount
+makes every restart run the test build, and `umount -l` (lazy: the running Main holds the file) puts it back.
+
+### Bug found on the SS1: Create filled the new file before answering
+
+MiSTer mounts `/media/fat` **sync**: every small write waits for the SD card, ~2.7 ms per 128 bytes (8 KB: 177 ms,
+128 KB: 3.5 s). The card firmware's Create zero-filled the new file before answering, so anything over ~4 KB took
+longer than the host's 100 ms wait: the SNES 8 KB save and the 32 KB Controller Pak failed, the 512-byte EEPROM
+got through. The PC tests passed because a PC's disk is fast. Fixed: Create only opens an empty file (the blocks
+fill it), and Commit refuses a file that doesn't have every byte. Rule: **no command does work in proportion to a
+save's size before answering.** The virtual card can now act like a slow SD card (`VCARD_SD_WRITE_US`), and a test
+writes a 128 KB save at 2.7 ms a write (it fails on the old firmware, passes now). Also fixed on the way: Commit's
+`.new` path buffer (128 bytes) could cut long names; a test now uses the longest names (32 + 64 + 16).
+- The sync now logs and counts a game the card doesn't answer for (the Genesis save was skipped silently).
+
 ### Super MemCard commands work in the virtual card
 
 `firmware/` adds 81 60-68 to sd2psXtd (`ps1_supermemcard.c`, `ps1_supermemcard_bus.inc`, a 4-file patch applied by
