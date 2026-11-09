@@ -6,6 +6,7 @@
 #include "vcard.h"
 #include "vcard_server.h"
 #include "host_settings.h"
+#include "vcard_wire.h"
 
 #include <signal.h>
 #include <stdio.h>
@@ -17,10 +18,6 @@
 #include <unistd.h>
 
 void host_set_flash(struct host_settings *f);
-
-enum { OP_SELECT, OP_XFER, OP_XFER_CTRL, OP_SETTLE, OP_PATH, OP_STOP };
-struct req { uint8_t op, a, b, last; };
-struct rsp { uint8_t byte, ack; char path[256]; };
 
 static struct host_settings *flash;
 static int sock = -1;
@@ -38,37 +35,24 @@ struct host_settings *host_settings(void) {
 
 static void serve(int s, const char *sd_root) {
     host_set_flash(host_settings());
-    struct rsp r;
+    struct vcard_rsp r;
     memset(&r, 0, sizeof(r));
     r.byte = vcs_start(sd_root) == 0;
     if (send(s, &r, sizeof(r), 0) != sizeof(r))
         _exit(3);
     for (;;) {
-        struct req q;
+        struct vcard_req q;
         if (recv(s, &q, sizeof(q), 0) != sizeof(q))
             _exit(0); /* test side went away: power gone */
-        memset(&r, 0, sizeof(r));
-        bool ack = false;
-        switch (q.op) {
-        case OP_SELECT: vcs_select(q.a); break;
-        case OP_XFER: r.byte = vcs_xfer(q.a, q.last, &ack); break;
-        case OP_XFER_CTRL: r.byte = vcs_xfer_ctrl(q.a, q.b, q.last, &ack); break;
-        case OP_SETTLE: vcs_settle(); break;
-        case OP_PATH: snprintf(r.path, sizeof(r.path), "%s", vcs_card_path()); break;
-        case OP_STOP:
-            vcs_stop();
-            send(s, &r, sizeof(r), 0);
-            _exit(0);
-        }
-        r.ack = ack;
-        if (send(s, &r, sizeof(r), 0) != sizeof(r))
+        bool more = vcard_handle(&q, &r);
+        if (send(s, &r, sizeof(r), 0) != sizeof(r) || !more)
             _exit(0);
     }
 }
 
-static struct rsp call(uint8_t op, uint8_t a, uint8_t b, bool last) {
-    struct req q = {op, a, b, last};
-    struct rsp r;
+static struct vcard_rsp call(uint8_t op, uint8_t a, uint8_t b, bool last) {
+    struct vcard_req q = {op, a, b, last};
+    struct vcard_rsp r;
     memset(&r, 0, sizeof(r));
     if (sock < 0 || send(sock, &q, sizeof(q), 0) != sizeof(q) || recv(sock, &r, sizeof(r), 0) != sizeof(r)) {
         fprintf(stderr, "virtual card: no card process\n");
@@ -93,7 +77,7 @@ int vcard_start(const char *sd_root) {
     }
     close(sv[1]);
     sock = sv[0];
-    struct rsp r;
+    struct vcard_rsp r;
     if (recv(sock, &r, sizeof(r), 0) != sizeof(r) || !r.byte) {
         vcard_power_cut();
         return -1;
@@ -126,13 +110,13 @@ void vcard_power_cut(void) {
 
 void vcard_select(bool selected) { call(OP_SELECT, selected, 0, false); }
 uint8_t vcard_xfer(uint8_t cmd, bool last, bool *ack) {
-    struct rsp r = call(OP_XFER, cmd, 0, last);
+    struct vcard_rsp r = call(OP_XFER, cmd, 0, last);
     if (ack)
         *ack = r.ack;
     return r.byte;
 }
 uint8_t vcard_xfer_ctrl(uint8_t cmd, uint8_t dat, bool last, bool *ack) {
-    struct rsp r = call(OP_XFER_CTRL, cmd, dat, last);
+    struct vcard_rsp r = call(OP_XFER_CTRL, cmd, dat, last);
     if (ack)
         *ack = r.ack;
     return r.byte;
@@ -140,7 +124,7 @@ uint8_t vcard_xfer_ctrl(uint8_t cmd, uint8_t dat, bool last, bool *ack) {
 void vcard_settle(void) { call(OP_SETTLE, 0, 0, false); }
 const char *vcard_card_path(void) {
     static char p[256];
-    struct rsp r = call(OP_PATH, 0, 0, false);
+    struct vcard_rsp r = call(OP_PATH, 0, 0, false);
     memcpy(p, r.path, sizeof(p));
     return p;
 }

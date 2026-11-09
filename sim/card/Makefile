@@ -23,12 +23,20 @@ LDFLAGS += $(OPT) -no-pie -pthread \
 FW_SRC  = src/ps1.c src/ps1/ps1_memory_card.c src/ps1/ps1_mc_data_interface.c src/ps1/ps1_dirty.c \
           src/ps1/ps1_cardman.c src/ps1/ps1_mmce.c src/ps1/ps1_empty_card.c src/card_config.c \
           src/util.c src/game_db/game_db.c src/bigmem.c ext/inih/ini.c
-HOST_SRC = host/vcard.c host/vcard_client.c host/sd_host.c host/firmware_host.c
+HOST_SRC = host/vcard.c host/vcard_wire.c host/sd_host.c host/firmware_host.c
 B       ?= build
 FW_OBJ  = $(addprefix $(B)/fw/,$(FW_SRC:.c=.o))
 HOST_OBJ = $(addprefix $(B)/,$(HOST_SRC:.c=.o))
 
-all: $(B)/test_card
+all: $(B)/test_card $(B)/vcardd
+
+# for the SS1 (armv7, static so it doesn't depend on MiSTer Linux's glibc):
+#   make ss1    ->  build-ss1/vcardd, build-ss1/test_card
+ss1:
+	$(MAKE) B=build-ss1 CC=arm-linux-gnueabihf-gcc LDFLAGS_STATIC=-static
+
+$(B)/vcardd: $(B)/host/vcardd.o $(HOST_OBJ) $(FW_OBJ)
+	$(CC) $^ $(LDFLAGS) $(LDFLAGS_STATIC) -o $@
 
 $(B)/fw/%.o: $(FW)/%.c
 	@mkdir -p $(dir $@)
@@ -37,12 +45,12 @@ $(B)/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -fno-pie -c $< -o $@
 
-$(B)/test_card: $(B)/tests/test_card.o $(B)/tests/bus.o $(HOST_OBJ) $(FW_OBJ)
-	$(CC) $^ $(LDFLAGS) -o $@
+$(B)/test_card: $(B)/tests/test_card.o $(B)/tests/bus.o $(B)/host/vcard_client.o $(HOST_OBJ) $(FW_OBJ)
+	$(CC) $^ $(LDFLAGS) $(LDFLAGS_STATIC) -o $@
 
 test: $(B)/test_card
 	$(B)/test_card
 
 clean:
 	rm -rf $(B)
-.PHONY: all test clean
+.PHONY: all test clean ss1
