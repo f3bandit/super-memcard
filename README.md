@@ -18,6 +18,7 @@ then handed to Retro Remake as a set: protocol spec, `sys/` and Main patches, ca
 | [docs/04-memory-card-managers.md](docs/04-memory-card-managers.md) | Console Mode's memory card manager, Phosphor's and SS1 Tool's |
 | [docs/05-design.md](docs/05-design.md) | Super MemCard: the protocol, the host, the card's menu |
 | [docs/06-console-mode.md](docs/06-console-mode.md) | how it works with Console Mode |
+| [docs/07-virtual-ss1.md](docs/07-virtual-ss1.md) | testing without an SS1: virtual card, bus simulation, virtual Main |
 
 ## How it works
 
