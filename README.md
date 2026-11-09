@@ -7,6 +7,18 @@ The card stays a normal PS1 memory card on a real PS1/PS2, in Console Mode and i
 Target: Console Mode. Developed and tested on Phosphor first (its Main is an open fork of Main_MiSTer),
 then handed to Retro Remake as a set: protocol spec, `sys/` and Main patches, card firmware changes.
 
+## Documents
+
+| | |
+|---|---|
+| [docs/00-rules.md](docs/00-rules.md) | the rules every part follows (the card stays a normal PS1 card, round trip included) |
+| [docs/01-how-cores-save.md](docs/01-how-cores-save.md) | how MiSTer, Console Mode and Phosphor cores read and write saves |
+| [docs/02-card-saves.md](docs/02-card-saves.md) | how the Retro Remake card (SD2PSX) reads and writes saves |
+| [docs/03-card-menu.md](docs/03-card-menu.md) | how the card's on-screen menu works |
+| [docs/04-memory-card-managers.md](docs/04-memory-card-managers.md) | Console Mode's memory card manager, Phosphor's and SS1 Tool's |
+| [docs/05-design.md](docs/05-design.md) | Super MemCard: the protocol, the host, the card's menu |
+| [docs/06-console-mode.md](docs/06-console-mode.md) | how it works with Console Mode |
+
 ## How it works
 
 1. **Card firmware** (Retro Remake's card is built on the open-source SD2PSX, GPL-3.0): plain PS1
