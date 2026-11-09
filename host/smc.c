@@ -128,7 +128,13 @@ int smc_core(const struct smc_bus *b, const char *sys, bool running) {
     if (n < 0)
         return SMC_E_BAD;
     req[n] = running ? 1 : 0;
-    int rc = smc_frame(b, C_CORE, req, n + 1, a, 2);
+    /* Core changes nothing twice, so a missed frame is simply asked again (as Hello is) */
+    int rc = SMC_E_NO_REPLY;
+    for (int i = 0; i < 2 && rc == SMC_E_NO_REPLY; i++) {
+        if (i)
+            usleep(60 * 1000);
+        rc = smc_frame(b, C_CORE, req, n + 1, a, 2);
+    }
     if (rc)
         return rc;
     return a[0] == GOOD ? a[1] : SMC_E_BAD;

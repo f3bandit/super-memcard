@@ -21,6 +21,9 @@ saved in `SuperMemCard/<SYSTEM>/card.ini`. Saves moved to `SuperMemCard/<SYSTEM>
   system's local saves belong to). Switching cards puts the local saves on the old card first and moves them aside,
   never deletes; with a conflict or a failure on the old card it waits (tested).
 - Like after a PS1 card switch, the first command after one can go unanswered; tests ask again.
+- In CI one run lost a whole system in the sync (`game names over 64 characters`: nothing pushed); not seen in 15
+  local runs. The likeliest cause is a missed Core frame (the sync then skips that system), so `smc_core()` now asks
+  twice, as Hello does (Core changes nothing when repeated). CI now prints the sync log to confirm next time.
 
 ### Virtual cards on the SS1: picked during a game, switched at the next menu
 

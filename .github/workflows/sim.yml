@@ -16,7 +16,7 @@ jobs:
       - name: Stock firmware
         run: make -C sim/card -s && sim/card/build/test_card
       - name: With Super MemCard
-        run: make -C sim/card -s SMC=1 && sim/card/build-smc/test_card
+        run: make -C sim/card -s SMC=1 && SYNC_LOG=1 sim/card/build-smc/test_card   # with the sync log, to see why one fails
       - name: With Super MemCard, AddressSanitizer
         run: make -C sim/card -s SMC=1 SAN=address B=build-smc-asan && sim/card/build-smc-asan/test_card
       - name: Bus simulation (Phosphor's front-port RTL against the virtual card), with Super MemCard and stock
