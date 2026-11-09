@@ -40,8 +40,9 @@ then handed to Retro Remake as a set: protocol spec, `sys/` and Main patches, ca
    so phase 1 is a change to Main alone and works with stock cores. For phase 2, every MiSTer core
    shares the `sys/` framework: the card driver goes into `sys/` once (`card_sector.sv` from
    SS1_MemCard_MiSTer) and the custom cores are rebuilt with it.
-4. **Speed**: the PS1 card bus does ~20-25 KB/s (a 128 KB save takes ~5 s), so the host keeps the save
-   in memory and writes changes back to the card in the background.
+4. **Speed**: measured on the SS1's front ports, ~11 KB/s of save data (a 140-byte frame per 128 bytes, ~11 ms
+   each): an 8 KB save ~0.7 s, a 128 KB one ~11 s. So the host keeps the save in memory and writes changes
+   back to the card in the background.
 5. **Safety**: the card is where saves live, so a mirror is kept (SS1 SD card / NVMe / NAS); losing
    the card is never worse than a reinstall is today.
 

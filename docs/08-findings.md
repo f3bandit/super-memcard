@@ -5,6 +5,16 @@ the design depends on. Newest first. Each entry says where it came from so it ca
 
 ## 2026-11-09
 
+### How fast the SS1's front ports move a card's data
+
+Timed on the SS1 with the Sony card (read only): a 140-byte frame (one 128-byte block plus the command bytes)
+takes **~10.9 ms** on the bus, so Super MemCard moves **~11 KB/s** of save data: 8 KB ~0.7 s, 32 KB ~3 s,
+128 KB ~11 s. The design had assumed 20-25 KB/s (README and 05 corrected). Most of a frame is the 30 us gap left
+after each byte for software cards; a shorter gap for Super MemCard frames is the first thing to try if it's too
+slow (sd2psXtd answers from PIO, it may not need it all). Through Main's socket (`card_read` from phosphord or a
+tool) it's much slower, ~51 ms a sector: Main handles its socket once per pass of its UI loop (~25 ms), and a
+`card_read` needs two passes. Super MemCard's sync calls the bus from inside Main, so it isn't affected.
+
 ### Raw card frames on the SS1's front ports; a real Sony card ignores Super MemCard
 
 phosphor-menu (branch `supermemcard`) has raw frames in its front-port extension (version 2: `PH_RAW` 87,

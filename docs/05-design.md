@@ -99,8 +99,8 @@ Both frontends can reach the card from their menu core (04).
    Status until 0 → update the mirror's generation.
 
 If the SS1 loses power mid-game, the SD card already has the newest save (Main writes `O_SYNC`); it
-goes to the card at the next game end. The cost is speed: ~20-25 KB/s, so a 32 KB save takes ~1.5 s
-and a 128 KB one ~5 s, shown with a progress bar.
+goes to the card at the next game end. The cost is speed: ~11 KB/s measured on the SS1 (08), so a 32 KB save takes ~3 s
+and a 128 KB one ~11 s, shown with a progress bar.
 
 ### Phase 2 (later): during the game
 
