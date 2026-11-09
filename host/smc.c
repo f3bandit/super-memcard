@@ -3,6 +3,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 
 enum { C_HELLO = 0x60, C_SELECT, C_READ, C_WRITE, C_CREATE, C_COMMIT, C_STATUS, C_LIST, C_INFO };
 enum { GOOD = 0x47, BAD_CHECKSUM = 0x4E, NOT_FOUND = 0x4F };
@@ -65,8 +66,14 @@ int smc_hello(const struct smc_bus *b, uint8_t host, uint8_t caps, struct smc_ca
     const uint8_t req[5] = {'S', 'M', 1, host, caps};
     uint8_t a[16];
     int rc = SMC_E_NO_REPLY;
-    for (int i = 0; i < 2 && rc == SMC_E_NO_REPLY; i++)
+    for (int i = 0; i < 2 && rc == SMC_E_NO_REPLY; i++) {
+        /* A card that refuses a command (a Sony card: Hello isn't one of its commands) sometimes
+         * doesn't answer the next frame at all when it comes within ~20 ms; after 50 ms it always
+         * does (seen on the SS1, 08). So the second try waits. */
+        if (i)
+            usleep(60 * 1000);
         rc = smc_frame(b, C_HELLO, req, 5, a, 16);
+    }
     if (rc == SMC_E_NO_REPLY)
         return 0;
     if (a[0] != 'S' || a[1] != 'M')
