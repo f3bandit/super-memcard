@@ -326,8 +326,8 @@ static void t_smc_commit_checks_every_block(void) {
     uint8_t e;
     CHECK_EQ(smc_frame(&vbus, 0x63, req, 132, &e, 1), SMC_OK); /* only block 0 of 8 */
     CHECK_EQ(e, 0x47);
-    uint8_t c[5] = {a[1], 0, 0, 0, 2};
-    CHECK_EQ(smc_frame(&vbus, 0x65, c, 5, &e, 1), SMC_OK);
+    uint8_t c[9] = {a[1], 0, 0, 0, 2, 0, 0, 0, 0}; /* gen 2, time 0 */
+    CHECK_EQ(smc_frame(&vbus, 0x65, c, 9, &e, 1), SMC_OK);
     CHECK_EQ(e, 0xFF);
     CHECK_EQ(smc_select(&vbus, "SNES", "Partial"), 1);
     CHECK_EQ(smc_info(&vbus, 0, &f), SMC_OK);

@@ -23,15 +23,15 @@ the card has the answer (an SD access, so up to tens of milliseconds late: Super
 |---|---|---|
 | `60` **Hello** | `'S' 'M' ver host caps` | `'S' 'M' ver features id[8] free_kb[4]` (16) |
 | `61` **Select** | `syslen sys idlen id card`: system = Main's save folder name (`SNES`, `TGFX16`), game ID = Main's save name (`Super Metroid (USA)`) or a serial, card = the system's virtual card 1-99 (0: its current one) | `status nfiles card` |
-| `68` **Info** | `file` | `status name[16] size[4] gen[4]`; status `44` 'D': deleted at generation gen (a tombstone) |
+| `68` **Info** | `file` | `status name[16] size[4] gen[4] time[4]`; status `44` 'D': deleted at generation gen (a tombstone) |
 | `62` **Read** | `file blk_hi blk_lo` | `data[128] chk end` (as a PS1 read; chk = XOR of blk bytes and data) |
 | `64` **Create** | `size[4] namelen name` | `status file`: starts writing `<name>.new` |
 | `63` **Write** | `file blk_hi blk_lo data[128] chk` | `end`: `47` good, `4E` bad checksum, `FF` failed |
-| `65` **Commit** | `file gen[4]` | `end`: `<name>.new` replaces `<name>`, generation saved |
+| `65` **Commit** | `file gen[4] time[4]`: time = when the save was made (Unix, UTC: the save file's time on the SuperStation; the card has no clock) | `end`: `<name>.new` replaces `<name>`, generation saved |
 | `66` **Status** | | `pending[2]` (0: every write is already on the SD card) |
 | `67` **List** | `syslen sys card idx[2]` | `status id[64]`: the idx-th game the card has for that system on that virtual card (0: current); sys `.`: the idx-th system |
 | `69` **Core** | `syslen sys flags` | `status card`: the system's current virtual card. Flags bit 0: this system's core is running now (the card shows it, its buttons pick this system's card); sys `.` with bit 0: none is. Without bit 0 it only asks |
-| `6A` **Delete** | `file gen[4]` | `end`: the save is deleted at generation gen; the card keeps a tombstone (meta.ini `<file>=-<gen>`) and the file itself in `<game>/.deleted/` |
+| `6A` **Delete** | `file gen[4] time[4]` | `end`: the save is deleted at generation gen; the card keeps a tombstone (meta.ini `<file>=-<gen>`) and the file itself in `<game>/.deleted/` |
 
 Status bytes: `47` good, `44` deleted, `4F` not found, `53` no game selected, `FF` failed. Before a Hello, `61`-`6A` aren't
 ACKed (exactly like stock firmware). Names that could leave `SuperMemCard/` (`/`, `\`, `:`, `..`, leading or

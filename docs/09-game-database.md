@@ -1,10 +1,10 @@
 # Which game a save belongs to: the game database
 
-**Draft, in progress.** Direction (Nov 9): every save carries a **game ID**, the identifier the game itself has
-(cartridge header code, disc product code; the ROM's CRC32 for systems without one), so Console Mode can tell which
-game a save is from, and save sets on the card are filed under it as sd2psXtd files PS1 cards (`SLUS-00594`).
-Whether the folder is named by the ID or by the game's name (with the ID in `id.txt`) is still to decide.
-`host/smc_ident.c` (phosphord's identification, copied) isn't built or used yet.
+**Built** (tested in the virtual card): every save set on the card is filed under its game's **game ID**, the
+identifier the game itself carries (cartridge header code, disc product code; the ROM's CRC32 for systems without
+one), as sd2psXtd files PS1 cards (`SLUS-00594`), with `game.ini` (ID, the name in its header) and the save's date
+and time. That's what Console Mode's memory manager shows: **game name, game ID, date and time** (and the icon),
+through `smc_list_card()` and `smc_game_info()`. Not built yet: the official names from the game lists (section 2).
 
 Today a save set on the card is named after Main's save file, which is named after the ROM file
 (`saves/SNES/Super Metroid (USA).sav` for `games/SNES/Super Metroid (USA).sfc`). That works on one SuperStation, but
@@ -26,6 +26,23 @@ folders), exactly as phosphord does it:
 | disc (`.cue`/`.bin`/`.iso`) | product code + data track size + CRC of its first megabyte (fast: under a second) | product code (PlayStation `SYSTEM.CNF`, Saturn and Mega-CD headers) |
 | `.chd` | the SHA-1 the `.chd` header carries | (product code needs libchdr: Phosphor has it, the library doesn't) |
 
+The **game ID** (`host/smc_gameid.c`, `smc_game_id_of()`): the code in the game's own header where it has one, else
+the identity above.
+
+| system | game ID | example |
+|---|---|---|
+| N64 | 4-character game code (header 0x3B), any byte order | `NSME` |
+| GBA | 4-character game code (0xAC) | `AMTE` |
+| Genesis, MegaDrive, S32X | product number (0x180) | `GM 00001009-00` |
+| SMS (and Game Gear) | product code in the TMR SEGA header | `SMS-7069` |
+| SNES, GAMEBOY | 4-character game code of later carts (checked header) | `SNES-AXXE`, `GB-AXXE` |
+| PSX, Saturn, MegaCD | disc product code | `SLUS-00594` |
+| the rest (NES, TurboGrafx-16, Jaguar, older carts) | CRC32 as No-Intro counts it | `CRC-1A2B3C4D` |
+| no ROM found for the save | the save's name, as before | |
+
+Neo Geo saves are already named after the game's set name, so they stay as they are. Header IDs can be shared
+by revisions of one game (N64 Rev 1 keeps its code); their saves are compatible, so they share a save set.
+
 `host/smc_ident.c` is phosphord's code, copied. Identities are cached per file (path, size, time) in the state
 folder, so a ROM is read once.
 
@@ -39,22 +56,24 @@ its own database (Phosphor's library) can answer the lookups itself instead (`sm
 
 ## 3. On the card
 
-When the game is known, its save set is named after the **official name** (`SuperMemCard/SNES/Card1/Super Metroid
-(Japan, USA) (En,Ja)/`), and `id.txt` beside the saves records what it is:
+When the game is known, its save set is named after its **game ID** (`SuperMemCard/N64/Card1/NSME/`), and
+`game.ini` beside the saves records what it is:
 
 ```
-name=Super Metroid (Japan, USA) (En,Ja)
-key=crc:d63ed5f8
-crc=d63ed5f8
-serial=
+id=NSME
+title=SUPER MARIO 64
 ```
+
+Each save file's time (when Main wrote it) goes with it to the card (Commit) and comes back onto other SuperStations'
+files.
 
 Every SuperStation with the game, whatever its ROM file is called, then finds the same save set. Unknown games (no
 ROM found, no list, not in the list) keep today's naming: the save file's name. `name.txt` still records the local
 save name the set came from, so a SuperStation without the ROM gets the save back under that name.
 
-Pulling a save set onto a SuperStation: its local file name is the name of the ROM there with the same identity, so
-Main finds it when the game starts; with no such ROM, the official name, else `name.txt`.
+Pulling a save set onto a SuperStation: its local file name is the name of the ROM there with the same game ID, so
+Main finds it when the game starts (tested: `Mario.z64` on one, `Super Mario 64 (USA).v64` on another); with no such
+ROM, `name.txt`. Game IDs worked out are kept in `<state>/ids.txt` (by path, size and time), so a ROM is read once.
 
 ## 4. Later
 

@@ -8,7 +8,7 @@
  *   SuperMemCard/<system>/card.ini                     card=<N>: the system's current virtual card (1..99)
  *   SuperMemCard/<system>/Card<N>/<game ID>/<file>     a save file (system: Main's save folder name)
  *   SuperMemCard/<system>/Card<N>/<game ID>/<file>.new a save being written, until Commit
- *   SuperMemCard/<system>/Card<N>/<game ID>/meta.ini   <file>=<generation>, or <file>=-<generation>: deleted
+ *   SuperMemCard/<system>/Card<N>/<game ID>/meta.ini   <file>=<generation>,<time>, or <file>=-<generation>,<time>: deleted
  *   SuperMemCard/<system>/Card<N>/<game ID>/.deleted/  deleted saves, kept
  *
  * A save is written to <file>.new and only replaces <file> at Commit, so a card pulled or
@@ -56,14 +56,14 @@ int ps1_supermemcard_req_len(uint8_t cmd, const uint8_t *r, int have) {
         if (have < 5) return 5;
         if (r[4] == 0 || r[4] > SMC_NAME_LEN) return -1;
         return 5 + r[4];
-    case SMC_COMMIT: return 5;
+    case SMC_COMMIT: return 9;
     case SMC_STATUS: return 0;
     case SMC_LIST:
         if (have < 1) return 1;
         if (r[0] == 0 || r[0] > SMC_SYS_LEN) return -1;
         return 1 + r[0] + 1 + 2;
     case SMC_INFO: return 1;
-    case SMC_DELETE: return 5;
+    case SMC_DELETE: return 9;
     case SMC_CORE:
         if (have < 1) return 1;
         if (r[0] == 0 || r[0] > SMC_SYS_LEN) return -1;
@@ -92,7 +92,7 @@ int ps1_supermemcard_exec(uint8_t cmd, const uint8_t *req, int len, uint8_t *ans
 
 struct file {
     char name[SMC_NAME_LEN + 1];
-    uint32_t size, gen;
+    uint32_t size, gen, time;
     bool exists;   /* committed copy on the SD card */
     bool deleted;  /* a tombstone: deleted at generation gen */
     bool writing;  /* <name>.new is open for writing */
@@ -226,19 +226,28 @@ static void save_meta(void) {
     text[0] = 0;
     for (int i = 0; i < nfiles; i++)
         if (files[i].exists || files[i].deleted) {
-            snprintf(line, sizeof(line), "%s=%s%lu\n", files[i].name, files[i].deleted ? "-" : "",
-                     (unsigned long)files[i].gen);
+            snprintf(line, sizeof(line), "%s=%s%lu,%lu\n", files[i].name, files[i].deleted ? "-" : "",
+                     (unsigned long)files[i].gen, (unsigned long)files[i].time);
             strcat(text, line);
         }
     snprintf(p, sizeof(p), "%s/meta.ini", set_dir);
     write_text(p, text);
 }
 
-static uint32_t meta_gen(const char *meta, const char *name) {
+/* "<gen>,<time>" or "-<gen>,<time>" (time missing: 0) */
+static uint32_t parse_gen(const char *v, uint32_t *time) {
+    char *e;
+    uint32_t g = (uint32_t)strtoul(v + (*v == '-'), &e, 10);
+    *time = *e == ',' ? (uint32_t)strtoul(e + 1, NULL, 10) : 0;
+    return g;
+}
+
+static uint32_t meta_gen(const char *meta, const char *name, uint32_t *time) {
     size_t n = strlen(name);
+    *time = 0;
     for (const char *l = meta; l && *l; l = strchr(l, '\n') ? strchr(l, '\n') + 1 : NULL)
         if (strncmp(l, name, n) == 0 && l[n] == '=')
-            return (uint32_t)strtoul(l + n + 1 + (l[n + 1] == '-'), NULL, 10);
+            return parse_gen(l + n + 1, time);
     return 0;
 }
 
@@ -340,7 +349,7 @@ static void select_set(const char *sys, const char *id, int card) {
             memset(f, 0, sizeof(*f));
             snprintf(f->name, sizeof(f->name), "%s", name);
             f->size = (uint32_t)sd_filesize(it);
-            f->gen = meta_gen(meta, name);
+            f->gen = meta_gen(meta, name, &f->time);
             f->exists = true;
         }
         it = sd_iterate_dir(dir, it);
@@ -365,7 +374,7 @@ static void select_set(const char *sys, const char *id, int card) {
         struct file *f = &files[nfiles++];
         memset(f, 0, sizeof(*f));
         snprintf(f->name, sizeof(f->name), "%s", name);
-        f->gen = (uint32_t)strtoul(eq + 2, NULL, 10);
+        f->gen = parse_gen(eq + 1, &f->time);
         f->deleted = true;
     }
     /* stable order: by name */
@@ -439,16 +448,17 @@ static int do_command(uint8_t cmd, const uint8_t *r, int len, uint8_t *a) {
     }
 
     case SMC_INFO:
-        memset(a, 0, 25);
+        memset(a, 0, 29);
         if (!file_ok(r[0]) || !(files[r[0]].exists || files[r[0]].deleted)) {
             a[0] = have_set ? SMC_NOT_FOUND : SMC_NO_SET;
-            return 25;
+            return 29;
         }
         a[0] = files[r[0]].deleted ? SMC_DELETED : SMC_GOOD;
         memcpy(a + 1, files[r[0]].name, strlen(files[r[0]].name));
         put32(a + 17, files[r[0]].size);
         put32(a + 21, files[r[0]].gen);
-        return 25;
+        put32(a + 25, files[r[0]].time);
+        return 29;
 
     case SMC_READ: {
         uint8_t f = r[0];
@@ -556,6 +566,7 @@ static int do_command(uint8_t cmd, const uint8_t *r, int len, uint8_t *a) {
         files[f].deleted = false;
         files[f].size = files[f].new_size;
         files[f].gen = be32(r + 1);
+        files[f].time = be32(r + 5);
         save_meta();
         a[0] = SMC_GOOD;
         return 1;
@@ -580,6 +591,7 @@ static int do_command(uint8_t cmd, const uint8_t *r, int len, uint8_t *a) {
         files[f].deleted = true;
         files[f].size = 0;
         files[f].gen = be32(r + 1);
+        files[f].time = be32(r + 5);
         save_meta();
         a[0] = SMC_GOOD;
         return 1;

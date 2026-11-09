@@ -44,6 +44,7 @@ struct smc_card {
 struct smc_file {
     char name[17];
     uint32_t size, gen;
+    uint32_t time; /* when the save was made (Unix time, UTC; 0: not known) */
     bool deleted; /* a tombstone: deleted at generation gen (size 0, nothing to read) */
 };
 
@@ -64,12 +65,15 @@ int smc_core(const struct smc_bus *b, const char *sys, bool running);
 int smc_info(const struct smc_bus *b, int idx, struct smc_file *f);
 /* Delete file `idx` of the selected game at generation `gen` (its generation + 1): the card keeps a tombstone so
  * other SuperStations delete their copy too, and the file itself aside. */
-int smc_delete(const struct smc_bus *b, int idx, uint32_t gen);
+int smc_delete(const struct smc_bus *b, int idx, uint32_t gen, uint32_t time);
 /* Read file `idx` whole into buf (at least f.size bytes). */
 int smc_read_file(const struct smc_bus *b, int idx, uint32_t size, uint8_t *buf);
 /* Write a whole save file and commit it with generation `gen`. The card keeps the previous copy
  * until the commit, so a failure here leaves the card's last good save in place. */
 int smc_write_file(const struct smc_bus *b, const char *name, const uint8_t *data, uint32_t size, uint32_t gen);
+/* The same with the time the save was made (Unix time, UTC), kept on the card beside it. */
+int smc_write_file_at(const struct smc_bus *b, const char *name, const uint8_t *data, uint32_t size, uint32_t gen,
+                      uint32_t time);
 /* Blocks still waiting for the card's SD card (0: safe to remove). */
 int smc_pending(const struct smc_bus *b);
 /* The idx-th game ID the card has for a system (sys "." : the idx-th system); SMC_E_NOT_FOUND past

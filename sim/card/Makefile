@@ -58,6 +58,14 @@ $(B)/smc_icons.o: ../../host/smc_icons.c ../../host/smc_sync.h
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -fno-pie -c $< -o $@
 
+$(B)/smc_ident.o: ../../host/smc_ident.c ../../host/smc_ident.h
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -fno-pie -c $< -o $@
+
+$(B)/smc_gameid.o: ../../host/smc_gameid.c ../../host/smc_ident.h
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -fno-pie -c $< -o $@
+
 $(B)/tests/test_card.o: tests/test_smc.inc tests/test_sync.inc
 
 $(B)/vcardd: $(B)/host/vcardd.o $(HOST_OBJ) $(FW_OBJ)
@@ -79,7 +87,7 @@ $(B)/%.o: %.c $(if $(filter 1,$(SMC)),$(B)/fw/.ready)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -fno-pie -c $< -o $@
 
-$(B)/test_card: $(B)/tests/test_card.o $(B)/tests/bus.o $(B)/host/vcard_client.o $(B)/smc_host.o $(B)/smc_sync.o $(B)/smc_icons.o $(HOST_OBJ) $(FW_OBJ)
+$(B)/test_card: $(B)/tests/test_card.o $(B)/tests/bus.o $(B)/host/vcard_client.o $(B)/smc_host.o $(B)/smc_sync.o $(B)/smc_icons.o $(B)/smc_ident.o $(B)/smc_gameid.o $(HOST_OBJ) $(FW_OBJ)
 	$(CC) $^ $(LDFLAGS) $(LDFLAGS_STATIC) -o $@
 
 test: $(B)/test_card

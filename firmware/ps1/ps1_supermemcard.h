@@ -16,14 +16,14 @@ enum {
     SMC_READ   = 0x62, /* file blk_hi blk_lo                   -> data[128] chk end (130) */
     SMC_WRITE  = 0x63, /* file blk_hi blk_lo data[128] chk     -> end (1) */
     SMC_CREATE = 0x64, /* size[4] namelen name                 -> status file (2) */
-    SMC_COMMIT = 0x65, /* file gen[4]                          -> end (1) */
+    SMC_COMMIT = 0x65, /* file gen[4] time[4]                  -> end (1); time: when the save was made (Unix, UTC) */
     SMC_STATUS = 0x66, /* (none)                               -> pending_hi pending_lo (2) */
     SMC_LIST   = 0x67, /* syslen sys card idx_hi idx_lo        -> status id[64] (65); sys "." lists systems */
-    SMC_INFO   = 0x68, /* file                                 -> status name[16] size[4] gen[4] (25) */
+    SMC_INFO   = 0x68, /* file                                 -> status name[16] size[4] gen[4] time[4] (29) */
     SMC_CORE   = 0x69, /* syslen sys flags                     -> status card (2): the system's current card;
                         * flags bit 0: this system's core is running (system mode: screen, buttons); sys "."
                         * with bit 0: no system (back to the PS1 card) */
-    SMC_DELETE = 0x6A, /* file gen[4]                          -> end (1): the save is deleted at generation gen; the
+    SMC_DELETE = 0x6A, /* file gen[4] time[4]                  -> end (1): the save is deleted at generation gen; the
                         * card keeps a tombstone (Info answers 44 'D') so other SS1s delete their copy too, and
                         * the file itself in <game>/.deleted/ */
 };

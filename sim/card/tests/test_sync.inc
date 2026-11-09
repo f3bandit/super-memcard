@@ -1,6 +1,9 @@
 /* Phase 1 sync tests (SMC=1): the SS1's saves folder <-> the virtual card, through host/smc_sync.c.
  * Two "SuperStations" (two saves folders, each with its own sync state) can share one card. */
 #include "../../../host/smc_sync.h"
+#include "../../../host/smc_ident.h"
+#include <sys/stat.h>
+#include <utime.h>
 
 static char ss[2][300];      /* <ss>/saves, <ss>/state */
 static int quiet_log;
@@ -423,6 +426,147 @@ static void t_sync_conflict_settled(void) {
     CHECK(memcmp(got, a2, sizeof(a2)) == 0);
 }
 
+/* ROM files with real headers, made up (no game's data) */
+static void put_file(const char *path, const uint8_t *d, size_t n) {
+    char cmd[1200];
+    snprintf(cmd, sizeof(cmd), "mkdir -p \"$(dirname \"%s\")\"", path);
+    CHECK(system(cmd) == 0);
+    FILE *f = fopen(path, "wb");
+    CHECK(f);
+    CHECK(fwrite(d, 1, n, f) == n);
+    fclose(f);
+}
+static uint8_t rom[1 << 20];
+static void make_n64(const char *path, bool byteswapped) {
+    memset(rom, 0x11, 4096);
+    const uint8_t magic[4] = {0x80, 0x37, 0x12, 0x40};
+    memcpy(rom, magic, 4);
+    memcpy(rom + 0x20, "SUPER MARIO 64      ", 20);
+    memcpy(rom + 0x3B, "NSME", 4);
+    if (byteswapped)
+        for (int i = 0; i < 4096; i += 2) { uint8_t t = rom[i]; rom[i] = rom[i + 1]; rom[i + 1] = t; }
+    put_file(path, rom, 4096);
+}
+static void make_genesis(const char *path) {
+    memset(rom, 0, 0x400);
+    memcpy(rom + 0x100, "SEGA MEGA DRIVE ", 16);
+    memcpy(rom + 0x150, "SONIC THE HEDGEHOG                              ", 48);
+    memcpy(rom + 0x180, "GM 00001009-00", 14);
+    put_file(path, rom, 0x400);
+}
+static void make_gba(const char *path) {
+    memset(rom, 0, 0x200);
+    memcpy(rom + 0xA0, "METROID4USA ", 12);
+    memcpy(rom + 0xAC, "AMTE", 4);
+    put_file(path, rom, 0x200);
+}
+static void make_sms(const char *path) {
+    memset(rom, 0xFF, 0x8000);
+    memcpy(rom + 0x7FF0, "TMR SEGA", 8);
+    rom[0x7FFC] = 0x69, rom[0x7FFD] = 0x70, rom[0x7FFE] = 0x00; /* product code 7069 */
+    put_file(path, rom, 0x8000);
+}
+static void make_nes(const char *path) {
+    memset(rom, 0, 16 + 0x8000);
+    memcpy(rom, "NES\x1a", 4);
+    for (int i = 0; i < 0x8000; i++)
+        rom[16 + i] = (uint8_t)(i * 7);
+    put_file(path, rom, 16 + 0x8000);
+}
+
+static void t_game_ids_from_headers(void) {
+    char p[600], id[65], title[65], want[65];
+    snprintf(p, sizeof(p), "%s-host/roms/a.z64", sd);
+    make_n64(p, false);
+    CHECK_EQ(smc_game_id_of("N64", p, id, title), 0);
+    CHECK(strcmp(id, "NSME") == 0 && strcmp(title, "SUPER MARIO 64") == 0);
+    snprintf(p, sizeof(p), "%s-host/roms/b.v64", sd);
+    make_n64(p, true);
+    CHECK_EQ(smc_game_id_of("N64", p, id, title), 0);
+    CHECK(strcmp(id, "NSME") == 0);
+    snprintf(p, sizeof(p), "%s-host/roms/c.md", sd);
+    make_genesis(p);
+    CHECK_EQ(smc_game_id_of("MegaDrive", p, id, title), 0);
+    CHECK(strcmp(id, "GM 00001009-00") == 0 && strcmp(title, "SONIC THE HEDGEHOG") == 0);
+    snprintf(p, sizeof(p), "%s-host/roms/d.gba", sd);
+    make_gba(p);
+    CHECK_EQ(smc_game_id_of("GBA", p, id, title), 0);
+    CHECK(strcmp(id, "AMTE") == 0);
+    snprintf(p, sizeof(p), "%s-host/roms/e.sms", sd);
+    make_sms(p);
+    CHECK_EQ(smc_game_id_of("SMS", p, id, title), 0);
+    CHECK(strcmp(id, "SMS-7069") == 0);
+    snprintf(p, sizeof(p), "%s-host/roms/f.nes", sd);
+    make_nes(p);
+    CHECK_EQ(smc_game_id_of("NES", p, id, title), 0);
+    snprintf(want, sizeof(want), "CRC-%08X", (unsigned)smc_crc32(rom + 16, 0x8000, 0)); /* the header left out */
+    CHECK(strcmp(id, want) == 0);
+}
+
+static struct smc_sync_report run_sync_games(int which) {
+    static char saves[2][400], state[2][400], games[2][400];
+    static const char *dirs[2][2];
+    snprintf(saves[which], 400, "%s/saves", ss[which]);
+    snprintf(state[which], 400, "%s/state", ss[which]);
+    snprintf(games[which], 400, "%s/games", ss[which]);
+    dirs[which][0] = games[which];
+    dirs[which][1] = NULL;
+    struct smc_sync_cfg cfg = {saves[which], state[which], smc_console_systems, SMC_HOST_TEST, slog, dirs[which]};
+    struct smc_sync_report r;
+    CHECK_EQ(smc_sync(&vbus, &cfg, &r), 0);
+    return r;
+}
+
+static void t_sync_by_game_id(void) {
+    /* the same game under two file names on two SuperStations is one save set on the card, filed under the game's
+     * ID, and the save keeps its time */
+    sync_setup();
+    char p[700];
+    snprintf(p, sizeof(p), "%s/games/N64/Mario.z64", ss[0]);
+    make_n64(p, false);
+    snprintf(p, sizeof(p), "%s/games/N64/Ultra/Super Mario 64 (USA).v64", ss[1]);
+    make_n64(p, true);
+    put_save(0, "N64/Mario.eep", eep, sizeof(eep));
+    snprintf(p, sizeof(p), "%s/saves/N64/Mario.eep", ss[0]);
+    struct utimbuf ut = {1700000000, 1700000000};
+    CHECK(utime(p, &ut) == 0);
+    CHECK_EQ(run_sync_games(0).pushed, 1);
+    CHECK_EQ(file_size("SuperMemCard/N64/Card1/NSME/save.eep"), sizeof(eep));
+    char ini[64] = {0};
+    CHECK_EQ(read_file_at("SuperMemCard/N64/Card1/NSME/game.ini", 0, ini, 29), 0);
+    CHECK(strncmp(ini, "id=NSME\ntitle=SUPER MARIO 64\n", 29) == 0);
+    /* the other SuperStation gets it under its own ROM's name, with the save's time */
+    CHECK_EQ(run_sync_games(1).pulled, 1);
+    CHECK_EQ(get_save(1, "N64/Super Mario 64 (USA).eep", got, sizeof(got)), sizeof(eep));
+    CHECK(memcmp(got, eep, sizeof(eep)) == 0);
+    struct stat st;
+    snprintf(p, sizeof(p), "%s/saves/N64/Super Mario 64 (USA).eep", ss[1]);
+    CHECK(stat(p, &st) == 0);
+    CHECK_EQ((long)st.st_mtime, 1700000000L);
+    /* and back: still one save set */
+    put_save(1, "N64/Super Mario 64 (USA).eep", sB, sizeof(eep));
+    CHECK_EQ(run_sync_games(1).pushed, 1);
+    CHECK_EQ(run_sync_games(0).pulled, 1);
+    CHECK_EQ(get_save(0, "N64/Mario.eep", got, sizeof(got)), sizeof(eep));
+    CHECK(memcmp(got, sB, sizeof(eep)) == 0);
+    char game[65];
+    CHECK_EQ(smc_list_card(&vbus, "N64", 1, 1, game), SMC_E_NOT_FOUND);
+    /* what Console Mode's memory manager shows */
+    struct smc_game_info gi;
+    CHECK_EQ(smc_list_card(&vbus, "N64", 1, 0, game), SMC_OK);
+    CHECK_EQ(smc_game_info(&vbus, "N64", 0, game, &gi), SMC_OK);
+    CHECK(strcmp(gi.id, "NSME") == 0);
+    CHECK(strcmp(gi.title, "SUPER MARIO 64") == 0);
+    CHECK(strcmp(gi.save_name, "Super Mario 64 (USA)") == 0); /* the name it last came from */
+    CHECK_EQ(gi.files, 1);
+    CHECK(gi.has_icon);
+    CHECK(gi.time > 1700000000u); /* the newer save, made just now */
+    /* a game with no ROM here keeps the old naming */
+    put_save(0, "N64/Homebrew.eep", eep, sizeof(eep));
+    CHECK_EQ(run_sync_games(0).pushed, 1);
+    CHECK_EQ(file_size("SuperMemCard/N64/Card1/Homebrew/save.eep"), sizeof(eep));
+}
+
 #define SYNC_TESTS \
     {"sync: saves to the card, then nothing to do, then a change", t_sync_to_card_then_unchanged, true, NULL}, \
     {"sync: a reinstall gets every save back", t_sync_reinstall_gets_everything_back, true, NULL}, \
@@ -436,4 +580,6 @@ static void t_sync_conflict_settled(void) {
     {"sync: a core's save folder from its .rbf", t_sync_core_system_names, true, NULL}, \
     {"sync: a deleted save is deleted on every SuperStation", t_sync_delete_reaches_every_superstation, true, NULL}, \
     {"sync: deleted on one, played on another: the save stays", t_sync_delete_vs_played_since, true, NULL}, \
-    {"sync: both changed, settled either way", t_sync_conflict_settled, true, NULL},
+    {"sync: both changed, settled either way", t_sync_conflict_settled, true, NULL}, \
+    {"game IDs from the games' own headers", t_game_ids_from_headers, true, NULL}, \
+    {"sync: one save set per game, filed by game ID, with its time", t_sync_by_game_id, true, NULL},

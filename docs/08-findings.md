@@ -5,6 +5,22 @@ the design depends on. Newest first. Each entry says where it came from so it ca
 
 ## 2026-11-09
 
+### Saves filed by game ID, with their date and time
+
+Every save set on the card is now filed under its game's ID (the code in the game's own header; the disc product
+code; the ROM's CRC32 where neither exists) with `game.ini` (ID, header name) and the save's time, so Console Mode's
+memory manager can show game name, game ID, date and time (`smc_game_info()`). Tested in the virtual card with
+made-up ROM headers (N64 in two byte orders, Genesis, GBA, Master System, NES): one game under two file names on two
+SuperStations is one save set, and each gets the save under its own ROM's name with the original time.
+
+- **Save times:** console saves don't hold a time; the save file's time is the SuperStation's clock when Main wrote
+  it, and the card has no clock at all. The time travels with the save (Commit `time[4]`, Info) and is put back on
+  the file when it's copied to another SuperStation. Whether the SS1's clock is right (network time, a clock chip)
+  is still to check: a wrong clock gives wrong dates.
+- The identification is phosphord's (`host/smc_ident.c`, copied); the header codes are new (`host/smc_gameid.c`).
+  The header offsets are from the formats' documentation and tested only on made-up headers so far: to check
+  against real ROMs on the SS1.
+
 ### Deleting saves, and settling "both changed"
 
 Built and tested in the virtual card: Delete (`81 6A`) leaves a tombstone on the card; the sync deletes (moves

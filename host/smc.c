@@ -141,8 +141,8 @@ int smc_core(const struct smc_bus *b, const char *sys, bool running) {
 }
 
 int smc_info(const struct smc_bus *b, int idx, struct smc_file *f) {
-    uint8_t req[1] = {(uint8_t)idx}, a[25];
-    int rc = smc_frame(b, C_INFO, req, 1, a, 25);
+    uint8_t req[1] = {(uint8_t)idx}, a[29];
+    int rc = smc_frame(b, C_INFO, req, 1, a, 29);
     if (rc)
         return rc;
     if (a[0] != GOOD && a[0] != DELETED)
@@ -151,14 +151,16 @@ int smc_info(const struct smc_bus *b, int idx, struct smc_file *f) {
     f->name[16] = 0;
     f->size = be32(a + 17);
     f->gen = be32(a + 21);
+    f->time = be32(a + 25);
     f->deleted = a[0] == DELETED;
     return SMC_OK;
 }
 
-int smc_delete(const struct smc_bus *b, int idx, uint32_t gen) {
-    uint8_t req[5] = {(uint8_t)idx}, a[1];
+int smc_delete(const struct smc_bus *b, int idx, uint32_t gen, uint32_t time) {
+    uint8_t req[9] = {(uint8_t)idx}, a[1];
     put32(req + 1, gen);
-    int rc = smc_frame(b, C_DELETE, req, 5, a, 1);
+    put32(req + 5, time);
+    int rc = smc_frame(b, C_DELETE, req, 9, a, 1);
     if (rc)
         return rc;
     return a[0] == GOOD ? SMC_OK : SMC_E_BAD;
@@ -187,6 +189,11 @@ int smc_read_file(const struct smc_bus *b, int idx, uint32_t size, uint8_t *buf)
 }
 
 int smc_write_file(const struct smc_bus *b, const char *name, const uint8_t *data, uint32_t size, uint32_t gen) {
+    return smc_write_file_at(b, name, data, size, gen, 0);
+}
+
+int smc_write_file_at(const struct smc_bus *b, const char *name, const uint8_t *data, uint32_t size, uint32_t gen,
+                      uint32_t time) {
     uint8_t req[136], a[2];
     size_t nl = strlen(name);
     if (nl == 0 || nl > 16 || size == 0)
@@ -227,7 +234,8 @@ int smc_write_file(const struct smc_bus *b, const char *name, const uint8_t *dat
 
     req[0] = file;
     put32(req + 1, gen);
-    rc = smc_frame(b, C_COMMIT, req, 5, a, 1);
+    put32(req + 5, time);
+    rc = smc_frame(b, C_COMMIT, req, 9, a, 1);
     if (rc)
         return rc;
     return a[0] == GOOD ? SMC_OK : SMC_E_BAD;

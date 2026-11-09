@@ -25,6 +25,9 @@ struct smc_sync_cfg {
     const char *const *systems;  /* save folders to keep on the card, NULL-terminated */
     uint8_t host;                /* SMC_HOST_* for Hello */
     void (*log)(const char *line); /* may be NULL */
+    /* Games folders to find each save's game in (/media/fat/games, /media/usb0/games ...), NULL-terminated; the
+     * saves then go on the card under their game's ID (docs/09). NULL: under their file names, as before. */
+    const char *const *games_dirs;
 };
 
 struct smc_sync_report {
@@ -69,3 +72,16 @@ int smc_resolve(const struct smc_bus *b, const struct smc_sync_cfg *cfg, const c
  * 55, '~' and 8 hex digits of its CRC-32 (the full name is then kept on the card in name.txt). */
 void smc_game_id(const char *game, char id[65]);
 uint32_t smc_crc32(const uint8_t *p, size_t n, uint32_t crc);
+
+/* For a frontend's memory manager (Console Mode): what the card has for one game of a system (`id` from
+ * smc_list_card(), `card` 0: the system's current virtual card). */
+struct smc_game_info {
+    char id[65];         /* game ID: the game's own code (NSME, SLUS-00594, GM 00001009-00) or CRC-xxxxxxxx */
+    char title[65];      /* the name in the game's header ("" if it has none); the official name: game lists, later */
+    char save_name[256]; /* the save's file name it came from on a SuperStation (Main's name for the game) */
+    uint32_t time;       /* when its newest save was made (Unix time, UTC; 0: not known) */
+    int files;           /* save files */
+    uint32_t bytes;
+    bool has_icon;       /* icon.bin (05: PS1 save-icon layout) */
+};
+int smc_game_info(const struct smc_bus *b, const char *sys, int card, const char *id, struct smc_game_info *gi);

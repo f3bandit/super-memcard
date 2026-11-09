@@ -156,7 +156,7 @@ module tb;
 			end
 
 			// 6. Commit generation 1
-			start_frame(8'h65); put(idx[7:0]); put(0); put(0); put(0); put(1); zeros(1); raw_frame(0, fl);
+			start_frame(8'h65); put(idx[7:0]); put(0); put(0); put(0); put(1); zeros(4); zeros(1); raw_frame(0, fl);   // gen 1, time 0
 			check("Commit: 47", fr[fl - 1], 8'h47);
 
 			// 7. Read both blocks back

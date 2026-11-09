@@ -6,7 +6,7 @@
  * Discs (.cue/.bin, .iso): the product code (PlayStation SYSTEM.CNF, Saturn and Mega-CD headers) for looking the game
  * up; identity is product code + data track size + CRC of its first megabyte.
  * Copyright (C) 2026 f3bandit. */
-#include "smc_ident.h"   /* (to be written: struct smc_ident, smc_ident_file) */
+#include "smc_ident.h"
 
 #include <ctype.h>
 #include <stdint.h>

@@ -1,6 +1,7 @@
 /* Super MemCard phase 1 sync (see smc_sync.h). */
 #define _GNU_SOURCE
 #include "smc_sync.h"
+#include "smc_ident.h"
 
 #include <dirent.h>
 #include <errno.h>
@@ -10,6 +11,8 @@
 #include <string.h>
 #include <strings.h>
 #include <sys/stat.h>
+#include <sys/time.h>
+#include <time.h>
 #include <unistd.h>
 
 const char *const smc_console_systems[] = {
@@ -38,6 +41,8 @@ const char *smc_core_system(const char *rbf) {
 #define MAX_SAVE (1024 * 1024)
 #define NAME_TXT "name.txt"
 #define ICON_BIN "icon.bin" /* the game's save icon (docs/05-design.md): not a save, never copied back */
+#define GAME_INI "game.ini" /* the game: id=, title= (docs/09-game-database.md) */
+static bool not_a_save(const char *n) { return !strcmp(n, NAME_TXT) || !strcmp(n, ICON_BIN) || !strcmp(n, GAME_INI); }
 
 /* ---- small helpers ---- */
 
@@ -277,6 +282,185 @@ static void local_path(char *out, size_t n, const char *sys, const char *game, c
     snprintf(out, n, "%s/%s/%s%s", C->saves_dir, sys, game, cfile + 4);
 }
 
+/* ---- the game a save belongs to (docs/09-game-database.md) ---- */
+
+/* the games found in the system's games folders: Main names a save after its ROM, so a save "X.sav" belongs to the
+ * game file named X (any extension) */
+struct rom {
+    char sys[SMC_SYS_MAX + 1], base[256], path[1024];
+    long size, mtime;
+    char id[65], title[65];
+    int known; /* 0 not looked at, 1 id found, -1 can't be read */
+};
+static struct rom *roms;
+static int nroms, maxroms;
+static char indexed[64][SMC_SYS_MAX + 1];
+static int nindexed;
+
+static bool not_a_game(const char *n) {
+    static const char *const skip[] = {".txt", ".png", ".jpg", ".xml", ".ini", ".cfg", ".md", ".pdf", ".nfo",
+                                       ".sav", ".srm", ".mgl", ".json", NULL};
+    const char *dot = strrchr(n, '.');
+    if (n[0] == '.' || !dot)
+        return true;
+    for (const char *const *e = skip; *e; e++)
+        if (!strcasecmp(dot, *e))
+            return true;
+    return false;
+}
+
+static void index_dir(const char *sys, const char *dir, int depth) {
+    DIR *d = opendir(dir);
+    if (!d)
+        return;
+    struct dirent *de;
+    while ((de = readdir(d))) {
+        char p[1024];
+        struct stat st;
+        if (de->d_name[0] == '.')
+            continue;
+        snprintf(p, sizeof(p), "%s/%s", dir, de->d_name);
+        if (stat(p, &st) != 0)
+            continue;
+        if (S_ISDIR(st.st_mode)) {
+            if (depth < 3)
+                index_dir(sys, p, depth + 1);
+            continue;
+        }
+        if (not_a_game(de->d_name))
+            continue;
+        if (nroms == maxroms) {
+            int m = maxroms ? maxroms * 2 : 256;
+            struct rom *r = realloc(roms, (size_t)m * sizeof(*r));
+            if (!r)
+                break;
+            roms = r, maxroms = m;
+        }
+        struct rom *r = &roms[nroms++];
+        memset(r, 0, sizeof(*r));
+        snprintf(r->sys, sizeof(r->sys), "%s", sys);
+        snprintf(r->base, sizeof(r->base), "%.*s", (int)(strrchr(de->d_name, '.') - de->d_name), de->d_name);
+        snprintf(r->path, sizeof(r->path), "%s", p);
+        r->size = (long)st.st_size;
+        r->mtime = (long)st.st_mtime;
+    }
+    closedir(d);
+}
+
+static void load_ids(void);
+
+static void index_system(const char *sys) {
+    for (int i = 0; i < nindexed; i++)
+        if (!strcmp(indexed[i], sys))
+            return;
+    if (nindexed < 64)
+        snprintf(indexed[nindexed++], SMC_SYS_MAX + 1, "%s", sys);
+    for (const char *const *g = C->games_dirs; g && *g; g++) {
+        char dir[1024];
+        snprintf(dir, sizeof(dir), "%s/%s", *g, sys);
+        index_dir(sys, dir, 0);
+    }
+    load_ids(); /* the IDs worked out before, for files that haven't changed */
+}
+
+/* game IDs already worked out, kept between runs: <state>/ids.txt, path size time id title */
+static void load_ids(void) {
+    char p[1100], line[1500];
+    snprintf(p, sizeof(p), "%s/ids.txt", C->state_dir);
+    FILE *f = fopen(p, "r");
+    if (!f)
+        return;
+    while (fgets(line, sizeof(line), f)) {
+        char *t[5] = {0};
+        int k = 0;
+        for (char *q = strtok(line, "\t\n"); q && k < 5; q = strtok(NULL, "\t\n"))
+            t[k++] = q;
+        if (k < 4)
+            continue;
+        for (int i = 0; i < nroms; i++)
+            if (!roms[i].known && !strcmp(roms[i].path, t[0]) && roms[i].size == atol(t[1]) &&
+                roms[i].mtime == atol(t[2])) {
+                snprintf(roms[i].id, sizeof(roms[i].id), "%s", t[3]);
+                snprintf(roms[i].title, sizeof(roms[i].title), "%s", k > 4 ? t[4] : "");
+                roms[i].known = 1;
+            }
+    }
+    fclose(f);
+}
+
+static void save_ids(void) {
+    char p[1100], tmp[1200];
+    snprintf(p, sizeof(p), "%s/ids.txt", C->state_dir);
+    snprintf(tmp, sizeof(tmp), "%s.new", p);
+    FILE *f = fopen(tmp, "w");
+    if (!f)
+        return;
+    /* the ones known now, then the older ones not looked at this time (other systems' games) */
+    for (int i = 0; i < nroms; i++)
+        if (roms[i].known == 1)
+            fprintf(f, "%s\t%ld\t%ld\t%s\t%s\n", roms[i].path, roms[i].size, roms[i].mtime, roms[i].id, roms[i].title);
+    FILE *old = fopen(p, "r");
+    char line[1500];
+    while (old && fgets(line, sizeof(line), old)) {
+        char path[1024];
+        const char *tab = strchr(line, '\t');
+        if (!tab || tab - line >= (long)sizeof(path))
+            continue;
+        snprintf(path, sizeof(path), "%.*s", (int)(tab - line), line);
+        bool have = false;
+        for (int i = 0; i < nroms && !have; i++)
+            have = !strcmp(roms[i].path, path);
+        if (!have)
+            fputs(line, f);
+    }
+    if (old)
+        fclose(old);
+    fclose(f);
+    rename(tmp, p);
+}
+
+static struct rom *rom_for(const char *sys, const char *game) {
+    if (!C->games_dirs)
+        return NULL;
+    index_system(sys);
+    for (int i = 0; i < nroms; i++)
+        if (!strcmp(roms[i].sys, sys) && !strcmp(roms[i].base, game))
+            return &roms[i];
+    return NULL;
+}
+
+static int id_of(struct rom *r) {
+    if (!r->known)
+        r->known = smc_game_id_of(r->sys, r->path, r->id, r->title) == 0 ? 1 : -1;
+    return r->known == 1 ? 0 : -1;
+}
+
+/* the card's folder for a local save: the game's ID when its ROM is found, else (as before) the save's name */
+static bool card_id_for(const char *sys, const char *game, char id[65], char title[65]) {
+    struct rom *r = rom_for(sys, game);
+    if (r && id_of(r) == 0) {
+        snprintf(id, 65, "%s", r->id);
+        if (title)
+            snprintf(title, 65, "%s", r->title);
+        return true;
+    }
+    smc_game_id(game, id);
+    if (title)
+        title[0] = 0;
+    return false;
+}
+
+/* this SuperStation's name for a game on the card: the ROM here with that game ID (so Main finds the save) */
+static const char *local_for_id(const char *sys, const char *id) {
+    if (!C->games_dirs)
+        return NULL;
+    index_system(sys);
+    for (int i = 0; i < nroms; i++)
+        if (!strcmp(roms[i].sys, sys) && id_of(&roms[i]) == 0 && !strcmp(roms[i].id, id))
+            return roms[i].base;
+    return NULL;
+}
+
 /* ---- one save file ---- */
 
 static uint8_t *bufA, *bufB;
@@ -291,7 +475,12 @@ static int push(const struct smc_bus *b, struct entry *e, const char *id, const 
         if (rc)
             return rc;
     }
-    int rc = smc_write_file(b, e->file, data, (uint32_t)n, gen);
+    /* the save's time: when Main wrote it (its file's time, the SuperStation's clock) */
+    char lp[1024];
+    struct stat st;
+    local_path(lp, sizeof(lp), e->sys, e->game, e->file);
+    uint32_t t = stat(lp, &st) == 0 && st.st_mtime > 0 ? (uint32_t)st.st_mtime : 0;
+    int rc = smc_write_file_at(b, e->file, data, (uint32_t)n, gen, t);
     if (rc)
         return rc;
     e->gen = gen;
@@ -302,13 +491,19 @@ static int push(const struct smc_bus *b, struct entry *e, const char *id, const 
     return 0;
 }
 
-static int pull(struct entry *e, const uint8_t *data, uint32_t n, uint32_t gen, struct smc_sync_report *rep) {
+static int pull(struct entry *e, const uint8_t *data, uint32_t n, uint32_t gen, uint32_t time,
+                struct smc_sync_report *rep) {
     char p[1024], dir[1024];
     snprintf(dir, sizeof(dir), "%s/%s", C->saves_dir, e->sys);
     local_path(p, sizeof(p), e->sys, e->game, e->file);
     if (mkdirs(dir) != 0 || write_file(p, data, n) != 0) {
         logf_("couldn't write %s", p);
         return -1;
+    }
+    if (time) {
+        /* the time the save was made, not when it was copied here */
+        struct timeval tv[2] = {{(time_t)time, 0}, {(time_t)time, 0}};
+        utimes(p, tv);
     }
     e->gen = gen;
     e->crc = smc_crc32(data, n, 0);
@@ -389,7 +584,7 @@ static int sync_one(const struct smc_bus *b, struct entry *e, const char *id, in
     if (!have_local && have_card) {
         if (smc_read_file(b, card_idx, cf->size, bufB) != SMC_OK)
             return -1;
-        return pull(e, bufB, cf->size, cf->gen, rep);
+        return pull(e, bufB, cf->size, cf->gen, cf->time, rep);
     }
     if (!have_local)
         return 0;
@@ -402,7 +597,7 @@ static int sync_one(const struct smc_bus *b, struct entry *e, const char *id, in
     if (smc_read_file(b, card_idx, cf->size, bufB) != SMC_OK)
         return -1;
     if (!local_changed)
-        return pull(e, bufB, cf->size, cf->gen, rep);
+        return pull(e, bufB, cf->size, cf->gen, cf->time, rep);
     /* both changed, or first sync with both sides there */
     if ((uint32_t)ln == cf->size && memcmp(bufA, bufB, (size_t)ln) == 0) {
         e->gen = cf->gen;
@@ -434,14 +629,23 @@ static int sync_game(const struct smc_bus *b, const char *sys, int card, const c
                 local_game[files[i].size] = 0;
         }
 
-    bool has_icon = false;
+    /* this SuperStation's file name for the game: its own ROM with the same game ID, when name.txt names a ROM
+     * that isn't here */
+    if (C->games_dirs && !rom_for(sys, local_game)) {
+        const char *l = local_for_id(sys, id);
+        if (l)
+            snprintf(local_game, sizeof(local_game), "%s", l);
+    }
+    bool has_icon = false, has_ini = false;
     int pushed = rep->pushed;
-    for (int i = 0; i < n; i++)
+    for (int i = 0; i < n; i++) {
         has_icon |= !strcmp(files[i].name, ICON_BIN);
+        has_ini |= !strcmp(files[i].name, GAME_INI);
+    }
 
     /* the card's files */
     for (int i = 0; i < n; i++) {
-        if (!strcmp(files[i].name, NAME_TXT) || !strcmp(files[i].name, ICON_BIN))
+        if (not_a_save(files[i].name))
             continue;
         struct entry *e = add(sys, card, local_game, files[i].name);
         if (!e)
@@ -483,6 +687,14 @@ static int sync_game(const struct smc_bus *b, const char *sys, int card, const c
         if (smc_select_card(b, sys, id, card, NULL) < 0 || smc_write_file(b, ICON_BIN, icon, (uint32_t)ilen, 1) != SMC_OK)
             logf_("couldn't put the icon on the card: %s/%s", sys, local_game);
     }
+    /* and what the game is, for a frontend's save list (game name, ID) */
+    char gid[65], title[65], ini[200];
+    if (!has_ini && rep->pushed > pushed && card_id_for(sys, local_game, gid, title) && !strcmp(gid, id)) {
+        snprintf(ini, sizeof(ini), "id=%s\ntitle=%s\n", gid, title);
+        if (smc_select_card(b, sys, id, card, NULL) < 0 ||
+            smc_write_file(b, GAME_INI, (const uint8_t *)ini, (uint32_t)strlen(ini), 1) != SMC_OK)
+            logf_("couldn't put game.ini on the card: %s/%s", sys, local_game);
+    }
     return 0;
 }
 
@@ -521,7 +733,7 @@ static void sync_system(const struct smc_bus *b, const char *sys, int card, stru
             continue;
         if (ndone < 256)
             snprintf(done[ndone++], 256, "%s", g);
-        smc_game_id(g, id);
+        card_id_for(sys, g, id, NULL);
         if (sync_game(b, sys, card, g, id, rep) < 0) {
             rep->failed++;
             logf_("failed: %s/%s: the card didn't answer", sys, g);
@@ -592,12 +804,18 @@ static int begin(const struct smc_bus *b, const struct smc_sync_cfg *cfg, struct
         return -1;
     }
     nents = 0;
+    nroms = nindexed = 0;
     load_state();
     load_locals();
     return 1;
 }
 
 static int end(void) {
+    if (nroms)
+        save_ids();
+    free(roms);
+    roms = NULL;
+    nroms = maxroms = nindexed = 0;
     int rc = save_state() | save_locals();
     free(ents), free(bufA), free(bufB);
     ents = NULL;
@@ -666,7 +884,7 @@ int smc_delete_save(const struct smc_bus *b, const struct smc_sync_cfg *cfg, con
     if (ok <= 0)
         return ok < 0 ? ok : SMC_E_NO_REPLY;
     int rc = SMC_OK, card = system_card(b, sys);
-    smc_game_id(game, id);
+    card_id_for(sys, game, id, NULL);
     struct entry *e = card > 0 ? add(sys, card, game, cfile) : NULL;
     struct smc_file f;
     int idx = e ? find_on_card(b, sys, card, id, cfile, &f) : -2;
@@ -675,7 +893,7 @@ int smc_delete_save(const struct smc_bus *b, const struct smc_sync_cfg *cfg, con
     else {
         uint32_t gen = idx >= 0 ? f.gen + 1 : (e->seen ? e->gen + 1 : 1);
         if (idx >= 0 && !f.deleted)
-            rc = smc_delete(b, idx, gen);
+            rc = smc_delete(b, idx, gen, (uint32_t)time(NULL));
         snprintf(path, sizeof(path), "%s/%s/%s", cfg->saves_dir, sys, save);
         if (rc == SMC_OK && access(path, F_OK) == 0 && trash_local(e, path) != 0)
             rc = SMC_E_BAD;
@@ -753,7 +971,7 @@ int smc_resolve(const struct smc_bus *b, const struct smc_sync_cfg *cfg, const c
     if (ok <= 0)
         return ok < 0 ? ok : SMC_E_NO_REPLY;
     int rc = SMC_E_NOT_FOUND, card = system_card(b, sys);
-    smc_game_id(game, id);
+    card_id_for(sys, game, id, NULL);
     struct entry *e = card > 0 ? add(sys, card, game, cfile) : NULL;
     struct smc_file f;
     int idx = e ? find_on_card(b, sys, card, id, cfile, &f) : -2;
@@ -802,3 +1020,47 @@ int smc_resolve(const struct smc_bus *b, const struct smc_sync_cfg *cfg, const c
     int erc = end();
     return rc ? rc : (erc ? SMC_E_BAD : SMC_OK);
 }
+
+int smc_game_info(const struct smc_bus *b, const char *sys, int card, const char *id, struct smc_game_info *gi) {
+    struct smc_file f;
+    memset(gi, 0, sizeof(*gi));
+    snprintf(gi->id, sizeof(gi->id), "%s", id);
+    int n = smc_select_card(b, sys, id, card, NULL);
+    if (n < 0)
+        return n;
+    char text[256];
+    for (int i = 0; i < n; i++) {
+        if (smc_info(b, i, &f) != SMC_OK)
+            return SMC_E_NO_REPLY;
+        if (f.deleted)
+            continue;
+        bool txt = !strcmp(f.name, NAME_TXT) || !strcmp(f.name, GAME_INI);
+        if (txt && f.size < sizeof(text)) {
+            if (smc_read_file(b, i, f.size, (uint8_t *)text) != SMC_OK)
+                return SMC_E_NO_REPLY;
+            text[f.size] = 0;
+            if (!strcmp(f.name, NAME_TXT))
+                snprintf(gi->save_name, sizeof(gi->save_name), "%s", text);
+            else {
+                char *t = strstr(text, "title=");
+                if (t) {
+                    t += 6;
+                    snprintf(gi->title, sizeof(gi->title), "%.*s", (int)strcspn(t, "\n"), t);
+                }
+            }
+            continue;
+        }
+        if (!strcmp(f.name, ICON_BIN)) {
+            gi->has_icon = true;
+            continue;
+        }
+        gi->files++;
+        gi->bytes += f.size;
+        if (f.time > gi->time)
+            gi->time = f.time;
+    }
+    if (!gi->save_name[0])
+        snprintf(gi->save_name, sizeof(gi->save_name), "%s", id); /* named after the save before game IDs */
+    return SMC_OK;
+}
+
