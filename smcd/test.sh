@@ -62,6 +62,8 @@ ask HELLO | grep -q "^card .* version 2" && ok "HELLO through the shim" || bad "
 r=$(ask READ)
 echo "$r" | grep -q "^read ok .*pushed=1" && ok "READ: the save to the card" || bad "READ: $r"
 ask LIST\ NES | grep -q "Test Game" && ok "LIST NES shows the game" || bad "LIST NES"
+sec=$(ask SECTION)
+echo "$sec" | grep -q "^system	NES	NES	1	1$" && echo "$sec" | grep -q "^game	NES	Test Game	" && echo "$sec" | grep -q "^section	1	1$" && ok "SECTION: the other systems' saves in one answer" || bad "SECTION: $sec"
 
 # 3. Main loads the game: LAUNCH (the card's copy is the same: nothing to load), then the game saves while it runs
 kill $shim; wait $shim 2>/dev/null || true

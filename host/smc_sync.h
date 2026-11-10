@@ -43,6 +43,8 @@ struct smc_sync_report {
 
 /* The console cores' save folders (cores/cores.tsv; names from each core's CONF_STR), and Console Mode's GBC. */
 extern const char *const smc_console_systems[];
+/* A save folder's name for a screen ("N64" -> "Nintendo 64"; unknown: the folder's own). */
+const char *smc_system_title(const char *sys);
 
 /* The save folder (system) of a game core about to be loaded, from its .rbf path ("_Console/SNES_20250101.rbf"
  * -> "SNES"), for Core; NULL for any other core. Every console core, PSX too: its per-game card images in saves/PSX

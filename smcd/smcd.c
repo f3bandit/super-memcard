@@ -13,6 +13,7 @@
  *   READ                    the memory manager's Read card: everything both ways
  *   SYSTEMS                 the systems with saves on the card
  *   LIST <sys> [<card>]     a system's games: name \t id \t time \t files \t bytes \t icon \t save name \t folder
+ *   SECTION [PSX]           every other system's saves at once, for the memory manager's screen (section() below)
  *   DELETE <sys>\t<save>    delete a save (others delete theirs at their next sync)
  *   CONFLICTS               saves whose two copies both changed
  *   KEEP <local|card> <sys>\t<save>
@@ -381,6 +382,75 @@ static void conflict_cb(const char *sys, int card, const char *save, uint32_t ge
     say(*(int *)ctx, "%s\t%d\t%s\t%u\n", sys, card, save, gen);
 }
 
+/* SECTION: the other systems' saves as one section of the memory manager's screen, in a fixed order, so the frontend
+ * can put it anywhere (below the PS1 card's saves, on a tab of its own) without asking system by system. Any number
+ * of games:
+ *   system  \t <folder> \t <title> \t <its current virtual card> \t <games>       then that system's games:
+ *   game    \t <folder> \t <name> \t <id> \t <time> \t <files> \t <bytes> \t <icon> \t <save name> \t <card folder> \t <both changed>
+ *   section \t <games> \t <systems>                                             last, the totals
+ * PSX (its card images) only with SECTION PSX: the PS1 card's saves are the frontend's own section. */
+struct conflict_set { char keys[64][200]; int n; };
+static void conflict_add(const char *sys, int card, const char *save, uint32_t gen, void *ctx) {
+    (void)gen;
+    struct conflict_set *cs = ctx;
+    if (cs->n < 64)
+        snprintf(cs->keys[cs->n++], sizeof(cs->keys[0]), "%s\t%d\t%s", sys, card, save);
+}
+static void section(int fd, struct conn *c, const struct smc_sync_cfg *k, int with_psx) {
+    static struct conflict_set cs;
+    cs.n = 0;
+    smc_conflicts(k, c->card.id, conflict_add, &cs);
+    int games = 0, systems = 0;
+    for (int s = 0; smc_console_systems[s]; s++) {
+        const char *sys = smc_console_systems[s];
+        if (!with_psx && !strcmp(sys, "PSX"))
+            continue;
+        int card = smc_core(&c->bus, sys, false);
+        if (card < 1)
+            card = 1;
+        /* the system's games first (its line carries their count), however many there are */
+        char *lines = NULL, id[65];
+        size_t ll = 0, cap = 0;
+        int n = 0;
+        for (int i = 0; smc_list_card(&c->bus, sys, card, i, id) == SMC_OK; i++) {
+            struct smc_game_info gi;
+            if (smc_game_info(&c->bus, sys, card, id, &gi) != SMC_OK)
+                continue;
+            char key[200], line[1024];
+            snprintf(key, sizeof(key), "%s\t%d\t%s", sys, card, gi.save_name);
+            int both = 0;
+            for (int j = 0; j < cs.n; j++)
+                both |= !strcmp(cs.keys[j], key);
+            int w = snprintf(line, sizeof(line), "game\t%s\t%s\t%s\t%u\t%d\t%u\t%d\t%s\t%s\t%d\n", sys,
+                             gi.name[0] ? gi.name : gi.title[0] ? gi.title : gi.save_name, gi.id, gi.time, gi.files,
+                             gi.bytes, gi.has_icon ? 1 : 0, gi.save_name, id, both);
+            if (w <= 0 || w >= (int)sizeof(line))
+                continue;
+            if (ll + (size_t)w > cap) {
+                size_t nc = cap ? cap * 2 : 16384;
+                while (nc < ll + (size_t)w)
+                    nc *= 2;
+                char *nl = realloc(lines, nc);
+                if (!nl)
+                    break;
+                lines = nl;
+                cap = nc;
+            }
+            memcpy(lines + ll, line, (size_t)w);
+            ll += (size_t)w;
+            n++;
+        }
+        if (n) {
+            say(fd, "system\t%s\t%s\t%d\t%d\n", sys, smc_system_title(sys), card, n);
+            send_all(fd, lines, ll);
+            games += n;
+            systems++;
+        }
+        free(lines);
+    }
+    say(fd, "section\t%d\t%d\n", games, systems);
+}
+
 /* a frontend's command; the answer ends with END */
 static void do_command(int fd, char *l) {
     struct conn c;
@@ -423,6 +493,8 @@ static void do_command(int fd, char *l) {
             *tab = 0;
             say(fd, "delete %d\n", smc_delete_save(&c.bus, &k, a, tab + 1));
         }
+    } else if (!strcmp(l, "SECTION") || !strcmp(l, "SECTION PSX")) {
+        section(fd, &c, &k, l[7] != 0);
     } else if (!strcmp(l, "CONFLICTS")) {
         smc_conflicts(&k, c.card.id, conflict_cb, &fd);
     } else if (!strncmp(l, "KEEP ", 5)) {

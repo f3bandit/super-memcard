@@ -21,6 +21,20 @@ const char *const smc_console_systems[] = {
     "TGFX16", "Jaguar", "NEOGEO", "PSX", "GameGear", NULL,
 };
 
+/* a save folder's name for a screen */
+const char *smc_system_title(const char *sys) {
+    static const struct { const char *sys, *title; } t[] = {
+        {"NES", "NES"}, {"SNES", "SNES"}, {"N64", "Nintendo 64"}, {"GAMEBOY", "Game Boy"}, {"GBC", "Game Boy Color"},
+        {"GBA", "Game Boy Advance"}, {"SMS", "Master System"}, {"GameGear", "Game Gear"}, {"Genesis", "Genesis"},
+        {"MegaDrive", "Mega Drive"}, {"MegaCD", "Mega-CD"}, {"S32X", "32X"}, {"Saturn", "Saturn"},
+        {"TGFX16", "TurboGrafx-16"}, {"Jaguar", "Jaguar"}, {"NEOGEO", "Neo Geo"}, {"PSX", "PlayStation"},
+    };
+    for (size_t i = 0; i < sizeof(t) / sizeof(t[0]); i++)
+        if (!strcmp(t[i].sys, sys))
+            return t[i].title;
+    return sys;
+}
+
 /* core (the .rbf's name before its date) -> its save folder (cores/cores.tsv; Main's names, 08) */
 static const struct { const char *core, *sys; } core_systems[] = {
     {"NES", "NES"}, {"SNES", "SNES"}, {"N64", "N64"}, {"Gameboy", "GAMEBOY"}, {"GBA", "GBA"}, {"SMS", "SMS"},

@@ -96,16 +96,43 @@ that isn't Super MemCard, the answer is `nocard`; a Super MemCard card that isn'
 |---|---|
 | `HELLO` | `card <id> version <n> features <hex> free_kb <n>` |
 | `READ` | Read card, everything both ways: `read ok card=<id> pushed= pulled= unchanged= conflicts= skipped= failed= deleted=` |
+| `SECTION` | the whole "other systems" section in one answer (below); `SECTION PSX` adds the PSX core's card images |
 | `SYSTEMS` | `<system>\t<its current virtual card>` per system on the card |
 | `LIST <sys> [<card>]` | per game: `name \t id \t time \t files \t bytes \t icon \t save name \t folder` |
 | `DELETE <sys>\t<save>` | `delete <rc>`: other SuperStations delete their copy at their next sync; nothing is lost |
 | `CONFLICTS` | saves whose two copies both changed (played on two SuperStations) |
 | `KEEP <local\|card> <sys>\t<save>` | `keep <rc>`: settles one |
 
+`SECTION`, every system's saves at once, any number of them, in a fixed system order:
+
+```
+system  \t <folder> \t <title> \t <its current virtual card> \t <games>        then that system's games:
+game    \t <folder> \t <name> \t <id> \t <time> \t <files> \t <bytes> \t <icon> \t <save name> \t <card folder> \t <both changed 0|1>
+section \t <games> \t <systems>                                             last, the totals
+END
+```
+
 `name` is the official name (else the header's title, else the save's name); `id` the game's own code (`NSME`,
 `SLUS-00594`, `CRC-1A2B3C4D`); `time` when the save was made (UTC). Show the save name too: two saves of one game on
 one SuperStation (one ROM under two names) are two entries with the same name and ID. Icons: `icon.bin` beside the
 saves, the PS1 save-icon layout (16x16, 16 colours, 1-3 frames; 05); every system has a default one for now.
+
+### On the screen: the PS1 card's saves stay as they are
+
+Memory Cards / Port 1 keeps everything it shows today (Card options, the PS1 saves, Free). Super MemCard's saves are
+a section of their own, fed only by `SECTION`, so it can go wherever suits the screen, and moving it changes nothing
+in `smcd`:
+
+- **below the PS1 card's saves**, with its own heading (`Other systems · Super MemCard`), its own options row, then
+  each system's heading and games; or
+- **its own tab** (`PS1 card` | `Other systems`, L1/R1).
+
+Mockups of both, on Console Mode's own screen: the "Super MemCard Saves Screen" design.
+
+**Long lists** (a card can hold hundreds of saves): the list scrolls inside its own area, between the header and the
+footer, and the selected row always stays in view; a scroll bar (or `21/48`) shows where you are; a name too long for
+its row ends in `…` on one line, never wraps; the right-hand column (system and time, or blocks) keeps its width.
+Nothing runs off the screen or over another row. System headings scroll with the list.
 
 ### Shared bus
 
