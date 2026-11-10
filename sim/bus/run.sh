@@ -8,7 +8,7 @@
 set -e
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../.." && pwd)
-PIN=5b7b01e540253a42476eae6d2ce91685cdf62720   # phosphor-menu, branch supermemcard (extension version 2)
+PIN=105d86632827300d37b0dcbceaff99b7313035e7   # phosphor-menu, branch supermemcard (extension version 3)
 work=$(mktemp -d)
 trap 'kill $vpid 2>/dev/null || true; wait $vpid 2>/dev/null || true; [ -n "$KEEP" ] && echo "kept $work" || rm -rf "$work"' EXIT
 

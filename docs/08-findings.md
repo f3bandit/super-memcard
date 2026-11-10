@@ -5,6 +5,21 @@ the design depends on. Newest first. Each entry says where it came from so it ca
 
 ## 2026-11-09
 
+### Faster Super MemCard frames (PH_RAW speed)
+
+Where a 140-byte frame's 10.9 ms went on the SS1: ~4.5 ms of bits at a PS1's 250 kHz, ~4.2 ms of 30 us gaps after
+each byte, the rest ACK waits. The card ACKs every byte before the next one goes, so it sets the pace itself: a faster
+clock and shorter gaps are safe to offer to a card that said it can (Hello). phosphor-menu's `PH_RAW` takes a speed
+now (extension version 3): 250 kHz/30 us, 500 kHz/10 us, 1 MHz/4 us, 2 MHz/2 us. Phosphor's Main sends Super MemCard
+frames at 1 MHz and Hello and PS1 frames at 250 kHz, and drops to 250 kHz for the session if a fast frame isn't
+answered whole.
+
+- phosphor-menu's simulation: 8.8 ms at 250 kHz, 4.0 ms at 500 kHz, 2.0 ms at 1 MHz, 1.2 ms at 2 MHz (the bus
+  alone; a real card's answer time adds to it).
+- Bus simulation with the card firmware at 1 MHz: the whole round trip passes, stock firmware too.
+- Still to measure: the SS1's front ports at those clocks (the wiring and level shifting), and the real card's own
+  answer time, which decides what speed is worth it.
+
 ### The card only when a save is loaded or saved (like a PS1)
 
 The first phase-1 version synced every save at every menu start; that read the card and the whole saves folder each

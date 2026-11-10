@@ -57,12 +57,13 @@ module tb;
 	reg  [7:0] fr[0:255];
 	reg [15:0] rst, rw16;
 	integer    fl;   // frame length being built
+	reg  [1:0] spd = 2'd2;   // Super MemCard frames' speed (PH_RAW, version 3): 1 MHz, as Phosphor's Main sends them
 	task automatic raw_frame(input integer port, input integer len);
 		integer k, tries;
 		begin
 			begin_cmd(16'h87);
 			w({7'd0, port[0], len[7:0]}, r);
-			w(16'd9766, r);
+			w({(fr[1] == 8'h60 || fr[1] == 8'h52) ? 2'd0 : spd, 14'd9766}, r);   // Hello and PS1 frames as a PS1; Super MemCard at spd
 			for (k = 0; k < len; k = k + 2) w({(k + 1 < len) ? fr[k + 1] : 8'h00, fr[k]}, r);
 			end_cmd;
 			tries = 0;
@@ -102,7 +103,7 @@ module tb;
 		repeat (10) @(negedge clk); reset = 0; repeat (10) @(negedge clk);
 
 		begin_cmd(16'h80); w(0, r); end_cmd;
-		check("menu core extension: version 2", r, 16'd2);
+		check("menu core extension: version 3", r, 16'd3);
 		begin_cmd(16'h81); w(16'h0001, r); end_cmd;
 		#(2_000_000);
 
