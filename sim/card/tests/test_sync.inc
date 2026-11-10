@@ -609,6 +609,59 @@ static void t_sync_by_game_id(void) {
     CHECK_EQ(file_size("SuperMemCard/N64/Card1/Homebrew/save.eep"), sizeof(eep));
 }
 
+/* a bus that counts the frames sent */
+static int frames;
+static void cnt_sel(void *c, bool on) { if (on) frames++; bus_sel(c, on); }
+static const struct smc_bus cbus = {NULL, cnt_sel, bus_x, NULL};
+static struct smc_sync_report quick(int which) {
+    struct smc_sync_cfg c = cfg_of(which);
+    struct smc_sync_report r;
+    CHECK_EQ(smc_sync_changed(&cbus, &c, &r), 0);
+    return r;
+}
+
+static void t_sync_quick_and_one_game(void) {
+    sync_setup();
+    put_save(0, "SNES/Super Metroid (USA).sav", sA, sizeof(sA));
+    put_save(0, "N64/Super Mario 64 (USA).eep", eep, sizeof(eep));
+    /* the first time with this card: everything */
+    struct smc_sync_report r = quick(0);
+    CHECK(r.first);
+    CHECK_EQ(r.pushed, 2);
+    /* nothing changed: nothing asked of the card but Hello */
+    frames = 0;
+    r = quick(0);
+    CHECK(!r.first);
+    CHECK_EQ(r.pushed + r.pulled + r.unchanged + r.failed, 0);
+    CHECK(frames <= 2);
+    /* a game played: only that one goes */
+    sleep(1); /* a new file time */
+    put_save(0, "SNES/Super Metroid (USA).sav", sB, sizeof(sB));
+    frames = 0;
+    r = quick(0);
+    CHECK_EQ(r.pushed, 1);
+    CHECK_EQ(r.unchanged, 0);
+    /* a newer save from another SuperStation waits until the game is started here */
+    CHECK_EQ(run_sync(1).pulled, 2);
+    put_save(1, "N64/Super Mario 64 (USA).eep", sA, sizeof(eep));
+    CHECK_EQ(quick(1).pushed, 1);
+    r = quick(0);
+    CHECK_EQ(r.pulled, 0);
+    struct smc_sync_cfg c0 = cfg_of(0);
+    CHECK_EQ(smc_sync_game(&vbus, &c0, "N64", "Super Mario 64 (USA)", &r), 0);
+    CHECK_EQ(r.pulled, 1);
+    CHECK_EQ(get_save(0, "N64/Super Mario 64 (USA).eep", got, sizeof(got)), sizeof(eep));
+    CHECK(memcmp(got, sA, sizeof(eep)) == 0);
+    /* and just pulled: the quick sync after the game has nothing to do */
+    r = quick(0);
+    CHECK_EQ(r.pushed + r.pulled, 0);
+    /* a reinstall: the first quick sync brings everything back */
+    wipe(0);
+    r = quick(0);
+    CHECK(r.first);
+    CHECK_EQ(r.pulled, 2);
+}
+
 #define SYNC_TESTS \
     {"sync: saves to the card, then nothing to do, then a change", t_sync_to_card_then_unchanged, true, NULL}, \
     {"sync: a reinstall gets every save back", t_sync_reinstall_gets_everything_back, true, NULL}, \
@@ -624,4 +677,5 @@ static void t_sync_by_game_id(void) {
     {"sync: deleted on one, played on another: the save stays", t_sync_delete_vs_played_since, true, NULL}, \
     {"sync: both changed, settled either way", t_sync_conflict_settled, true, NULL}, \
     {"game IDs from the games' own headers", t_game_ids_from_headers, true, NULL}, \
-    {"sync: one save set per game, filed by game ID, with its time", t_sync_by_game_id, true, NULL},
+    {"sync: one save set per game, filed by game ID, with its time", t_sync_by_game_id, true, NULL}, \
+    {"sync: quick after a game, one game before it, everything the first time", t_sync_quick_and_one_game, true, NULL},

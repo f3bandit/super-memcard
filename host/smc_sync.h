@@ -39,6 +39,7 @@ struct smc_sync_report {
     int pushed, pulled, unchanged, conflicts, skipped, failed;
     int switched; /* systems moved to another virtual card (the card's buttons) */
     int deleted;  /* saves deleted on another SuperStation, deleted here too (kept aside) */
+    bool first;   /* nothing had been synced with this card before (a new card or a reinstall): everything was */
 };
 
 /* The 15 console cores' save folders (cores/cores.tsv; names from each core's CONF_STR). */
@@ -53,8 +54,19 @@ const char *smc_core_system(const char *rbf);
  * The sync puts it beside a game's saves on the card the first time the game goes there. */
 const uint8_t *smc_system_icon(const char *sys, size_t *len);
 
-/* 0 on success (including "no Super MemCard card": report.card is false), <0 if the sync stopped. */
+/* When to sync (docs/05 §3): the card is only reachable from the menu core, before and after a game.
+ *   smc_sync_game()     just before a game starts: that one game (the card's newer copy comes in before the core
+ *                       loads)
+ *   smc_sync_changed()  back in the menu: only local saves new or changed since they were last synced (a folder read
+ *                       when nothing changed: nothing is sent to the card)
+ *   smc_sync()          everything: for the memory manager, or when the user asks
+ * Each does everything instead the first time with a card (a new card, or a reinstall: every save comes back).
+ * 0 on success (including "no Super MemCard card": report.card is false), <0 if the sync stopped. */
 int smc_sync(const struct smc_bus *b, const struct smc_sync_cfg *cfg, struct smc_sync_report *rep);
+/* game: the save's name, which is the game file's name without its extension (Main's rule) */
+int smc_sync_game(const struct smc_bus *b, const struct smc_sync_cfg *cfg, const char *sys, const char *game,
+                  struct smc_sync_report *rep);
+int smc_sync_changed(const struct smc_bus *b, const struct smc_sync_cfg *cfg, struct smc_sync_report *rep);
 
 /* The frontend deletes a save (`save`: its file name in saves/<sys>/, "Super Metroid (USA).sav"): the card's copy
  * is deleted with a tombstone, so every SuperStation that syncs deletes its copy too (unless that one was played

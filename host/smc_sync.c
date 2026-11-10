@@ -126,6 +126,7 @@ struct entry {
     char game[256];   /* the local save name (without the extension) */
     char file[17];    /* the card's file name: save.sav, save.eep, save_1.cpk ... */
     uint32_t gen, crc;
+    long mtime, size; /* the local file when last synced: unchanged since means nothing to do (quick sync) */
     bool seen;    /* synced before (with this card) */
     bool visited; /* handled in this run */
 };
@@ -159,22 +160,25 @@ static void load_state(void) {
     FILE *f = fopen(p, "r");
     if (!f)
         return;
-    /* sys card game file gen crc (before virtual cards: no card column, card 1) */
+    /* sys card game file gen crc mtime size (before virtual cards: no card column, card 1; before the quick sync: no
+     * mtime and size) */
     while (fgets(line, sizeof(line), f)) {
-        char *t[6];
+        char *t[8];
         int k = 0;
-        for (char *s = strtok(line, "\t\n"); s && k < 6; s = strtok(NULL, "\t\n"))
+        for (char *s = strtok(line, "\t\n"); s && k < 8; s = strtok(NULL, "\t\n"))
             t[k++] = s;
         if (k < 5)
             continue;
-        int card = k == 6 ? atoi(t[1]) : 1;
-        char **u = k == 6 ? t + 2 : t + 1;
+        int card = k >= 6 ? atoi(t[1]) : 1;
+        char **u = k >= 6 ? t + 2 : t + 1;
         if (card < 1 || card > SMC_CARDS_MAX)
             continue;
         struct entry *e = add(t[0], card, u[0], u[1]);
         if (e) {
             e->gen = (uint32_t)strtoul(u[2], NULL, 10);
             e->crc = (uint32_t)strtoul(u[3], NULL, 16);
+            e->mtime = k == 8 ? atol(t[6]) : -1;
+            e->size = k == 8 ? atol(t[7]) : -1;
             e->seen = true;
         }
     }
@@ -246,8 +250,8 @@ static int save_state(void) {
         return -1;
     for (int i = 0; i < nents; i++)
         if (ents[i].seen)
-            fprintf(f, "%s\t%d\t%s\t%s\t%u\t%08x\n", ents[i].sys, ents[i].card, ents[i].game, ents[i].file,
-                    (unsigned)ents[i].gen, (unsigned)ents[i].crc);
+            fprintf(f, "%s\t%d\t%s\t%s\t%u\t%08x\t%ld\t%ld\n", ents[i].sys, ents[i].card, ents[i].game, ents[i].file,
+                    (unsigned)ents[i].gen, (unsigned)ents[i].crc, ents[i].mtime, ents[i].size);
     bool ok = fflush(f) == 0 && fsync(fileno(f)) == 0;
     fclose(f);
     return ok && rename(tmp, p) == 0 ? 0 : -1;
@@ -560,8 +564,30 @@ static int trash_local(const struct entry *e, const char *path) {
 
 /* Bring one save file in step. card_idx: its index in the selected set on the card, -1 if the card
  * doesn't have it (the set must be selected when card_idx >= 0). */
+static int sync_one_(const struct smc_bus *b, struct entry *e, const char *id, int card_idx, const struct smc_file *cf,
+                     struct smc_sync_report *rep);
+
+/* the local file as it is now (after the sync): the quick sync skips it while it stays so */
+static void note_local(struct entry *e) {
+    char p[1024];
+    struct stat st;
+    local_path(p, sizeof(p), e->sys, e->game, e->file);
+    if (stat(p, &st) == 0)
+        e->mtime = (long)st.st_mtime, e->size = (long)st.st_size;
+    else
+        e->mtime = e->size = -1;
+}
+
 static int sync_one(const struct smc_bus *b, struct entry *e, const char *id, int card_idx, const struct smc_file *cf,
                     struct smc_sync_report *rep) {
+    int rc = sync_one_(b, e, id, card_idx, cf, rep);
+    if (rc == 0)
+        note_local(e);
+    return rc;
+}
+
+static int sync_one_(const struct smc_bus *b, struct entry *e, const char *id, int card_idx, const struct smc_file *cf,
+                     struct smc_sync_report *rep) {
     char p[1024];
     e->visited = true;
     local_path(p, sizeof(p), e->sys, e->game, e->file);
@@ -833,6 +859,7 @@ static int begin(const struct smc_bus *b, const struct smc_sync_cfg *cfg, struct
     nents = 0;
     nroms = nindexed = 0;
     load_state();
+    rep->first = nents == 0; /* nothing synced with this card yet: a new card, or a reinstall */
     load_locals();
     return 1;
 }
@@ -850,35 +877,116 @@ static int end(void) {
     return rc;
 }
 
+/* A system on the virtual card the card has in use for it. When the card's buttons picked another one, the local saves
+ * go to the old card first; only then are they replaced by the new card's (the whole system: a switch is rare).
+ * game: one game only (NULL: every game). Returns the card in use, 0 if the system couldn't be synced. */
+static int sync_system_now(const struct smc_bus *b, const char *sys, const char *game, struct smc_sync_report *rep) {
+    int now = smc_core(b, sys, false);
+    if (now < 1) {
+        rep->failed++;
+        logf_("failed: %s: the card didn't say which of its cards is in use", sys);
+        return 0;
+    }
+    int was = local_card(sys);
+    if (was && was != now) {
+        int failed = rep->failed, conflicts = rep->conflicts;
+        sync_system(b, sys, was, rep);
+        if (rep->failed != failed || rep->conflicts != conflicts || set_aside(sys, was) != 0) {
+            logf_("%s stays on card %d: its saves couldn't all be put on it first", sys, was);
+            return 0;
+        }
+        logf_("%s: card %d -> card %d", sys, was, now);
+        rep->switched++;
+        game = NULL; /* everything of the new card comes in */
+    }
+    set_local_card(sys, now);
+    if (!game)
+        sync_system(b, sys, now, rep);
+    else {
+        char id[65];
+        card_id_for(sys, game, id, NULL);
+        if (sync_game(b, sys, now, game, id, rep) < 0) {
+            rep->failed++;
+            logf_("failed: %s/%s: the card didn't answer", sys, game);
+        }
+    }
+    return now;
+}
+
+static void done_log(const char *what, const struct smc_sync_report *rep) {
+    logf_("%s done: %d to card, %d from card, %d unchanged, %d both changed, %d deleted, %d skipped, %d failed", what,
+          rep->pushed, rep->pulled, rep->unchanged, rep->conflicts, rep->deleted, rep->skipped, rep->failed);
+}
+
 int smc_sync(const struct smc_bus *b, const struct smc_sync_cfg *cfg, struct smc_sync_report *rep) {
     int ok = begin(b, cfg, rep);
     if (ok <= 0)
         return ok;
+    for (const char *const *s = cfg->systems; *s; s++)
+        sync_system_now(b, *s, NULL, rep);
+    done_log("sync", rep);
+    return end();
+}
+
+int smc_sync_game(const struct smc_bus *b, const struct smc_sync_cfg *cfg, const char *sys, const char *game,
+                  struct smc_sync_report *rep) {
+    int ok = begin(b, cfg, rep);
+    if (ok <= 0)
+        return ok;
+    if (rep->first) {
+        /* the first time with this card: everything (a reinstall gets every save back) */
+        for (const char *const *s = cfg->systems; *s; s++)
+            sync_system_now(b, *s, NULL, rep);
+    } else
+        sync_system_now(b, sys, game, rep);
+    done_log("game sync", rep);
+    return end();
+}
+
+int smc_sync_changed(const struct smc_bus *b, const struct smc_sync_cfg *cfg, struct smc_sync_report *rep) {
+    int ok = begin(b, cfg, rep);
+    if (ok <= 0)
+        return ok;
     for (const char *const *s = cfg->systems; *s; s++) {
-        int now = smc_core(b, *s, false);
-        if (now < 1) {
-            rep->failed++;
-            logf_("failed: %s: the card didn't say which of its cards is in use", *s);
+        if (rep->first) {
+            sync_system_now(b, *s, NULL, rep);
             continue;
         }
-        int was = local_card(*s);
-        if (was && was != now) {
-            /* the card's buttons picked another card for this system: the local saves belong to the old
-             * one, so they go to it first; only then are they replaced by the new card's */
-            int failed = rep->failed, conflicts = rep->conflicts;
-            sync_system(b, *s, was, rep);
-            if (rep->failed != failed || rep->conflicts != conflicts || set_aside(*s, was) != 0) {
-                logf_("%s stays on card %d: its saves couldn't all be put on it first", *s, was);
+        /* only local saves new or changed since they were last synced: the folder is read, no file, no ROM, and the
+         * card isn't asked anything unless one changed */
+        char dir[1024];
+        snprintf(dir, sizeof(dir), "%s/%s", cfg->saves_dir, *s);
+        DIR *d = opendir(dir);
+        if (!d)
+            continue;
+        static char changed[64][256];
+        int nchanged = 0;
+        struct dirent *de;
+        while ((de = readdir(d))) {
+            char g[256], cfile[17], p[1300];
+            struct stat st;
+            if (de->d_name[0] == '.' || !split_name(de->d_name, g, sizeof(g), cfile, sizeof(cfile)))
                 continue;
-            }
-            logf_("%s: card %d -> card %d", *s, was, now);
-            rep->switched++;
+            snprintf(p, sizeof(p), "%s/%s", dir, de->d_name);
+            if (stat(p, &st) != 0 || !S_ISREG(st.st_mode))
+                continue;
+            int card = local_card(*s);
+            struct entry *e = card ? find(*s, card, g, cfile) : NULL;
+            if (e && e->seen && e->mtime == (long)st.st_mtime && e->size == (long)st.st_size)
+                continue;
+            bool have = false;
+            for (int i = 0; i < nchanged && !have; i++)
+                have = !strcmp(changed[i], g);
+            if (!have && nchanged < 64)
+                snprintf(changed[nchanged++], 256, "%s", g);
         }
-        set_local_card(*s, now);
-        sync_system(b, *s, now, rep);
+        closedir(d);
+        int switched = rep->switched;
+        for (int i = 0; i < nchanged; i++)
+            if (!sync_system_now(b, *s, changed[i], rep) || rep->switched != switched)
+                break; /* (a switched system was synced whole) */
     }
-    logf_("sync done: %d to card, %d from card, %d unchanged, %d both changed, %d deleted, %d skipped, %d failed",
-          rep->pushed, rep->pulled, rep->unchanged, rep->conflicts, rep->deleted, rep->skipped, rep->failed);
+    done_log("quick sync", rep);
     return end();
 }
 
