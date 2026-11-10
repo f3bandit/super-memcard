@@ -1,5 +1,4 @@
-// Copied from phosphor-menu rtl/phosphor/card_sector.sv (port, do not edit here: change it there and copy, tools/sync-phosphor-ext.sh).
-// SS1 Controller Tester
+// Super MemCard: the front ports' bus (from f3bandit's SS1 Controller Tester)
 // Copyright (C) 2026 f3bandit
 //
 // This program is free software: you can redistribute it and/or modify it under the terms of
@@ -32,7 +31,7 @@
 // raw_count: bytes exchanged; raw_ack: clk cycles to wait for each ACK (a Super MemCard card ACKs a
 // request's last byte only once its SD card is done: milliseconds). Same timing as the sector reads.
 
-module card_sector
+module smc_card_sector
 (
 	input             clk,
 	input             reset,
@@ -87,7 +86,7 @@ reg  [7:0] b_tx;
 wire [7:0] b_rx;
 wire       b_done, b_ack;
 
-sio_byte sio_byte
+smc_sio_byte smc_sio_byte
 (
 	.clk(clk), .reset(reset),
 	.half_period(half_period), .ack_timeout(rw ? raw_ack : pd ? 24'(ack_timeout) : 24'(card_ack_timeout)),

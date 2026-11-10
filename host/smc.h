@@ -1,8 +1,8 @@
 /* Super MemCard host library: talks to the card over the PS1 memory card bus (docs/05-design.md).
  *
- * The bus is given as two callbacks, so the same code runs over the SS1's front port (Phosphor's
- * PH_CARD) and over the virtual card's socket (sim/card vcardd) while there's no real card.
- * Plain C, no allocation, for Phosphor's Main and Console Mode alike. */
+ * The bus is given as two callbacks, so the same code runs over the SS1's front ports (the Super MemCard front-port
+ * driver, core/sys) and over the virtual card's socket (sim/card vcardd) while there's no real card.
+ * Plain C, no allocation, for any MiSTer Main (Console Mode's, the test Main). */
 #pragma once
 #include <stdbool.h>
 #include <stddef.h>
@@ -17,7 +17,7 @@ struct smc_bus {
      * the bus must wait at least SMC_ACK_TIMEOUT_MS for it. */
     uint8_t (*xfer)(void *ctx, uint8_t out, bool last, bool *ack);
     /* Optional, used instead of select/xfer when set: a whole frame in one go, as the SS1's front
-     * ports do it (phosphor-menu PH_RAW). Sends out[0..len-1] in one select, puts the card's byte for
+     * ports do it (core/sys smc_port: SMC_RAW). Sends out[0..len-1] in one select, puts the card's byte for
      * each into in[k], stops after the first byte that isn't ACKed (the last one never is). Returns
      * the bytes exchanged (0: nothing answered), <0 on a transport error. */
     int (*frame)(void *ctx, const uint8_t *out, uint8_t *in, int len);
@@ -33,7 +33,7 @@ enum {
 };
 
 /* host IDs (Hello) */
-enum { SMC_HOST_PHOSPHOR = 1, SMC_HOST_CONSOLE_MODE = 2, SMC_HOST_CORE = 3, SMC_HOST_TEST = 0x7F };
+enum { SMC_HOST_MAIN = 1, SMC_HOST_CONSOLE_MODE = 2, SMC_HOST_CORE = 3, SMC_HOST_TEST = 0x7F };
 
 struct smc_card {
     uint8_t version, features;

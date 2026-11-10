@@ -1,5 +1,5 @@
 /* The virtual card's bus over a socket: one request, one reply. Used between the test program
- * and its card process (vcard_client.c), and by vcardd for a host on the SS1 (Phosphor's Main). */
+ * and its card process (vcard_client.c), and by vcardd for a host on the SS1 (a test Main). */
 #pragma once
 #include <stdbool.h>
 #include <stdint.h>

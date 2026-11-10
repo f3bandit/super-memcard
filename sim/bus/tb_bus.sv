@@ -1,5 +1,5 @@
-// Layer 2 of the virtual SS1 (docs/07): Phosphor's front-port logic (phosphor-menu phosphor_ext, card_sector,
-// sio_byte) driven the way Main drives it over EXT_BUS, with the virtual card, sd2psXtd's own PS1 code with Super
+// Layer 2 of the virtual SS1 (docs/07): the Super MemCard front-port driver (core/sys: smc_port, smc_card_sector,
+// smc_sio_byte) driven the way Main drives it over EXT_BUS, with the virtual card, sd2psXtd's own PS1 code with Super
 // MemCard, on front port 1 bit by bit (vcard_bus + vcardd). Port 2 is empty.
 // Run: sh sim/bus/run.sh
 // Copyright (C) 2026 f3bandit.
@@ -41,7 +41,7 @@ module tb;
 	assign sel2_n = uo[0];
 `else
 	// controllers are read rarely here: each poll of port 1 reaches the virtual card, which takes real time
-	phosphor_ext #(.GAP(23'h7FFFFF)) dut
+	smc_port #(.GAP(23'h7FFFFF)) dut
 	(
 		.clk(clk), .reset(reset), .clk_u64(16'(CLK_U64)),
 		.io_strobe(io_strobe), .io_enable(io_enable), .io_din(io_din), .io_dout(io_dout), .dout_en(dout_en),
@@ -53,7 +53,7 @@ module tb;
 
 	vcard_bus card(.sel_n(sel1_n), .sclk(sclk), .cmd(scmd), .dat(dat1), .ack_n(ack1));
 
-	// ---- Main's side (as phosphor-main does it) ----
+	// ---- Main's side ----
 	reg [15:0] r;
 	task automatic w(input [15:0] v, output [15:0] got);
 		begin
@@ -94,7 +94,7 @@ module tb;
 	reg  [7:0] fr[0:255];
 	reg [15:0] rst, rw16;
 	integer    fl;   // frame length being built
-	reg  [1:0] spd = 2'd2;   // Super MemCard frames' speed (PH_RAW, version 3): 1 MHz, as Phosphor's Main sends them
+	reg  [1:0] spd = 2'd2;   // Super MemCard frames' speed (SMC_RAW, version 3): 1 MHz, as the test Main sends them
 	task automatic raw_frame(input integer port, input integer len);
 		integer k, tries;
 		begin
@@ -117,7 +117,7 @@ module tb;
 	endtask
 	task automatic zeros(input integer n); integer k; begin for (k = 0; k < n; k = k + 1) put(8'h00); end endtask
 
-	// PS1 sector read through PH_CARD (the existing path), up to 3 tries
+	// PS1 sector read through SMC_CARD (the existing path), up to 3 tries
 	reg [15:0] data[0:63];
 	task automatic ps1_read(input [9:0] sec);
 		integer k, n, t;
@@ -140,7 +140,7 @@ module tb;
 		repeat (10) @(negedge clk); reset = 0; repeat (10) @(negedge clk);
 
 		begin_cmd(16'h80); w(0, r); end_cmd;
-		check("menu core extension: version 3", r, 16'd3);
+		check("front-port driver: version 3", r, 16'd3);
 		begin_cmd(16'h81); w(16'h0001, r); end_cmd;
 		#(2_000_000);
 

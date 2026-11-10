@@ -4,12 +4,12 @@ Game saves from MiSTer console cores on the SuperStation One, kept on the Retro 
 a front port as a redundant backup, so they survive a Console Mode reinstall or a new SD card:
 
 - **phase 1, any core**: the host (Main) copies a game's save to and from the card at game start and
-  end. Cores are unchanged; only Main changes (Phosphor's, then Console Mode's);
+  end. Cores are unchanged; only Main changes (the test Main's, then Console Mode's);
 - **phase 2, custom MiSTer/SS1 cores**: cores rebuilt with a card driver in `sys/` save to the card
   while the game runs (the N64 Controller Pak on the card is the first one).
 The card stays a normal PS1 memory card on a real PS1/PS2, in Console Mode and in the PSX core.
 
-Target: Console Mode. Developed and tested on Phosphor first (its Main is an open fork of Main_MiSTer),
+Target: Console Mode. Developed and tested on a test Main first (a fork of Main_MiSTer),
 then handed to Retro Remake as a set: protocol spec, `sys/` and Main patches, card firmware changes.
 
 ## Documents
@@ -17,10 +17,10 @@ then handed to Retro Remake as a set: protocol spec, `sys/` and Main patches, ca
 | | |
 |---|---|
 | [docs/00-rules.md](docs/00-rules.md) | the rules every part follows (the card stays a normal PS1 card, round trip included) |
-| [docs/01-how-cores-save.md](docs/01-how-cores-save.md) | how MiSTer, Console Mode and Phosphor cores read and write saves |
+| [docs/01-how-cores-save.md](docs/01-how-cores-save.md) | how MiSTer and Console Mode cores read and write saves |
 | [docs/02-card-saves.md](docs/02-card-saves.md) | how the Retro Remake card (SD2PSX) reads and writes saves |
 | [docs/03-card-menu.md](docs/03-card-menu.md) | how the card's on-screen menu works |
-| [docs/04-memory-card-managers.md](docs/04-memory-card-managers.md) | Console Mode's memory card manager, Phosphor's and SS1 Tool's |
+| [docs/04-memory-card-managers.md](docs/04-memory-card-managers.md) | Console Mode's memory card manager, f3bandit's card tools and SS1 Tool's |
 | [docs/05-design.md](docs/05-design.md) | Super MemCard: the protocol, the host, the card's menu |
 | [docs/06-console-mode.md](docs/06-console-mode.md) | how it works with Console Mode |
 | [docs/07-virtual-ss1.md](docs/07-virtual-ss1.md) | testing without an SS1: virtual card, bus simulation, virtual Main |
@@ -41,7 +41,7 @@ then handed to Retro Remake as a set: protocol spec, `sys/` and Main patches, ca
    and the PSX core already reads the disc ID. The host tells the card "system N64, game NUS-NSME-USA".
 3. **Main first, then `sys/`**: every core's save reads and writes already go through Main (`hps_io`),
    so phase 1 is a change to Main alone and works with stock cores. For phase 2, every MiSTer core
-   shares the `sys/` framework: the card driver goes into `sys/` once (`card_sector.sv` from
+   shares the `sys/` framework: the card driver goes into `sys/` once (`smc_card_sector.sv` from
    SS1_MemCard_MiSTer) and the custom cores are rebuilt with it.
 4. **Speed**: measured on the SS1's front ports, ~11 KB/s of save data (a 140-byte frame per 128 bytes, ~11 ms
    each): an 8 KB save ~0.7 s, a 128 KB one ~11 s. So the host keeps the save in memory and writes changes
@@ -52,7 +52,7 @@ then handed to Retro Remake as a set: protocol spec, `sys/` and Main patches, ca
 ## Plan
 
 1. Card side: test the protocol on the bench (stock SD2PSX or the MC/PS MemCard Pro board).
-2. Phosphor prototype: `sys/` card driver + Main save routing + game IDs; rebuild PSX, N64 and one
+2. Prototype on the test Main: `sys/` card driver + Main save routing + game IDs; rebuild PSX, N64 and one
    cartridge core (e.g. SNES) and test on the SS1.
 3. N64 first use: the Controller Pak lives on the card (see SS1_N64_MiSTer plan).
 4. Hand-off for Console Mode: the spec, the `sys/` and Main patches (MiSTer_ConsoleMode derives from

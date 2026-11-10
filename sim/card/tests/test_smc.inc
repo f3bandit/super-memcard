@@ -6,7 +6,7 @@ static void bus_sel(void *c, bool s) { (void)c; vcard_select(s); }
 static uint8_t bus_x(void *c, uint8_t o, bool last, bool *ack) { (void)c; return vcard_xfer(o, last, ack); }
 static const struct smc_bus vbus = {NULL, bus_sel, bus_x, NULL};
 
-/* the front ports' way: a whole frame per call (phosphor-menu PH_RAW), here done byte by byte on the
+/* the front ports' way: a whole frame per call (core/sys smc_port: SMC_RAW), here done byte by byte on the
  * virtual card, stopping after the first byte without an ACK like the FPGA does */
 static int bus_frame_cb(void *c, const uint8_t *out, uint8_t *in, int len) {
     (void)c;

@@ -1,5 +1,5 @@
 /* Super MemCard: a game's ID from its own header (smc_ident.h). The CRC32 and disc product codes come from
- * phosphord's identification (smc_ident.c); the cartridge header codes are read here.
+ * the game identification (smc_ident.c); the cartridge header codes are read here.
  * Copyright (C) 2026 f3bandit. */
 #include "smc_ident.h"
 
@@ -201,7 +201,7 @@ int smc_game_id_of(const char *sys, const char *path, char id[65], char title[65
             *p = (char)toupper((unsigned char)*p);
         return 0;
     }
-    /* no code in the game itself: phosphord's identity (disc product code, or the ROM's CRC32) */
+    /* no code in the game itself: the game's identity (disc product code, or the ROM's CRC32) */
     if (smc_ident_file(sys, path, &x))
         return -1;
     if (x.serial[0])

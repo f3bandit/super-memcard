@@ -1,5 +1,4 @@
-// Copied from phosphor-menu rtl/phosphor/sio_byte.sv (port, do not edit here: change it there and copy, tools/sync-phosphor-ext.sh).
-// SS1 Controller Tester
+// Super MemCard: the front ports' bus (from f3bandit's SS1 Controller Tester)
 // Copyright (C) 2026 f3bandit
 //
 // This program is free software: you can redistribute it and/or modify it under the terms of
@@ -13,7 +12,7 @@
 // both sides sample on the rising edge. After every byte except the last one of a command the
 // card pulls ACK low for a few microseconds to say "send the next byte".
 
-module sio_byte
+module smc_sio_byte
 (
 	input             clk,
 	input             reset,

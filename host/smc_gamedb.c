@@ -1,6 +1,6 @@
 /* Super MemCard: the official names of games, from libretro-database's game lists (No-Intro for cartridges, Redump
- * for discs), the lists Phosphor uses (docs/09-game-database.md). The .dat reader is Phosphor's (phosphord
- * src_libretro.c: port, don't rewrite; change it there and copy). The lists aren't shipped: a frontend fetches them
+ * for discs) (docs/09-game-database.md). The .dat reader is ported from f3bandit's game library code
+ * (src_libretro.c). The lists aren't shipped: a frontend fetches them
  * onto the SuperStation (tools/gamedb/fetch.sh does it for testing) and they're used there under their own terms.
  * Copyright (C) 2026 f3bandit. */
 #include "smc_gamedb.h"
@@ -11,7 +11,7 @@
 #include <string.h>
 #include <strings.h>
 
-/* Main's save folder -> libretro list(s) (phosphord's MAP, by save folder); disc systems use Redump */
+/* Main's save folder -> libretro list(s) (by save folder); disc systems use Redump */
 static const struct { const char *sys; const char *lr[3]; int disc; } MAP[] = {
 	{ "PSX",       { "Sony - PlayStation" }, 1 },
 	{ "Saturn",    { "Sega - Saturn" }, 1 },

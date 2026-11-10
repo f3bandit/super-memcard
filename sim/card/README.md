@@ -28,7 +28,7 @@ test_card                                  # the same tests, on the SS1 (run fro
 vcardd /tmp/supermemcard/sd [socket]       # a card that stays powered, on /tmp/supermemcard.sock
 ```
 
-Until there's a real card, Phosphor's Main talks to `vcardd` instead of the front port. The socket carries
+Until there's a real card, the test Main talks to `vcardd` instead of the front port. The socket carries
 the same thing the bus does (select, one byte out, one byte and ACK back; `host/vcard_wire.h`), so only that link
 changes when the card arrives. SIGTERM powers it off cleanly; its settings are kept in `<folder>/.vcard-flash`.
 

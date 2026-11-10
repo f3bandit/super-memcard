@@ -1,28 +1,27 @@
-// Copied from phosphor-menu rtl/phosphor/phosphor_ext.sv (port, do not edit here: change it there and copy, tools/sync-phosphor-ext.sh).
-// Phosphor extension for the MiSTer menu core (phosphor-menu, a fork of MiSTer-devel/Menu_MiSTer).
+// Super MemCard: the SuperStation One's front ports (SNAC) for Main: raw card frames, and in a menu core PS1 card
+// sectors and controllers. In a game core it's in sys_top (smc_sys.sv, RAW_ONLY).
 // Copyright (C) 2026 f3bandit
 //
 // This program is free software: you can redistribute it and/or modify it under the terms of
 // the GNU General Public License as published by the Free Software Foundation, either version 3
 // of the License, or (at your option) any later version.
 //
-// Lets Main (phosphor-main) read PlayStation controllers and memory cards on the SuperStation
-// One's front ports (SNAC) while the menu core is loaded. The ports stay off until Main turns
-// them on: until then the user port works as in the stock menu core (MT32-pi, MIDI).
+// Lets Main read PlayStation controllers and memory cards on the SuperStation One's front ports (SNAC). The ports
+// stay off until Main turns them on: until then the user port is the core's (in the menu core: MT32-pi, MIDI).
 //
-// Commands on hps_io's EXT_BUS (16-bit words; the first word is the command). Main reads the bus
+// Commands on hps_io's EXT_BUS or sys_top's UIO channel (16-bit words; the first word is the command). Main reads the bus
 // after each word's strobe, so each word returns the answer set at its own strobe: the command word
 // returns the first reply word below, the k-th word after it the next (as with hps_io's own commands):
-//   80 PH_ID           reply: 5048 ('PH'), version, mode
-//   81 PH_MODE         write: mode (bit 0: front ports on).                  reply: 5048, old mode
-//   82 PH_PADS         reply: mode, then per port (1, 2) four words:
+//   80 SMC_ID           reply: 534D ('SM'), version, mode
+//   81 SMC_MODE         write: mode (bit 0: front ports on).                  reply: 534D, old mode
+//   82 SMC_PADS         reply: mode, then per port (1, 2) four words:
 //                        {7'0, answered, ID}, buttons (as sent: active low), {RY, RX}, {LY, LX}
-//   83 PH_CARD         write: {7'0, port 2, 6'0, op (0 read, 1 write)}, sector (0..1023),
+//   83 SMC_CARD         write: {7'0, port 2, 6'0, op (0 read, 1 write)}, sector (0..1023),
 //                        then for a write 64 data words (byte 2n low, byte 2n+1 high)
 //                        the operation starts after the sector (read) or the last data word (write)
-//   84 PH_CARD_STATUS  reply: {busy, done, 12'0, result}, then 64 data words (after a read)
+//   84 SMC_CARD_STATUS  reply: {busy, done, 12'0, result}, then 64 data words (after a read)
 //                        result: 0 OK, 1 no card, 2 bad reply / refused, 3 sector out of range
-//   87 PH_RAW          write: {7'0, port 2, len (1..255)}, {speed, ack wait}: ack wait in units of 1024 clk (10.24 us
+//   87 SMC_RAW          write: {7'0, port 2, len (1..255)}, {speed, ack wait}: ack wait in units of 1024 clk (10.24 us
 //                        at 100 MHz; bits 13:0, up to ~168 ms); speed (bits 15:14), version 3: 0 as a PS1 (250 kHz,
 //                        30 us after each byte), 1 500 kHz / 10 us, 2 1 MHz / 4 us, 3 2 MHz / 2 us. Each byte still
 //                        waits for the card's ACK, so a card that needs longer gets it; only for cards that said
@@ -30,17 +29,17 @@
 //                        then the frame's bytes as (len + 1) / 2 words (byte 2n low, 2n+1 high); the frame
 //                        starts after the last data word: one select, the bytes out in turn, each reply byte
 //                        kept in its place, stopping after the first byte the card doesn't ACK
-//   88 PH_RAW_STATUS   reply: {busy, done, 6'0, count (bytes exchanged)}, then the reply bytes as words
+//   88 SMC_RAW_STATUS   reply: {busy, done, 6'0, count (bytes exchanged)}, then the reply bytes as words
 //                        (count 0 with done: nothing answered at all)
-//   86 PH_LOOK         write: bit 0 = show MiSTer's moving static behind the menu (default off: black, so the
-//                        SS1 stays black from power-on until Phosphor is on screen; Main turns it on while
+//   86 SMC_LOOK         write: bit 0 = show MiSTer's moving static behind the menu (default off: black, so the
+//                        SS1 stays black from power-on until the frontend is on screen; Main turns it on while
 //                        MiSTer's own menu has the screen)
-//   85 PH_PAD_CMD      write: {7'0, port 2, 6'0, pcmd}: 1 config mode, 2 analog on, 3 leave config
+//   85 SMC_PAD_CMD      write: {7'0, port 2, 6'0, pcmd}: 1 config mode, 2 analog on, 3 leave config
 //                        (1, 2, 3 in turn switch a DualShock to analog)
 // While a card operation or controller command is waiting or on the bus the controllers aren't
-// read; Main waits for done (PH_CARD_STATUS) before the next one.
+// read; Main waits for done (SMC_CARD_STATUS) before the next one.
 
-module phosphor_ext
+module smc_port
 #(
 	// timings in clk cycles at 100 MHz; at another clock they're scaled by clk_u64 (below)
 	parameter HALF    = 199,     // clk cycles per half bit: 250 kHz at 100 MHz
@@ -50,7 +49,7 @@ module phosphor_ext
 	parameter BYTE_GAP = 3000,   // 30 us between a memory card's bytes, as a PS1 leaves
 	parameter GAP     = 400000,  // 4 ms between controller reads (each port every 8 ms)
 	parameter PADS    = 1,       // read the controllers
-	parameter RAW_ONLY = 0       // 1: raw card frames only (PH_ID, PH_MODE, PH_RAW): no controllers, sector reads or
+	parameter RAW_ONLY = 0       // 1: raw card frames only (SMC_ID, SMC_MODE, SMC_RAW): no controllers, sector reads or
 	                             // controller commands, so it's small enough for every game core's sys_top (with PADS 0)
 )
 (
@@ -68,7 +67,7 @@ module phosphor_ext
 	output reg        dout_en,    // EXT_BUS[32]: this module answers the command
 
 	output            ports_on,   // the user port belongs to the front ports
-	output reg        show_static,       // PH_LOOK bit 0 (0 at power-up)
+	output reg        show_static,       // SMC_LOOK bit 0 (0 at power-up)
 
 	output            sio_sel1_n,
 	output            sio_sel2_n,
@@ -78,9 +77,9 @@ module phosphor_ext
 	input             sio_ack
 );
 
-localparam VERSION = 16'd3;   // 2: PH_RAW, PH_RAW_STATUS; 3: PH_RAW speed
-localparam PH_ID = 8'h80, PH_MODE = 8'h81, PH_PADS = 8'h82, PH_CARD = 8'h83, PH_CARD_STATUS = 8'h84, PH_PAD_CMD = 8'h85, PH_LOOK = 8'h86,
-           PH_RAW = 8'h87, PH_RAW_STATUS = 8'h88;
+localparam VERSION = 16'd3;   // 2: SMC_RAW, SMC_RAW_STATUS; 3: SMC_RAW speed
+localparam SMC_ID = 8'h80, SMC_MODE = 8'h81, SMC_PADS = 8'h82, SMC_CARD = 8'h83, SMC_CARD_STATUS = 8'h84, SMC_PAD_CMD = 8'h85, SMC_LOOK = 8'h86,
+           SMC_RAW = 8'h87, SMC_RAW_STATUS = 8'h88;
 localparam R_OK = 2'd0;
 
 reg [15:0] mode;
@@ -103,7 +102,7 @@ end
 reg        cs_start, cs_pad, cs_port, cs_raw;
 reg  [7:0] cs_rlen;
 reg [23:0] cs_rack;
-reg  [1:0] cs_speed;   // a raw frame's speed (PH_RAW)
+reg  [1:0] cs_speed;   // a raw frame's speed (SMC_RAW)
 wire [7:0] cs_rcount;
 reg  [1:0] cs_pcmd, cs_mode;
 reg  [9:0] cs_sector;
@@ -142,7 +141,7 @@ always @(posedge clk) begin
 	t_unit     <= 16'((32'd41 * clk_u64) >> 8);                // 1024 * clk_u64 / 6400, within 0.1%
 end
 
-// a raw frame's bit clock and gap after each byte (PH_RAW speed); everything else as a PS1 does it
+// a raw frame's bit clock and gap after each byte (SMC_RAW speed); everything else as a PS1 does it
 wire        cs_raw_x = RAW_ONLY ? 1'b1 : cs_raw;   // with RAW_ONLY the card side is only ever a raw frame
 // RAW_ONLY works the faster speeds out from the 250 kHz half bit (2 us) with shifts (within a clock cycle), so a game
 // core's sys_top keeps fewer registers
@@ -156,7 +155,7 @@ wire [15:0] r_gap3  = RAW_ONLY ? h0 : t_gap3;                    // 2 us
 wire [15:0] cs_half = !cs_raw_x ? t_half0 : cs_speed == 2'd1 ? r_half1 : cs_speed == 2'd2 ? r_half2 : cs_speed == 2'd3 ? r_half3 : t_half0;
 wire [15:0] cs_gap  = !cs_raw_x ? t_gap0 : cs_speed == 2'd1 ? r_gap1 : cs_speed == 2'd2 ? r_gap2 : cs_speed == 2'd3 ? r_gap3 : t_gap0;
 
-card_sector card_sector
+smc_card_sector smc_card_sector
 (
 	.clk(clk), .reset(reset | ~ports_on),
 	.half_period(cs_half), .ack_timeout(t_ack), .card_ack_timeout(t_card_ack), .sel_delay(t_sel), .byte_gap(cs_gap),
@@ -333,7 +332,7 @@ end
 
 ///////////////////////////// hps_io commands /////////////////////////////
 
-function [15:0] pads_word(input [3:0] n);   // PH_PADS reply word n (1..9)
+function [15:0] pads_word(input [3:0] n);   // SMC_PADS reply word n (1..9)
 	reg q;
 	begin
 		q = (n >= 6);
@@ -370,21 +369,21 @@ always @(posedge clk) begin
 		if (!dout_en && wcnt == 0) begin
 			// the command word
 			cmd     <= io_din[7:0];
-			dout_en <= (io_din[15:8] == 0 && io_din[7:0] >= PH_ID && io_din[7:0] <= PH_RAW_STATUS);
+			dout_en <= (io_din[15:8] == 0 && io_din[7:0] >= SMC_ID && io_din[7:0] <= SMC_RAW_STATUS);
 			case (io_din)
-				PH_ID, PH_MODE:  io_dout <= 16'h5048;
-				PH_PADS:         io_dout <= pads_word(1);
-				PH_CARD_STATUS:  io_dout <= {card_busy, card_done, 12'd0, card_res};
-				PH_RAW_STATUS:   io_dout <= {raw_busy, raw_done, 6'd0, raw_count};
+				SMC_ID, SMC_MODE:  io_dout <= 16'h534D;
+				SMC_PADS:         io_dout <= pads_word(1);
+				SMC_CARD_STATUS:  io_dout <= {card_busy, card_done, 12'd0, card_res};
+				SMC_RAW_STATUS:   io_dout <= {raw_busy, raw_done, 6'd0, raw_count};
 				default: ;
 			endcase
 			h_rd <= 0;
 		end
 		else if (dout_en) case (cmd)
-			PH_ID:   if (wcnt == 1) io_dout <= VERSION; else if (wcnt == 2) io_dout <= mode;
-			PH_MODE: if (wcnt == 1) begin io_dout <= mode; mode <= io_din; end
-			PH_PADS: io_dout <= pads_word(4'(wcnt + 1'd1));
-			PH_CARD: if (!card_busy) begin
+			SMC_ID:   if (wcnt == 1) io_dout <= VERSION; else if (wcnt == 2) io_dout <= mode;
+			SMC_MODE: if (wcnt == 1) begin io_dout <= mode; mode <= io_din; end
+			SMC_PADS: io_dout <= pads_word(4'(wcnt + 1'd1));
+			SMC_CARD: if (!card_busy) begin
 				if (wcnt == 1) begin card_port <= io_din[8]; card_wr <= io_din[0]; end
 				if (wcnt == 2) begin
 					card_sec <= io_din[9:0];
@@ -397,11 +396,11 @@ always @(posedge clk) begin
 					if (wcnt == 66) set_card <= !RAW_ONLY;
 				end
 			end
-			PH_CARD_STATUS: if (wcnt <= 64) begin
+			SMC_CARD_STATUS: if (wcnt <= 64) begin
 				io_dout <= h_q;            // word wcnt - 1 of the buffer
 				h_rd    <= 7'(wcnt);
 			end
-			PH_RAW: if (!raw_busy && !raw_req) begin
+			SMC_RAW: if (!raw_busy && !raw_req) begin
 				if (wcnt == 1) begin raw_port <= io_din[8]; raw_len <= (io_din[7:0] == 0) ? 8'd1 : io_din[7:0]; end
 				if (wcnt == 2) begin raw_ack <= 24'(io_din[13:0] * t_unit); raw_speed <= io_din[15:14]; end   // ack: units of 10.24 us
 				if (wcnt >= 3 && wcnt <= 8'd2 + 8'(({1'b0, raw_len} + 9'd1) >> 1)) begin
@@ -411,12 +410,12 @@ always @(posedge clk) begin
 					if (wcnt == 8'd2 + 8'(({1'b0, raw_len} + 9'd1) >> 1)) set_raw <= 1;
 				end
 			end
-			PH_RAW_STATUS: if (wcnt <= 128) begin
+			SMC_RAW_STATUS: if (wcnt <= 128) begin
 				io_dout <= h_q;
 				h_rd    <= 7'(wcnt);
 			end
-			PH_LOOK: if (wcnt == 1) show_static <= io_din[0];
-			PH_PAD_CMD: if (wcnt == 1 && !pcmd_req) begin
+			SMC_LOOK: if (wcnt == 1) show_static <= io_din[0];
+			SMC_PAD_CMD: if (wcnt == 1 && !pcmd_req) begin
 				pcmd_port <= io_din[8];
 				pcmd_cmd  <= io_din[1:0];
 				set_pcmd  <= !RAW_ONLY;

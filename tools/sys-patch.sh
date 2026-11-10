@@ -11,9 +11,9 @@ top=$sys/sys_top.v
 [ -f "$top" ] || { echo "no $top"; exit 1; }
 grep -q smc_sys "$top" && { echo "$top: already has Super MemCard"; exit 0; }
 
-for f in smc_sys phosphor_ext card_sector sio_byte; do cp "$here/core/sys/$f.sv" "$sys/"; done
+for f in smc_sys smc_port smc_card_sector smc_sio_byte; do cp "$here/core/sys/$f.sv" "$sys/"; done
 cp "$here/core/sys/smc_sys.sdc" "$sys/"
-for f in smc_sys phosphor_ext card_sector sio_byte; do
+for f in smc_sys smc_port smc_card_sector smc_sio_byte; do
 	printf 'set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) %s.sv ]\n' "$f" >> "$sys/sys.qip"
 done
 printf 'set_global_assignment -name SDC_FILE           [file join $::quartus(qip_path) smc_sys.sdc ]\n' >> "$sys/sys.qip"

@@ -5,8 +5,8 @@ core (N64, PSX) runs at seconds per frame. Super MemCard only touches four parts
 or in GitHub Actions on every push. The real SS1 stays the final check, not the test bed.
 
 ```
- virtual Main (phosphor-main, x86)  ──PH_CARD──▶  bus simulation (Verilog)  ──SIO bytes──▶  virtual card (sd2psXtd, x86)
-   ├ fake core: hps_io save blocks                phosphor_ext.sv                            SD card = a folder
+ virtual Main (the test Main, x86)  ──SMC_CARD──▶  bus simulation (Verilog)  ──SIO bytes──▶  virtual card (sd2psXtd, x86)
+   ├ fake core: hps_io save blocks                smc_port.sv                            SD card = a folder
    └ real save files in a temp saves/            card_sector.sv                              MemoryCards/PS1, SuperMemCard/
 ```
 
@@ -33,7 +33,7 @@ It runs the card's real logic, not a model of it. Tests:
 
 ## 2. Bus simulation
 
-`phosphor_ext.sv` and `card_sector.sv` (phosphor-menu) in a Verilog simulator (iverilog, as
+`smc_port.sv` and `smc_card_sector.sv` (the test menu core) in a Verilog simulator (iverilog, as
 SS1_MemCard_MiSTer's `sim/run.sh` already does; Verilator if it's too slow), with the virtual card on the
 other end through VPI/DPI. Tests the timing that matters for software cards:
 
@@ -41,16 +41,16 @@ other end through VPI/DPI. Tests the timing that matters for software cards:
 - controllers aren't polled while a card operation is on the bus;
 - the new `81 6x` frames go through the same driver unchanged.
 
-Built: `sim/bus` (`sh sim/bus/run.sh`, `STOCK=1` for stock firmware), with the RTL fetched from phosphor-menu at a
+Built: `sim/bus` (`sh sim/bus/run.sh`, `STOCK=1` for stock firmware), with the RTL fetched from the test menu core at a
 pinned commit. The card's ACK timing is not modelled from the firmware (a byte's ACK comes 3 µs after it in
-simulated time; the real wait is in the bridge), so late ACKs are tested by phosphor-menu's own `sim/` card model.
+simulated time; the real wait is in the bridge), so late ACKs are tested by the test menu core's own `sim/` card model.
 Results in 08.
 
 ## 3. Virtual Main
 
-phosphor-main built for x86 with its FPGA layer swapped out:
+the test Main built for x86 with its FPGA layer swapped out:
 
-- `fpga_io` / `spi_uio_*`: a fake that sends `PH_CARD` / `PH_CARD_STATUS` to the bus simulation (or, for
+- `fpga_io` / `spi_uio_*`: a fake that sends `SMC_CARD` / `SMC_CARD_STATUS` to the bus simulation (or, for
   fast tests, straight to the virtual card);
 - **a fake core**: a small program that loads a "game", asks for its save, and reads and writes 512-byte
   blocks the way `hps_io` does, so Main's real mount and block-write paths (01) run;
@@ -66,7 +66,7 @@ Tests the parts where a bug costs saves:
 
 ## 4. Frontend on a PC (optional, later)
 
-Phosphor's frontend is LVGL, which has an SDL driver, so it could open in a window on a PC for the Super
+The test frontend is LVGL, which has an SDL driver, so it could open in a window on a PC for the Super
 MemCard screens (progress, "both changed", restore after install). There's no PC build yet and the first
 version doesn't need one. Console Mode's frontend can't run this way: it's a closed ARM binary using
 SS1-specific devices.

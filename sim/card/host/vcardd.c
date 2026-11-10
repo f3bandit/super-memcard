@@ -1,4 +1,4 @@
-/* vcardd: the virtual card as a service, for a host on the SS1 (Phosphor's Main) to talk to
+/* vcardd: the virtual card as a service, for a host on the SS1 (a test Main) to talk to
  * instead of the front port while there's no real card.
  *
  *   vcardd <sd-folder> [socket]      socket default /tmp/supermemcard.sock

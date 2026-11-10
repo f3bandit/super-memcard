@@ -2,7 +2,7 @@
 
 Everything Console Mode needs to add, in one place, in the order it would be built. The details are in 05 (design and
 protocol), 06 (Console Mode as it is), 09 (game IDs and names) and 08 (what was found testing). All of it is built
-and tested on an SS1 with Phosphor as the test bench, and against Console Mode 2.0-RC-1's SD card (section 7).
+and tested on an SS1 with a test Main (a fork of Main_MiSTer), and against Console Mode 2.0-RC-1's SD card (section 7).
 
 What it does: every console core's saves also go to the Retro Remake memory card, by game, so they survive a
 reinstall and follow the card to another SuperStation. Like a PS1, the card is only used when a save is loaded or
@@ -13,8 +13,8 @@ saved. The card stays a plain PS1 card for everything else (a real PS1/PS2, the 
 | where | what | from |
 |---|---|---|
 | the card (RP2040 firmware) | `81 60`-`6A` commands, the saves on its SD card, virtual cards per system, its own screen | `firmware/` (a patch to sd2psXtd, GPL-3.0) |
-| menu core | send a frame of any length (up to 255 bytes) to a front port and give back the card's bytes | phosphor-menu `PH_RAW` (`phosphor_ext.sv`, version 3) |
-| host (`MiSTer_ConsoleMode`) | the library, two calls around each game, `@memcard` commands for the screen | `host/` (plain C, no allocation) |
+| menu core | send a frame of any length (up to 255 bytes) to a front port and give back the card's bytes | `core/sys/smc_port.sv` (`SMC_RAW`, version 3) |
+| host (`MiSTer_ConsoleMode`) | the library, two calls around each game (and one during it), `@memcard` commands for the screen | `host/` (plain C, no allocation), `main/` (the Main side, ready to copy) |
 | frontend | a Super MemCard view in Media › Memory Cards | (Console Mode's own screens) |
 
 ## 2. Menu core: raw frames
@@ -23,20 +23,23 @@ The library needs one thing from the bus: send `out[0..len-1]` in one card selec
 for each, stopping after the first byte the card doesn't ACK (`struct smc_bus.frame`, `host/smc.h`). The ACK after
 a Super MemCard request can be up to 100 ms late (the card reads its SD card): the wait has to be that long.
 
-phosphor-menu's version (`rtl/phosphor/phosphor_ext.sv`), as Phosphor's Main drives it over `EXT_BUS`:
+Super MemCard's front-port driver (`core/sys/smc_port.sv`, the same in a menu core and, raw frames only, in every
+game core's `sys_top`), as Main drives it over `EXT_BUS` / UIO (`main/smc_frontport.cpp`):
 
 ```
-87 PH_RAW         write {port, len}, {speed[15:14], ack wait[13:0] in 1024-clock units}, then the bytes as words
-88 PH_RAW_STATUS  read  {busy, done, count}, then the card's bytes as words
+80 SMC_ID          read  534D ('SM'), version, mode
+81 SMC_MODE        write bit 0: the front ports are the driver's (only while frames run)
+87 SMC_RAW         write {port, len}, {speed[15:14], ack wait[13:0] in 1024-clock units}, then the bytes as words
+88 SMC_RAW_STATUS  read  {busy, done, count}, then the card's bytes as words
 speed: 0 = 250 kHz as a PS1 (Hello and every PS1 command), 1 = 500 kHz, 2 = 1 MHz, 3 = 2 MHz
 ```
 
-Phosphor sends Hello at speed 0 and Super MemCard frames at 2, and steps down by one when a frame comes back short
-(`front_frame()` in phosphor-main `supermemcard.cpp`). The speed the real card handles is still to measure. PS1
+The test Main sends Hello at speed 0 and Super MemCard frames at 2, and steps down by one when a frame comes back
+short (`front_frame()` in `main/supermemcard.cpp`). The speed the real card handles is still to measure. PS1
 reads in Console Mode 2.0-RC-1 take ~17 ms a sector (06): if its menu core has its own raw command, only the frame
 length (≤255) and the ACK wait matter.
 
-Controller reads pause while a frame runs (they share the bus), as `phosphor_ext.sv` does.
+Controller reads pause while a frame runs (they share the bus), as `smc_port.sv` does.
 
 ## 3. Host: the library
 
@@ -60,8 +63,8 @@ plain PS1 card or none: do nothing more. After a refused Hello leave the card al
 
 ### The two moments around a game
 
-**Before the core loads** (where Main loads the `.rbf`; Phosphor calls it from `fpga_load_rbf()` when the core
-isn't the menu):
+**Before the core loads** (where Main loads the `.rbf`; `main/supermemcard.cpp`'s `supermemcard_core_start()`, called
+from `fpga_load_rbf()` when the core isn't the menu):
 
 ```c
 struct smc_mgl m;
@@ -123,15 +126,15 @@ One user of the card at a time: Memory Cards, SS1 Tool's card reads and the Supe
 
 Cores built with `tools/sys-patch.sh` (the front-port card driver in their `sys_top`, no change to the core itself)
 reach the card while the game runs, through the same commands as the menu core. A host then sends a game's save to the
-card as soon as it changes (Phosphor: `supermemcard_poll()`: the save files changed and settled for a second, then
+card as soon as it changes (`main/supermemcard.cpp`'s `supermemcard_poll()`: the save files changed and settled for a second, then
 `smc_sync_game()`). Not in the PSX core, which uses the front ports itself, nor Saturn, which has no room left in
 the FPGA: those two, and any core without it, work as in phase 1.
 
 What it takes in a host, beyond phase 1:
-- Ask `PH_ID` (`80`) in the game core as in the menu core; `0x5048` back means the front ports are there. Only the
-  raw-frame commands answer in a game core (`PH_ID`, `PH_MODE`, `PH_RAW`, `PH_RAW_STATUS`): no controller reads or
+- Ask `SMC_ID` (`80`) in the game core as in the menu core; `0x534D` ('SM') back means the front ports are there. Only the
+  raw-frame commands answer in a game core (`SMC_ID`, `SMC_MODE`, `SMC_RAW`, `SMC_RAW_STATUS`): no controller reads or
   sector commands.
-- Turn the ports on (`PH_MODE` 1) only for the frames, and off again after: until then the user port is the core's.
+- Turn the ports on (`SMC_MODE` 1) only for the frames, and off again after: until then the user port is the core's.
 - Never in the PSX core.
 
 Built and timing met in NES, Game Boy, GBA, Genesis, Mega Drive, N64, Mega-CD, 32X, SMS, SNES, Jaguar,
@@ -159,7 +162,7 @@ header title. Identities are cached (`<state>/ids.txt`), so a ROM is read once.
 - `tools/smccli`: each frontend call from a shell against vcardd: `hello`, `launch <rbf> [<mgl>]`, `back <sys>
   [<game>]`, `read`, `systems`, `list <sys>`, `delete`, `conflicts`, `keep`, `core`, `mgl <file>`. Build for the SS1:
   `make -C sim/card SMC=1 B=build-ss1-smc CC=arm-linux-gnueabihf-gcc LDFLAGS_STATIC=-static`.
-- `sim/bus`: phosphor-menu's front-port RTL bit by bit against the card firmware (Icarus Verilog): checks a menu
+- `sim/bus`: the front-port driver (`core/sys`) bit by bit against the card firmware (Icarus Verilog): checks a menu
   core's raw frames against the real card code.
 
 ## 7. Checked against Console Mode 2.0-RC-1's SD card (Nov 9 2026)
@@ -174,7 +177,7 @@ SuperStation each get their own set. Details in 08.
 ## 8. Open points
 
 - The shipping card's firmware: sd2psXtd-based? Its source (GPL-3.0) to apply `firmware/` to.
-- Raw frames in Console Mode's menu core: the same `PH_RAW` or its own command; its timing.
+- Raw frames in Console Mode's menu core: the same `SMC_RAW` or its own command; its timing.
 - Where the two hooks go in `MiSTer_ConsoleMode`'s launch path.
 - The real card's speed limit, and a power pull mid-save on the real card (works in the simulation).
 - On the real card with this firmware: a real PS1 and PS2 (plain PS1 card, no Hello ever sent), FreePSXBoot booting

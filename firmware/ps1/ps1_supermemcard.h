@@ -33,7 +33,7 @@ enum { SMC_GOOD = 0x47, SMC_BAD_CHECKSUM = 0x4E, SMC_FAIL = 0xFF, SMC_NOT_FOUND 
        SMC_DELETED = 0x44 };
 
 /* host IDs in Hello */
-enum { SMC_HOST_PHOSPHOR = 1, SMC_HOST_CONSOLE_MODE = 2, SMC_HOST_CORE = 3, SMC_HOST_TEST = 0x7F };
+enum { SMC_HOST_MAIN = 1, SMC_HOST_CONSOLE_MODE = 2, SMC_HOST_CORE = 3, SMC_HOST_TEST = 0x7F };
 
 #define SMC_MAX_FILES   16
 #define SMC_NAME_LEN    16    /* file names: save.eep, cpak1.cpk ... */

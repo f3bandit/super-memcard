@@ -1,8 +1,8 @@
-# How MiSTer, Console Mode and Phosphor cores read and write saves
+# How MiSTer and Console Mode cores read and write saves
 
-Sources: phosphor-main (f3bandit's fork of Main_MiSTer, commit 5f0b918, Nov 7 2026), MiSTer-devel
+Sources: f3bandit's test Main (a fork of Main_MiSTer, Nov 7 2026), MiSTer-devel
 N64_MiSTer (5725381), and what was measured on a SuperStation One with Console Mode 2.0-RC-1.
-Line numbers are phosphor-main's.
+Line numbers are the test Main's.
 
 ## The save file
 
@@ -77,9 +77,9 @@ public). Its strings match Main's save handling (`SavePath=%s`, `saves/%s/`) and
 
 A reinstall that replaces the SD card loses `saves/` and those snapshots: the reason for this project.
 
-## Phosphor
+## The test Main
 
-phosphor-main is a fork of Main_MiSTer, so saves work exactly as above. It adds RetroAchievements
+the test Main is a fork of Main_MiSTer, so saves work exactly as above. It adds RetroAchievements
 hooks around save I/O (`achievements_notify_save_io()`), and its card path to the front ports (04).
 
 ## Where Super MemCard hooks in

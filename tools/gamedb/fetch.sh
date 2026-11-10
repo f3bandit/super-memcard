@@ -1,13 +1,13 @@
 #!/bin/sh
 # Fetch libretro-database's game lists for the Super MemCard systems into a folder (for the sync's official names,
-# smc_sync_cfg.gamedb_dir). The same lists Phosphor fetches; not part of this repository, used under their terms.
+# smc_sync_cfg.gamedb_dir). Not part of this repository, used under their terms.
 #   tools/gamedb/fetch.sh <folder>
 # Copyright (C) 2026 f3bandit.
 set -e
 dir=${1:?usage: fetch.sh <folder>}
 LR=https://raw.githubusercontent.com/libretro/libretro-database/master/metadat
 mkdir -p "$dir"
-# MiSTer Linux's curl doesn't find its certificates by itself (as Phosphor does, give them)
+# MiSTer Linux's curl doesn't find its certificates by itself (give them)
 CA=
 [ -f /etc/ssl/certs/cacert.pem ] && CA="--cacert /etc/ssl/certs/cacert.pem"
 get() { # <no-intro|redump> <name>

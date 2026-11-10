@@ -28,17 +28,17 @@ unchanged, and what Super MemCard needs from it is small.
    both sides (`smc_conflicts()`, `smc_resolve()`). A progress bar while saves move (≈11 KB/s).
 5. **One user of the bus at a time**: card jobs (Memory Cards screen, SS1 Tool, Super MemCard sync)
    take a lock, like `/tmp/ss1_bt.busy` for Bluetooth, so a sync and a backup never overlap.
-   Controller reads pause during a card operation, as `phosphor_ext.sv` already does.
+   Controller reads pause during a card operation, as `smc_port.sv` already does.
 
 ## What Retro Remake gets
 
 - the protocol spec (05 §2);
 - the card firmware changes (on sd2psXtd, GPL-3.0);
-- the Main changes, built and tested in phosphor-main (Main_MiSTer-derived, so they apply to
+- the Main changes, built and tested in the test Main (Main_MiSTer-derived, so they apply to
   `MiSTer_ConsoleMode` nearly as they are);
 - the `sys/` driver for phase 2.
 
-Plus test results from an SS1 running Phosphor with a Retro Remake card.
+Plus test results from an SS1 running the test Main with a Retro Remake card.
 
 ## Console Mode 2.0 RC1 (Nov 7 2026), what it tells us
 
@@ -50,41 +50,41 @@ apart):
   design, ps1_memcard_lib). The frontend asks the host with `@memcard read` / `@memcard write` (`@memcard
   cancel`) on `/dev/MiSTer_RR_cmd` and reads the result from `/tmp/consolemode_memcard.txt`; card images go to
   `ConsoleMode/memcards` (and `/media/fat/memcards`).
-- So the pieces Super MemCard needs are where we put them on Phosphor: the bus in the menu core, the card jobs in
+- So the pieces Super MemCard needs are where we put them on the test Main: the bus in the menu core, the card jobs in
   the host, the screens in the frontend. Super MemCard adds to each:
-  - **menu core**: `81 6x` frames of any length (Phosphor's `PH_RAW`, phosphor-menu); its PS1 sector reads stay;
+  - **menu core**: `81 6x` frames of any length (`SMC_RAW`, `core/sys/smc_port.sv`); its PS1 sector reads stay;
   - **host**: the library (`host/`), called at game start and exit, and new `@memcard` commands for the screens
     (read card = sync, list games, delete, keep which);
   - **frontend**: the Super MemCard view in Memory Cards (name, ID, date and time, icon per game).
 - `/tmp/FULLPATH` and `/tmp/ACTIVEGAME` are written at launch (1.1.4, 1.2.5): the game a launch starts is known.
 - The source of the RC1 menu core and host isn't published yet (`menu_ConsoleMode` is at 1.2): their card
-  timing is still to compare with phosphor-menu's when it is.
+  timing is still to compare with the test menu core's when it is.
 
 ### On an SS1 with Console Mode 2.0-RC-1 (Nov 9)
 
 Looked at with backups first (saves, config, `ConsoleMode/memcards`, binaries' checksums), all unchanged after.
 
 - Console Mode boots **its own menu core**, `ConsoleMode/menu_ConsoleMode.rbf` (`MiSTer.ini`: `main=ConsoleMode/MiSTer_ConsoleMode`);
-  `/media/fat/menu.rbf` is a different file. Loading that one (as on Phosphor) leaves Main in the menu without
+  `/media/fat/menu.rbf` is a different file. Loading that one (as on the test Main) leaves Main in the menu without
   Console Mode's frontend: a reboot brings it back. The Super MemCard hooks have to come back to Console Mode's menu
   core, the way its own launches do.
 - Save folders: as Main's, plus **`GBC`** (Game Boy Color saves apart from `GAMEBOY`) and `SS1_MemCard` (the SS1
   memory card core's images). GBC added to the systems.
 - A game started from an MGL by `/dev/MiSTer_cmd` writes only `/tmp/CORENAME` and `/tmp/RBFNAME`; the game is in
-  the MGL (as Phosphor's hooks read it). `FULLPATH`/`ACTIVEGAME`/`last_launch` are written by the frontend's own
+  the MGL (as `main/supermemcard.cpp` reads it). `FULLPATH`/`ACTIVEGAME`/`last_launch` are written by the frontend's own
   launches.
 - The card commands are SS1 Tool's (`memcard_cmports.go`, written for Console Mode 2.0): `@memcard read
   <port>|<file>|<frames>` and `@memcard write <port>|<new file>|<current file>` on `/dev/MiSTer_RR_cmd`, answers in
   `/tmp/consolemode_memcard.txt` (`reading 1 n total`, then `done read 1 <file>` or `error ...`). (A bare
   `@memcard read 1` gets no answer.) Baseline with the Sony card in port 1: the whole card read in **17 s**, twice,
-  both reads identical (`MC` header): ~17 ms a sector, ~7.5 KB/s (Phosphor's raw frames: ~9-11 ms a sector at a
+  both reads identical (`MC` header): ~17 ms a sector, ~7.5 KB/s (the test Main's raw frames: ~9-11 ms a sector at a
   PS1's speed). That's the speed Console Mode's menu core gets today; Super MemCard's transfers there would be
   measured the same way.
 
 ## Open points for Taki
 
 - Is the shipping card's firmware sd2psXtd-based, and can we have its source? It's GPL-3.0.
-- Does Console Mode's menu core card driver match `phosphor_ext.sv`'s timing for software cards?
+- Does Console Mode's menu core card driver match `smc_port.sv`'s timing for software cards?
   Its card reads work today, so probably.
 - Where in the launch path Console Mode wants the two hooks.
-- Raw frames in the RC1 menu core: the same command as phosphor-menu's `PH_RAW`, or its own.
+- Raw frames in the RC1 menu core: the same command as the test menu core's `SMC_RAW`, or its own.

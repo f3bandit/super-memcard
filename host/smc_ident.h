@@ -21,10 +21,10 @@
 struct smc_ident {
     char crc32[9];   /* 8 hex digits, ROM data without copier headers (No-Intro's count); "" if not hashed */
     char serial[32]; /* disc product code, for lookups */
-    char key[80];    /* phosphord's identity: crc:xxxxxxxx, disc:<code>:<size>:<crc of 1st MB>, chd:<sha1> */
+    char key[80];    /* the identity: crc:xxxxxxxx, disc:<code>:<size>:<crc of 1st MB>, chd:<sha1> */
 };
 
-/* phosphord's identification (smc_ident.c, copied from Phosphor). 0 if the file could be read. */
+/* A game's identification (smc_ident.c). 0 if the file could be read. */
 int smc_ident_file(const char *sys, const char *path, struct smc_ident *out);
 int smc_disc_system(const char *sys);
 

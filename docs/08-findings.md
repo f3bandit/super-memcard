@@ -12,26 +12,26 @@ the design depends on. Newest first. Each entry says where it came from so it ca
 - Every pinned core's `sys_top.v` decodes Main's UIO commands itself and owns the user port, at four lines all 15
   share (4 different `sys_top.v` versions among them): the driver goes there, the cores' own code is untouched.
   hps_io uses UIO commands up to `3E`; the cores' `EXT_BUS` users (SNES, Mega Drive MSU/CD, PSX, Saturn, Mega-CD,
-  TurboGrafx-16 CD) answer `34`/`35`. Phosphor's `80`-`88` are free in every core.
-- `sys_top`'s `clk_sys` is the core's clock (21-100+ MHz). phosphor_ext's timings were constants for the menu core's
+  TurboGrafx-16 CD) answer `34`/`35`. Super MemCard's `80`-`88` are free in every core.
+- `sys_top`'s `clk_sys` is the core's clock (21-100+ MHz). smc_port's timings were constants for the menu core's
   100 MHz: now they're worked out from the clock (cycles in 64 us), which `smc_sys` measures against the 50 MHz board
-  clock. The menu core's results are identical (phosphor-menu's simulation, before and after); the bit clock on the
+  clock. The menu core's results are identical (the test menu core's simulation, before and after); the bit clock on the
   wire measured in the bus simulation: 2.0 us half-bits for PS1 frames, 0.5 us at 1 MHz, at 33, 42.95, 50, 85.9 and
   100 MHz.
 - **On the SS1 (Console Mode's SD card):** the NES core built with the driver (`NES_49a0a66`, Quartus 17.0.2 in
-  Actions, timing met, 79% of the logic) loaded under Phosphor's Main; Main found the front ports in the game core
-  (PH_ID) and read sector 0 of the Sony PS1 card in port 1 through it: 140 bytes, `MC`, checksum, `47`; port 2
+  Actions, timing met, 79% of the logic) loaded under the test Main; Main found the front ports in the game core
+  (SMC_ID) and read sector 0 of the Sony PS1 card in port 1 through it: 140 bytes, `MC`, checksum, `47`; port 2
   (empty) answered nothing. The driver works in a game core on the real hardware.
 - **Every core built with the driver** (Actions, Quartus 17.0.2): NES, Gameboy, Genesis, MegaDrive, N64, MegaCD,
   S32X, SMS, SNES, Jaguar, TurboGrafx16 and NeoGeo fit and meet timing. GBA, Saturn and PSX didn't fit (Saturn
-  needed 4296 LABs of 4191, PSX 4265): the driver had phosphor_ext's controller reads, sector commands and controller
+  needed 4296 LABs of 4191, PSX 4265): the driver had smc_port's controller reads, sector commands and controller
   commands, which a game core never uses (~1000 LUTs, ~700 registers by Yosys' count, ~1400 ALMs in Quartus on NES).
-  Now `RAW_ONLY` keeps only the raw frames (~640 LUTs, ~530 registers); the menu core is unchanged (phosphor-menu's
+  Now `RAW_ONLY` keeps only the raw frames (~640 LUTs, ~530 registers); the menu core is unchanged (the test menu core's
   simulation identical). PSX doesn't get it: it uses the front ports itself. With `RAW_ONLY` GBA fits; Saturn needed
   4200 LABs, then 4199 with the faster speeds worked out by shifts (~450 registers): Saturn fills the FPGA without
   the driver, so it stays on phase 1 (its saves go before and after the game). 13 of the 15 cores carry it.
 - The same core built with and without the driver, each loaded by Console Mode's own Main and played: both look and
-  play the same. (A bad picture seen first came from starting a core by hand with Phosphor's test Main on Console
+  play the same. (A bad picture seen first came from starting a core by hand with the test Main on Console
   Mode's SD card, not from the core.)
 
 ### Console Mode 2.0-RC-1's SD card: every save onto the card and back
@@ -58,7 +58,7 @@ checked before and after); the games came from its USB drive and SD card, names 
 - **MGL `<setname>` is the save folder** (Main's `CoreName2`, unless `same_dir="1"`). Console Mode's
   `GameboyColor.mgl` starts the Gameboy core with saves in `GBC`, `Game Gear.mgl` the SMS core with `GameGear`. The
   hooks used the `.rbf` only, so a Game Boy Color game's save would have been looked for in `GAMEBOY`. Fixed:
-  `smc_mgl_read()` and `smc_launch_system()` in the library (Phosphor's Main uses them now). `GameGear` added as a
+  `smc_mgl_read()` and `smc_launch_system()` in the library (the test Main uses them now). `GameGear` added as a
   system (game ID `GG-<product code>`, its icon, the Game Gear list). Mega Duck, Atari 2600, WonderSwan Color and
   Pocket Challenge V2 MGLs aren't systems the card keeps.
 - A game's load and save around a launch from an MGL written the way Console Mode's are: N64 (`Hydro Thunder.n64`:
@@ -74,23 +74,23 @@ checked before and after); the games came from its USB drive and SD card, names 
   reads or writes the PS1 card (system mode already ends there).
 - Console Mode's games folders include `cifs/games` (a network share): added to the games folders searched.
 
-### Faster Super MemCard frames (PH_RAW speed)
+### Faster Super MemCard frames (SMC_RAW speed)
 
 Where a 140-byte frame's 10.9 ms went on the SS1: ~4.5 ms of bits at a PS1's 250 kHz, ~4.2 ms of 30 us gaps after
 each byte, the rest ACK waits. The card ACKs every byte before the next one goes, so it sets the pace itself: a faster
-clock and shorter gaps are safe to offer to a card that said it can (Hello). phosphor-menu's `PH_RAW` takes a speed
-now (extension version 3): 250 kHz/30 us, 500 kHz/10 us, 1 MHz/4 us, 2 MHz/2 us. Phosphor's Main sends Super MemCard
+clock and shorter gaps are safe to offer to a card that said it can (Hello). the test menu core's `SMC_RAW` takes a speed
+now (extension version 3): 250 kHz/30 us, 500 kHz/10 us, 1 MHz/4 us, 2 MHz/2 us. the test Main sends Super MemCard
 frames at 1 MHz and Hello and PS1 frames at 250 kHz, and drops to 250 kHz for the session if a fast frame isn't
 answered whole.
 
-- phosphor-menu's simulation: 8.8 ms at 250 kHz, 4.0 ms at 500 kHz, 2.0 ms at 1 MHz, 1.2 ms at 2 MHz (the bus
+- the test menu core's simulation: 8.8 ms at 250 kHz, 4.0 ms at 500 kHz, 2.0 ms at 1 MHz, 1.2 ms at 2 MHz (the bus
   alone; a real card's answer time adds to it).
 - Bus simulation with the card firmware at 1 MHz: the whole round trip passes, stock firmware too.
 - **The SS1's front ports at those clocks** (Sony card in port 1, PS1 sector reads as raw frames, compared with its
   backup image; reads only): 250 kHz and 500 kHz 96 of 96 right, 1 MHz 93 of 96 (3 cut short), 2 MHz none (all cut
   short). Never wrong data: the wiring carries the faster clocks cleanly, the Sony card's timing is the limit. A
   Super MemCard card never gets fast frames unless it answered Hello, so this only says the ports can do it.
-- Phosphor's Main starts Super MemCard frames at 1 MHz and steps down one speed (500 kHz, then 250 kHz) for the
+- the test Main starts Super MemCard frames at 1 MHz and steps down one speed (500 kHz, then 250 kHz) for the
   session when a frame isn't answered whole. The real card's answer time decides where it settles.
 - The menu core with speeds builds with timing met (worst setup slack +0.270 ns).
 
@@ -100,7 +100,7 @@ The first phase-1 version synced every save at every menu start; that read the c
 time, and a first run took over a minute identifying games. Now (as a PS1 uses its card): nothing at menu start, a
 game's own save before it starts and after it, everything only from the memory manager ("read card").
 
-On the SS1 (test Main, vcardd): menu start left the card alone; an N64 game started through an MGL (as Phosphor and
+On the SS1 (test Main, vcardd): menu start left the card alone; an N64 game started through an MGL (as the test Main and
 Console Mode start games) checked only its save (under a second, unchanged); back in the menu only that game's saves
 went to the card, including the 32 KB `.sra` the real N64 core wrote while it ran. Restored after as before.
 
@@ -119,7 +119,7 @@ Test Main (bind-mounted) + vcardd + libretro's lists fetched onto the SS1 (`tool
   - `.md` was skipped as a text file, but it's a Mega Drive ROM: that Genesis game had no ID.
   - A save with no ROM made the sync hash every ROM of its system (549 SNES ROMs, ~100 s over USB) looking for
     its ID; it now only looks for sets filed under a game ID.
-  - MiSTer's curl needs `--cacert /etc/ssl/certs/cacert.pem` to fetch over HTTPS (as Phosphor does).
+  - MiSTer's curl needs `--cacert /etc/ssl/certs/cacert.pem` to fetch over HTTPS (as the test frontend does).
 - The SS1's clock: a DS1307 clock chip and ntpd, right to the second, so save times are right. Times are kept in UTC;
   a frontend shows them in local time.
 - Left as is: two copies of one dump under different names (`Pokemon - Emerald` and `Pokemon - Emerald Version`) share a
@@ -144,14 +144,14 @@ SuperStations is one save set, and each gets the save under its own ROM's name w
   PSX `SLUS-00633`). Two things changed from it: hacks keep the original's code (*Aria of Sorrow* and its
   *Persephone* hack are both `A2CE`), so a cartridge's save set is filed as code-CRC (`A2CE-35536183`), the code
   alone shown; and homebrew/boot ROMs carry `GM 00000000-00`, which now falls back to the CRC.
-- The identification is phosphord's (`host/smc_ident.c`, copied); the header codes are new (`host/smc_gameid.c`).
+- The identification is the game library's (`host/smc_ident.c`, copied); the header codes are new (`host/smc_gameid.c`).
 
 ### Deleting saves, and settling "both changed"
 
 Built and tested in the virtual card: Delete (`81 6A`) leaves a tombstone on the card; the sync deletes (moves
 aside) other SuperStations' copies, or brings the save back when one was played since; nothing is erased anywhere.
 `smc_conflicts()` / `smc_resolve()` let a frontend settle a both-changed save either way. Console Mode needs screens
-for both (a delete in its save manager, a "which one?" question); Phosphor is only the test bench.
+for both (a delete in its save manager, a "which one?" question); the test Main is only the test bench.
 
 ### The card's SuperStation menu, free space, save icons
 
@@ -170,7 +170,7 @@ for both (a delete in its save manager, a "which one?" question); Phosphor is on
 Built and tested in the virtual card. A core (Main, for now) names the running system with **Core** (`81 69`); while
 it's named, the card's buttons step that system's virtual card (1-99) instead of the PS1 card, and the choice is
 saved in `SuperMemCard/<SYSTEM>/card.ini`. Saves moved to `SuperMemCard/<SYSTEM>/Card<N>/<game>/` (version 1 had no
-`Card<N>` level; nothing outside the test bench used it). Select and List take a card number (0: current).
+`Card<N>` level; nothing outside the test Main used it). Select and List take a card number (0: current).
 
 - The PS1 card is untouched: without a Core the buttons do what they always did (tested), and the first PS1 read or
   write, or a Core `.`, gives them back to the PS1 card (tested).
@@ -193,7 +193,7 @@ saved in `SuperMemCard/<SYSTEM>/card.ini`. Saves moved to `SuperMemCard/<SYSTEM>
 
 ### Virtual cards on the SS1: picked during a game, switched at the next menu
 
-On the SS1 with the test Main (phosphor-main `supermemcard`, bind-mounted) and vcardd version 2, saves in
+On the SS1 with the test Main (bind-mounted) and vcardd version 2, saves in
 `supermemcard_test/`: Main sends Core just before it loads a console core (`fpga_load_rbf`, the system from the
 .rbf's name; not PSX), and Core `.` after the menu's sync.
 
@@ -222,13 +222,13 @@ does; in CI for SD2PSX (with the screen) and PMC+ (without). Both link: `sd2psx.
 
 ### The front-port logic and the card firmware work together, bit by bit (layer 2)
 
-`sim/bus` runs Phosphor's front-port RTL (phosphor-menu `phosphor_ext`, `card_sector`, `sio_byte`, pinned at the
+`sim/bus` runs the front-port driver (`core/sys`: `smc_port`, `smc_card_sector`, `smc_sio_byte`, pinned at the
 supermemcard commit) in Icarus Verilog, with sd2psXtd's own PS1 code (with Super MemCard, or stock) behind a
 bit-level card model (`vcard_bus.sv`, DAT on the falling clock, ACK after the byte) through a VPI bridge to vcardd
-(new wire op `OP_PEEK`: the byte the card queued for the next clock-out). Main's side is driven the way phosphor-main
+(new wire op `OP_PEEK`: the byte the card queued for the next clock-out). Main's side is driven the way the test Main
 drives EXT_BUS.
 
-- With Super MemCard: PS1 sector read (PH_CARD and as a raw frame), Hello, Select, Create, two Writes, Commit, two
+- With Super MemCard: PS1 sector read (SMC_CARD and as a raw frame), Hello, Select, Create, two Writes, Commit, two
   Reads, then the PS1 sector again: all right; `save.sav` lands on the SD card byte for byte. Port 2 empty answers
   nothing. 1033 bytes on the bus, 1015 ACKed.
 - Stock firmware: Hello and Select stop at byte 2 (no ACK of the command byte), PS1 reads before and after work.
@@ -258,16 +258,16 @@ Timed on the SS1 with the Sony card (read only): a 140-byte frame (one 128-byte 
 takes **~10.9 ms** on the bus, so Super MemCard moves **~11 KB/s** of save data: 8 KB ~0.7 s, 32 KB ~3 s,
 128 KB ~11 s. The design had assumed 20-25 KB/s (README and 05 corrected). Most of a frame is the 30 us gap left
 after each byte for software cards; a shorter gap for Super MemCard frames is the first thing to try if it's too
-slow (sd2psXtd answers from PIO, it may not need it all). Through Main's socket (`card_read` from phosphord or a
+slow (sd2psXtd answers from PIO, it may not need it all). Through Main's socket (`card_read` from a card job or a
 tool) it's much slower, ~51 ms a sector: Main handles its socket once per pass of its UI loop (~25 ms), and a
 `card_read` needs two passes. Super MemCard's sync calls the bus from inside Main, so it isn't affected.
 
 ### Raw card frames on the SS1's front ports; a real Sony card ignores Super MemCard
 
-phosphor-menu (branch `supermemcard`) has raw frames in its front-port extension (version 2: `PH_RAW` 87,
+the test menu core has raw frames in its front-port extension (version 2: `SMC_RAW` 87,
 `PH_RAW_STATUS` 88): up to 255 bytes in one select through `card_sector`'s own byte engine, each reply kept,
-stopping after the first byte without an ACK, with a per-frame ACK wait up to ~168 ms. phosphor-main has
-`card_raw P MS HEX` and `phosphor_card_raw()`; the sync uses the card in front port 1 or 2 that answers Hello.
+stopping after the first byte without an ACK, with a per-frame ACK wait up to ~168 ms. the test Main has
+`card_raw P MS HEX` and a raw-frame call (now `main/smc_frontport.cpp`); the sync uses the card in front port 1 or 2 that answers Hello.
 Simulated (iverilog, also in CI) and run on the SS1 with the original Sony card in front port 1 (backed up first,
 all 1024 sectors identical to the backup afterwards):
 
@@ -283,7 +283,7 @@ all 1024 sectors identical to the backup afterwards):
   between them, never with 50-100 ms; plain reads back to back are fine). A real PS1 never sends a refused
   command, so it has never mattered before. Hello now waits 60 ms before its second try, and the sync leaves a
   plain card alone for 100 ms after.
-- The first build of the core missed HDMI timing by 42 ps (the `phosphor` branch has +0.49 ns); the only sizeable
+- The first build of the core missed HDMI timing by 42 ps (the test Main's branch has +0.49 ns); the only sizeable
   new logic, a multiplier for the ACK wait, became a shift (the wait is sent in units of 1024 clocks).
 
 ### Phase 1 works end to end on the SS1
@@ -296,16 +296,16 @@ With the test Main and the virtual card, on the real SS1 (all reached only throu
   Controller Pak, Genesis) came back from the card byte for byte in ~7 s.
 - Main creates a game's save file only when the game first saves, so a test without a player has to put the
   save there itself; Main's own writing of saves is MiSTer's and untouched.
-- Phosphor's watchdog isn't consistent about restarting Main: once within seconds, once not within 15 s. The test
+- the test frontend's watchdog isn't consistent about restarting Main: once within seconds, once not within 15 s. The test
   script starts Main itself if nothing has after 8 s.
 - Afterwards: the installed Main back, `saves/` and `config/` checked against their backups (unchanged).
 
 #### Before that: the test Main and the first run
 
-Phosphor's Main with `supermemcard.cpp` (phosphor-main branch `supermemcard`) syncs at every start in the menu
+the test Main with `supermemcard.cpp` (the test Main branch `supermemcard`) syncs at every start in the menu
 core. On the SS1, with the virtual card (`vcardd`) and test saves in `supermemcard_test/`: SNES 8 KB, N64 EEPROM +
 Controller Pak, Genesis 16 KB all reached the card byte for byte; a second run leaves unchanged saves alone.
-The test Main runs bind-mounted over the installed binary's path (`supermemcard_test/main_test.sh`): Phosphor's
+The test Main runs bind-mounted over the installed binary's path (`supermemcard_test/main_test.sh`): the test frontend's
 watchdog restarts Main within seconds of it stopping, so swapping the process loses that race; the bind mount
 makes every restart run the test build, and `umount -l` (lazy: the running Main holds the file) puts it back.
 
@@ -340,7 +340,7 @@ unaffected). ASan: nothing in the new code.
 
 ### The memory card manager doesn't write to cards (a marker is planned)
 
-SS1 Tool, Phosphor and ps1_memcard_lib recognise a card by the saves on it (common save names / all, 0.5 or more =
+SS1 Tool, f3bandit's card tools and ps1_memcard_lib recognise a card by the saves on it (common save names / all, 0.5 or more =
 the same card) and don't keep a version identical to the card's latest; nothing is written to the card
 (`ps1_memcard_lib/src/mclib.c`, SS1 Tool `memcard.go`). Block 0 frames 56-62 are unused by the PS1 format
 (`mcformat.go`), but they're not used for a Super MemCard marker: they travel with the image and can be wiped.
@@ -348,12 +348,12 @@ Decided: a Super MemCard card gives its own card ID in Hello's answer (05 §2).
 
 Matching by save names goes wrong on nearly empty cards (1 save + 2 new = 33%, a new card), empty cards (always a
 new card), reorganised cards, and different cards holding the same games (merged). So the manager gets a marker
-for card identity (block 0 frame 56, written once, save names as the fallback): on the SS1 Tool / Phosphor todo
+for card identity (block 0 frame 56, written once, save names as the fallback): on the SS1 Tool todo
 list, to be tested first for invisibility on the PSX core, Console Mode and a real PS1/PS2.
 
 ### Decided: the core sends Hello on its first card poll
 
-Hello carries who the host is (Phosphor Main, Console Mode, a core's `sys/` driver) and what it can do, so the
+Hello carries who the host is (the test Main, Console Mode, a core's `sys/` driver) and what it can do, so the
 card knows it's on an approved core and turns on that host's features; stock cores, the stock PSX core and a
 real PS1 never send it, so the card stays a plain PS1 card for them. Sent twice if the first gets no reply
 (finding 4 below). Details in 05 §2.
@@ -364,9 +364,8 @@ real PS1 never send it, so the card stays a plain PS1 card for them. Sent twice 
   matter). All 15 card tests pass on the SS1 in ~20 s, run from `/tmp` (nothing written to the SD card).
 - `vcardd <folder>` keeps a virtual card powered and serves the bus on `/tmp/supermemcard.sock`. Checked on the
   SS1: card ID `08 5A 5D 5C 5D 04 00 00 80`, `Card1-1.mcd` created, clean power-off on SIGTERM. Until Taki's card
-  arrives, Phosphor's Main talks to this instead of the front port; only that link changes when the card comes.
-- SS1 used: MiSTer Linux 260912, kernel 6.18.38-MiSTer, armv7l, Phosphor Main at
-  `/media/fat/phosphor/bin/MiSTer_phosphor`, `/tmp` is a 246 MB tmpfs.
+  arrives, the test Main talks to this instead of the front port; only that link changes when the card comes.
+- SS1 used: MiSTer Linux 260912, kernel 6.18.38-MiSTer, armv7l, the test Main installed, `/tmp` is a 246 MB tmpfs.
 
 ### Save folders don't always match core names
 

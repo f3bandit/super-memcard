@@ -13,19 +13,19 @@ the same game can carry different file names on two of them (`Super Metroid.sfc`
 then the card holds two save sets for one game. A frontend also wants the game's real name (and later its icon) to
 show beside the save, not a file name.
 
-So each save is tied to the **game** it comes from, the way Phosphor's library already identifies games (port,
-don't rewrite: phosphord `ident.c` and its libretro source).
+So each save is tied to the **game** it comes from, the way f3bandit's game library already identifies games (port,
+don't rewrite: f3bandit's game library: `ident.c` and its libretro source).
 
 ## 1. What a game is (identity)
 
 From the ROM or disc file the save belongs to (Main's rule: same name, without the extension, in the system's games
-folders), exactly as phosphord does it:
+folders), exactly as the game library does it:
 
 | | identity | looked up by |
 |---|---|---|
 | cartridge | CRC32 of the ROM data, counted as the No-Intro sets do: copier headers left out (iNES/FDS 16 bytes, SNES 512), N64 in big-endian `.z64` order | CRC32 |
 | disc (`.cue`/`.bin`/`.iso`) | product code + data track size + CRC of its first megabyte (fast: under a second) | product code (PlayStation `SYSTEM.CNF`, Saturn and Mega-CD headers) |
-| `.chd` | the SHA-1 the `.chd` header carries | (product code needs libchdr: Phosphor has it, the library doesn't) |
+| `.chd` | the SHA-1 the `.chd` header carries | (product code needs libchdr: the game library has it, this one doesn't) |
 
 The **game ID** (`host/smc_gameid.c`, `smc_game_id_of()`): the code in the game's own header where it has one, else
 the identity above.
@@ -47,16 +47,16 @@ numbers (`GM 00000000-00`) aren't IDs: those games fall back to the CRC. Checked
 second to identify over USB, once (kept in `ids.txt`); finding another SuperStation's ROM for a save set reads only
 headers until the code matches.
 
-`host/smc_ident.c` is phosphord's code, copied. Identities are cached per file (path, size, time) in the state
+`host/smc_ident.c` is f3bandit's game library code, copied. Identities are cached per file (path, size, time) in the state
 folder, so a ROM is read once.
 
 ## 2. The game lists (names)
 
-The same lists Phosphor uses: libretro-database's `metadat/no-intro` (cartridges) and `metadat/redump` (discs), one
+The lists: libretro-database's `metadat/no-intro` (cartridges) and `metadat/redump` (discs), one
 `.dat` per system. They are **not** shipped in this repository or on the card: the frontend fetches them onto the
-SuperStation (as Phosphor does), and they are used there under their own terms. `host/smc_gamedb.c` reads a `.dat`
+SuperStation, and they are used there under their own terms. `host/smc_gamedb.c` reads a `.dat`
 (clrmamepro format) into a table of CRC32, product code and official name; a frontend that already has the lists in
-its own database (Phosphor's library) can answer the lookups itself instead (`smc_sync_cfg.lookup`).
+its own database (f3bandit's game library) can answer the lookups itself instead (`smc_sync_cfg.lookup`).
 
 ## 3. On the card
 

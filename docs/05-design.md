@@ -1,6 +1,6 @@
 # Super MemCard design: the card's menu, the protocol and the host
 
-A proposal to build and test on Phosphor, then hand to Retro Remake. Builds on 00-04.
+A proposal to build and test on a test Main, then hand to Retro Remake. Builds on 00-04.
 
 ## 1. The card stays a PS1 card
 
@@ -13,7 +13,7 @@ get stuck in.
 ## 2. Protocol: `81 6x` (unused by PS1 mode, MMCE and every Sony console)
 
 Same bus, same speed and the same 128-byte blocks as the PS1 protocol, so the SS1's existing driver
-(`card_sector.sv` / `phosphor_ext.sv`) only needs the new command byte.
+(`smc_card_sector.sv` / `smc_port.sv`) only needs the new command byte.
 
 Built and tested in the virtual card (`firmware/`, `sim/card`, version 2: version 1 had no Core and no virtual cards). Every frame is `81 6x`, the request
 bytes, then the answer clocked out with `00`s. The card ACKs each request byte; the ACK of the last one comes once
@@ -41,7 +41,7 @@ off mid-save keeps the old one whole (tested).
 ### Who sends Hello, and when
 
 The **core** sends Hello the first time it polls the card: a custom game core through its `sys/` card driver
-(phase 2), or the menu core on Main's behalf (phase 1, Phosphor's or Console Mode's). Its answer tells both
+(phase 2), or the menu core on Main's behalf (phase 1, the test Main's or Console Mode's). Its answer tells both
 sides what they have:
 
 | on the SS1 | the card sees | result |
@@ -147,7 +147,7 @@ uses them (Retro Remake's SuperStation documentation: the built-in ports work "o
 the original hardware"). So while any other core runs the bus is free, and Main can reach the card then too.
 
 - **The card driver is in `sys_top`, not in the cores** (`core/sys/smc_sys.sv`, added to every core's `sys/` by
-  `tools/sys-patch.sh` at build time). It's phosphor-menu's own front-port logic (`phosphor_ext`, copied, port don't
+  `tools/sys-patch.sh` at build time). It's the front-port driver (`smc_port`, copied, port don't
   rewrite) answering the same commands (`80`-`88`) on the UIO channel next to `sys_top`'s own; hps_io doesn't use
   those and the cores' own `EXT_BUS` users answer `34`/`35`. Its timings scale with the core's clock, measured against
   the board's 50 MHz clock, so the bus keeps a PS1's timing in every core (bus simulation at 33-100 MHz, and through
@@ -155,7 +155,7 @@ the original hardware"). So while any other core runs the bus is free, and Main 
   frame, so a core that uses SNAC isn't disturbed; Main never does it in the PSX core. It's built into every console
   core except PSX (it uses the front ports) and Saturn (no room left in the FPGA): those two save before and after
   the game only.
-- **Main** (phosphor-main `supermemcard_poll()`): while a game runs, when its save files change (Main wrote them as
+- **Main** (the test Main `supermemcard_poll()`): while a game runs, when its save files change (Main wrote them as
   the core saved) and have settled for a second, that game's save goes to the card (`smc_sync_game()`), there and
   then. A core without the driver, or no card: nothing, and the save goes after the game as in phase 1.
 - Phase 1 stays as it is around every game: the card's newer save in before the game, the save out after it, Core.

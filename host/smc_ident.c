@@ -1,5 +1,5 @@
-/* Super MemCard: which game a file is. Copied from Phosphor (phosphord ident.c: port, don't rewrite; change it there
- * and copy), without libchdr: a .chd is known by the SHA-1 its header carries.
+/* Super MemCard: which game a file is. Ported from f3bandit's game library code (ident.c),
+ * without libchdr: a .chd is known by the SHA-1 its header carries.
  *
  * Cartridges: CRC32 of the ROM data, the way the No-Intro sets count it (copier headers left out: iNES/FDS 16 bytes,
  * SNES 512, Atari 7800 128, Lynx 64; N64 read in big-endian .z64 order whatever the file's byte order).
@@ -160,7 +160,7 @@ static int disc_open(const char *path, disc_t *d, char *track, size_t tn)
 		if (name[0] == '/' || !slash) snprintf(track, tn, "%s", name);
 		else snprintf(track, tn, "%.*s/%s", (int)(slash - path), path, name);
 	} else if (dot && !strcasecmp(dot, ".chd")) {
-		return -1;   /* phosphord reads it with libchdr; the library only takes its SHA-1 (smc_ident_file) */
+		return -1;   /* the game library reads it with libchdr; this one only takes its SHA-1 (smc_ident_file) */
 	}
 	memset(d, 0, sizeof(*d));
 	d->f = fopen(track, "rb");
@@ -288,7 +288,7 @@ int smc_ident_file(const char *sys, const char *path, struct smc_ident *out)
 	memset(out, 0, sizeof(*out));
 	const char *dot = strrchr(path, '.');
 	if (smc_disc_system(sys) && dot && !strcasecmp(dot, ".chd")) {
-		/* identity: the header's SHA-1 (phosphord also reads the product code inside, with libchdr) */
+		/* identity: the header's SHA-1 (the game library also reads the product code inside, with libchdr) */
 		char sha[48];
 		if (chd_sha1(path, sha, sizeof(sha))) return -1;
 		if (sha[0]) snprintf(out->key, sizeof(out->key), "chd:%s", sha);
