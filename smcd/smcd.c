@@ -24,6 +24,8 @@
 #include "smc_vcard.h"
 
 #include <dirent.h>
+#include <fcntl.h>
+#include <ctype.h>
 #include <errno.h>
 #include <poll.h>
 #include <signal.h>
@@ -211,6 +213,10 @@ static int genuine(struct conn *c) {
     return 0;
 }
 
+static void icons_to_card(struct conn *c);
+static void icon_wait(void);
+static int fetch(const char *url, const char *to);
+
 /* the card: vcardd if it runs, else the first front port whose card answers Hello. 1: a card. */
 static int card_open(struct conn *c) {
     struct stat st;
@@ -218,8 +224,10 @@ static int card_open(struct conn *c) {
     c->front.fd = -1;
     if (stat(vcard_path, &st) == 0 && smc_vcard_open(vcard_path, &c->bus) == 0) {
         c->vcard = 1;
-        if (smc_hello(&c->bus, SMC_HOST_MAIN, 0, &c->card) == 1 && genuine(c))
+        if (smc_hello(&c->bus, SMC_HOST_MAIN, 0, &c->card) == 1 && genuine(c)) {
+            icons_to_card(c);
             return 1;
+        }
         smc_vcard_close(&c->bus);
         return 0;
     }
@@ -232,8 +240,10 @@ static int card_open(struct conn *c) {
     for (int p = 1; p <= 2; p++) {
         c->front.port = p;
         int h = smc_hello(&c->bus, SMC_HOST_MAIN, 0, &c->card);
-        if (h == 1 && genuine(c))
+        if (h == 1 && genuine(c)) {
+            icons_to_card(c);
             return 1;
+        }
         if (h == 1)
             break;   /* a Super MemCard card, not genuine: a PS1 card (Main goes on as without Super MemCard) */
         if (h < 0 && p == 1) {
@@ -471,7 +481,15 @@ static void do_command(int fd, char *l) {
         say(fd, "card %s version %u features 0x%02x free_kb %u\n", c.card.id, c.card.version, c.card.features,
             c.card.free_kb);
     } else if (!strcmp(l, "READ")) {
-        report(fd, "read", smc_sync(&c.bus, &k, &rep), &rep);
+        smc_icons_retry(true); /* a manual read: games still on their system's icon are looked for again */
+        int rr = smc_sync(&c.bus, &k, &rep);
+        smc_icons_retry(false);
+        icon_wait();
+        int made = smc_fetch_icons(&k, fetch);
+        int put = smc_apply_icons(&c.bus, &k);
+        if (made || put)
+            lg("icons: %d made from pictures, %d put on the card", made, put);
+        report(fd, "read", rr, &rep);
     } else if (!strcmp(l, "SYSTEMS")) {
         char s[65];
         for (int i = 0; smc_list(&c.bus, ".", i, s) == SMC_OK; i++)
@@ -529,6 +547,72 @@ static void handle(int fd) {
     }
 }
 
+/* ---- save icons (host/smc_sync.c): the download list, worked through in a child process (smcd keeps answering) ---- */
+#include <sys/wait.h>
+
+static pid_t icon_child;
+
+static int fetch(const char *url, const char *to) {
+    pid_t p = fork();
+    if (p == 0) {
+        int nul = open("/dev/null", O_WRONLY);
+        if (nul >= 0) {
+            dup2(nul, 1);
+            dup2(nul, 2);
+        }
+        execlp("curl", "curl", "-fsSL", "--max-time", "30", "-o", to, url, (char *)NULL);
+        _exit(127);
+    }
+    int st = 0;
+    if (p < 0 || waitpid(p, &st, 0) < 0)
+        return -1;
+    return WIFEXITED(st) && WEXITSTATUS(st) == 0 ? 0 : -1;
+}
+
+static int icons_waiting(const char *file) {
+    char p[1100];
+    snprintf(p, sizeof(p), "%s/icons/%s", state, file);
+    return access(p, F_OK) == 0;
+}
+
+static void icon_wait(void) {
+    if (icon_child > 0) {
+        waitpid(icon_child, NULL, 0);
+        icon_child = 0;
+    }
+}
+
+/* from the main loop: collect a finished download run; start one when games are listed */
+static void icon_poll(void) {
+    if (icon_child > 0) {
+        if (waitpid(icon_child, NULL, WNOHANG) != icon_child)
+            return;
+        icon_child = 0;
+    }
+    if (!icons_waiting("queue.txt"))
+        return;
+    pid_t p = fork();
+    if (p == 0) {
+        struct smc_sync_cfg k = cfg();
+        int made = smc_fetch_icons(&k, fetch);
+        if (made)
+            lg("icons: %d made from pictures (on the card the next time it's opened)", made);
+        _exit(0);
+    }
+    if (p > 0)
+        icon_child = p;
+}
+
+/* icons made since the card was last opened go on it now */
+static void icons_to_card(struct conn *c) {
+    if (!icons_waiting("ready.txt"))
+        return;
+    struct smc_sync_cfg k = cfg();
+    int put = smc_apply_icons(&c->bus, &k);
+    if (put)
+        lg("icons: %d put on the card", put);
+}
+
 int main(int argc, char **argv) {
     static char sv[1024], st[1024], ls[1024], g[8][1024];
     int opt;
@@ -583,5 +667,6 @@ int main(int argc, char **argv) {
             }
         }
         game_poll();
+        icon_poll();
     }
 }

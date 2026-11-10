@@ -848,6 +848,268 @@ static size_t own_icon(const char *sys, const char *dir, const char *game, uint8
     return got;
 }
 
+/* ---- Save icons for games whose saves carry none (docs/05-design.md) ----
+ * The icon database, on the SuperStation: <state>/icons/<system>/<game ID>.bin, each game's 32x32 icon made once from
+ * its picture; <game ID>.none: no picture anywhere (not asked for again for 30 days, except at a manual card read).
+ * Where a game's picture comes from, in order (smc_fetch_icons, in the background: a sync never waits on the net):
+ *   1. ours: SMC_ICON_REPO/<system>/<game ID>.png (mods, patched games, homebrew; the public super-memcard-cores repo)
+ *   2. libretro's cover, by the game's official name from the game lists
+ *   3. Console Mode's own art beside the game (media/<game>.png), offline
+ * A game without one yet shows its system's icon; the download list is <state>/icons/queue.txt, and icons made but not
+ * yet on the card <state>/icons/ready.txt (smc_apply_icons puts them there). PSX saves always use their own icon. */
+#define ICON_RETRY_DAYS 30
+#define SMC_ICON_REPO "https://raw.githubusercontent.com/f3bandit/super-memcard-cores/main/icons"
+#define SMC_LIBRETRO_THUMBS "https://thumbnails.libretro.com"
+
+static bool icon_retry; /* a manual card read: ask again for games marked .none */
+void smc_icons_retry(bool on) { icon_retry = on; }
+
+static void icon_db_path(char *out, size_t n, const char *sys, const char *base, const char *ext) {
+    snprintf(out, n, "%s/icons/%s/%s.%s", C->state_dir, sys, base, ext);
+}
+
+static size_t read_small(const char *path, uint8_t *out, size_t max) {
+    FILE *f = fopen(path, "rb");
+    if (!f)
+        return 0;
+    size_t n = fread(out, 1, max, f);
+    fclose(f);
+    return n;
+}
+
+static bool put_small(const char *path, const void *d, size_t len) {
+    char tmp[1300];
+    snprintf(tmp, sizeof(tmp), "%s.tmp", path);
+    FILE *f = fopen(tmp, "wb");
+    if (!f)
+        return false;
+    bool ok = fwrite(d, 1, len, f) == len;
+    ok &= fclose(f) == 0;
+    if (ok)
+        ok = rename(tmp, path) == 0;
+    else
+        unlink(tmp);
+    return ok;
+}
+
+static void icons_line(const char *file, const char *line) {
+    char dir[1100], path[1200];
+    snprintf(dir, sizeof(dir), "%s/icons", C->state_dir);
+    mkdirs(dir);
+    snprintf(path, sizeof(path), "%s/%s", dir, file);
+    FILE *f = fopen(path, "a");
+    if (f) {
+        fputs(line, f);
+        fclose(f);
+    }
+}
+
+/* the game's icon from the database; none yet: the game goes on the download list. Its length, 0 for none yet. */
+static size_t db_icon(const char *sys, int card, const char *id, const char *base, const char *game, uint8_t *out,
+                      size_t out_max) {
+    char path[1400];
+    struct stat st;
+    icon_db_path(path, sizeof(path), sys, base, "bin");
+    size_t l = read_small(path, out, out_max);
+    if (l >= 8 && !memcmp(out, "SMIC", 4))
+        return l;
+    icon_db_path(path, sizeof(path), sys, base, "none");
+    if (!icon_retry && stat(path, &st) == 0 && time(NULL) - st.st_mtime < ICON_RETRY_DAYS * 86400)
+        return 0;
+    const char *crc = NULL, *dash = strrchr(base, '-');
+    if (!strncmp(base, "CRC-", 4))
+        crc = base + 4;
+    else if (dash && strlen(dash + 1) == 8 && strspn(dash + 1, "0123456789ABCDEF") == 8)
+        crc = dash + 1;
+    const char *name = C->gamedb_dir ? smc_gamedb_name(C->gamedb_dir, sys, crc, crc ? NULL : base) : NULL;
+    struct rom *r = rom_for(sys, game);
+    char line[2600];
+    snprintf(line, sizeof(line), "%s\t%d\t%s\t%s\t%s\t%s\n", sys, card, id, base, name ? name : "", r ? r->path : "");
+    icons_line("queue.txt", line);
+    return 0;
+}
+
+/* libretro's file name for a game (these characters become _), then the URL's escapes */
+static void url_name(char *out, size_t n, const char *name) {
+    size_t o = 0;
+    for (const unsigned char *p = (const unsigned char *)name; *p && o + 4 < n; p++) {
+        unsigned char c = *p;
+        if (strchr("&*/:`<>?\\|\"", c))
+            c = '_';
+        if ((c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || strchr("-._~", c))
+            out[o++] = (char)c;
+        else
+            o += (size_t)snprintf(out + o, n - o, "%%%02X", c);
+    }
+    out[o] = 0;
+}
+
+/* one picture, downloaded and made into an icon */
+static size_t fetch_icon(int (*fetch)(const char *url, const char *to), const char *url, const char *tmp, uint8_t *out,
+                         size_t out_max) {
+    size_t l = 0;
+    if (fetch(url, tmp) == 0)
+        l = smc_art_icon(tmp, out, out_max);
+    unlink(tmp);
+    return l;
+}
+
+int smc_fetch_icons(const struct smc_sync_cfg *cfg, int (*fetch)(const char *url, const char *to)) {
+    C = cfg;
+    char q[1100], work[1100];
+    snprintf(q, sizeof(q), "%s/icons/queue.txt", C->state_dir);
+    snprintf(work, sizeof(work), "%s/icons/queue.work", C->state_dir);
+    if (rename(q, work))
+        return 0;
+    FILE *f = fopen(work, "r");
+    char line[2600];
+    int made = 0;
+    static char done[512][100];
+    int nd = 0;
+    while (f && fgets(line, sizeof(line), f)) {
+        line[strcspn(line, "\r\n")] = 0;
+        char *v[6];
+        int k = 0;
+        for (char *p = line; k < 6; k++) {
+            v[k] = p;
+            char *t = strchr(p, '\t');
+            if (!t) {
+                k++;
+                break;
+            }
+            *t = 0;
+            p = t + 1;
+        }
+        if (k < 6)
+            continue;
+        const char *sys = v[0], *card = v[1], *id = v[2], *base = v[3], *name = v[4], *rom = v[5];
+        char key[100], bin[1300], none[1300], tmp[1300], ready[1200];
+        snprintf(key, sizeof(key), "%s/%s", sys, base);
+        bool seen = false;
+        for (int i = 0; i < nd; i++)
+            seen |= !strcmp(done[i], key);
+        snprintf(ready, sizeof(ready), "%s\t%s\t%s\t%s\n", sys, card, id, base);
+        icon_db_path(bin, sizeof(bin), sys, base, "bin");
+        if (seen || access(bin, F_OK) == 0) {
+            if (access(bin, F_OK) == 0)
+                icons_line("ready.txt", ready); /* another card set of a game already done */
+            continue;
+        }
+        if (nd < 512)
+            snprintf(done[nd++], sizeof(done[0]), "%s", key);
+        char dir[1100];
+        snprintf(dir, sizeof(dir), "%s/icons/%s", C->state_dir, sys);
+        mkdirs(dir);
+        snprintf(tmp, sizeof(tmp), "%s/.fetch", dir);
+        static uint8_t icon[8 + 32 + 512];
+        size_t l = 0;
+        char url[1400], en[600], el[200];
+        /* 1. ours, by game ID */
+        url_name(en, sizeof(en), base);
+        url_name(el, sizeof(el), sys);
+        snprintf(url, sizeof(url), "%s/%s/%s.png", SMC_ICON_REPO, el, en);
+        l = fetch_icon(fetch, url, tmp, icon, sizeof(icon));
+        /* 2. libretro's cover, by official name, in each of the system's lists */
+        if (!l && *name) {
+            const char *lists[3];
+            int disc, nl = smc_gamedb_lists(sys, lists, &disc);
+            url_name(en, sizeof(en), name);
+            for (int li = 0; li < nl && !l; li++) {
+                url_name(el, sizeof(el), lists[li]);
+                snprintf(url, sizeof(url), "%s/%s/Named_Boxarts/%s.png", SMC_LIBRETRO_THUMBS, el, en);
+                l = fetch_icon(fetch, url, tmp, icon, sizeof(icon));
+            }
+        }
+        /* 3. Console Mode's art beside the game: media/<game>.png in its folder or one above */
+        if (!l && *rom) {
+            char d2[1024], romname[256], path[1400];
+            const char *sl = strrchr(rom, '/');
+            snprintf(romname, sizeof(romname), "%s", sl ? sl + 1 : rom);
+            char *dot = strrchr(romname, '.');
+            if (dot)
+                *dot = 0;
+            snprintf(d2, sizeof(d2), "%s", rom);
+            for (int up = 0; up < 3 && !l; up++) {
+                char *cut = strrchr(d2, '/');
+                if (!cut)
+                    break;
+                *cut = 0;
+                static const char *const ext[] = {"png", "jpg", "jpeg", "PNG", "JPG"};
+                for (size_t e = 0; e < sizeof(ext) / sizeof(ext[0]) && !l; e++) {
+                    snprintf(path, sizeof(path), "%s/media/%s.%s", d2, romname, ext[e]);
+                    if (access(path, R_OK) == 0)
+                        l = smc_art_icon(path, icon, sizeof(icon));
+                }
+            }
+        }
+        icon_db_path(none, sizeof(none), sys, base, "none");
+        if (l && put_small(bin, icon, l)) {
+            unlink(none);
+            icons_line("ready.txt", ready);
+            made++;
+        } else {
+            put_small(none, "", 0); /* no picture anywhere */
+        }
+    }
+    if (f)
+        fclose(f);
+    unlink(work);
+    return made;
+}
+
+int smc_apply_icons(const struct smc_bus *b, const struct smc_sync_cfg *cfg) {
+    C = cfg;
+    char r[1100], work[1100];
+    snprintf(r, sizeof(r), "%s/icons/ready.txt", C->state_dir);
+    snprintf(work, sizeof(work), "%s/icons/ready.work", C->state_dir);
+    if (rename(r, work))
+        return 0;
+    FILE *f = fopen(work, "r");
+    char line[600];
+    int put = 0;
+    while (f && fgets(line, sizeof(line), f)) {
+        line[strcspn(line, "\r\n")] = 0;
+        char sys[40], id[80], base[80];
+        int card;
+        if (sscanf(line, "%39[^\t]\t%d\t%79[^\t]\t%79s", sys, &card, id, base) != 4)
+            continue;
+        static uint8_t icon[8 + 32 + 512];
+        char bin[1300];
+        icon_db_path(bin, sizeof(bin), sys, base, "bin");
+        size_t l = read_small(bin, icon, sizeof(icon));
+        if (l < 8 || memcmp(icon, "SMIC", 4))
+            continue;
+        /* only over the system's placeholder (or no icon): never over a game's own */
+        int n = smc_select_card(b, sys, id, card, NULL);
+        if (n < 0)
+            continue;
+        int at = -1;
+        struct smc_file fi;
+        for (int i = 0; i < n; i++)
+            if (smc_info(b, i, &fi) == SMC_OK && !strcmp(fi.name, ICON_BIN) && !fi.deleted) {
+                at = i;
+                break;
+            }
+        uint32_t gen = 1;
+        if (at >= 0) {
+            size_t dl;
+            const uint8_t *def = smc_system_icon(sys, &dl);
+            uint8_t cur[256];
+            if (!def || fi.size != dl || smc_read_file(b, at, (uint32_t)dl, cur) != SMC_OK || memcmp(cur, def, dl))
+                continue;
+            gen = fi.gen + 1;
+        }
+        if (smc_select_card(b, sys, id, card, NULL) >= 0 && smc_write_file(b, ICON_BIN, icon, (uint32_t)l, gen) == SMC_OK)
+            put++;
+        else
+            logf_("couldn't put the icon on the card: %s/%s", sys, id);
+    }
+    if (f)
+        fclose(f);
+    unlink(work);
+    return put;
+}
+
 static int sync_game(const struct smc_bus *b, const char *sys, int card, const char *game, const char *id,
                      struct smc_sync_report *rep) {
     struct smc_file files[16];
@@ -917,22 +1179,42 @@ static int sync_game(const struct smc_bus *b, const char *sys, int card, const c
     }
     if (d)
         closedir(d);
-    /* the game's own icon when its save carries one (icon_readers: a PS1 card image's, as Console Mode shows it for the
-     * card in the port); else a game new on the card gets its system's icon (smc_icons.c) */
-    size_t ilen;
-    const uint8_t *icon = smc_system_icon(sys, &ilen);
-    static uint8_t own[8 + 32 + 3 * 128];
-    bool has_own = false;
-    if (!has_icon) {
+    /* the game's icon: its save's own (icon_readers: PSX), else the icon database's (made from its picture), else its
+     * system's until the database has one (db_icon lists it for the download; smc_apply_icons puts it on later) */
+    size_t ilen = 0;
+    const uint8_t *def = smc_system_icon(sys, &ilen), *icon = def;
+    char base_id[65];
+    snprintf(base_id, sizeof(base_id), "%s", id); /* a second save set (<id>~<crc>) shows the game's icon too */
+    if (strchr(base_id, '~'))
+        *strchr(base_id, '~') = 0;
+    static uint8_t own[8 + 32 + 32 * 32 / 2];
+    int icon_at = -1;
+    for (int i = 0; i < n; i++)
+        if (!strcmp(files[i].name, ICON_BIN) && !files[i].deleted)
+            icon_at = i;
+    bool is_default = false;
+    if (icon_at >= 0 && def && files[icon_at].size == ilen) {
+        uint8_t cur[256];
+        is_default = ilen <= sizeof(cur) && smc_select_card(b, sys, id, card, NULL) >= 0 &&
+                     smc_read_file(b, icon_at, (uint32_t)ilen, cur) == SMC_OK && !memcmp(cur, def, ilen);
+    }
+    bool better = false;
+    if (!has_icon || is_default) {
         size_t l = own_icon(sys, dir, local_game, own, sizeof(own));
+        bool carries = false;
+        for (size_t k = 0; k < sizeof(icon_readers) / sizeof(icon_readers[0]); k++)
+            carries |= !strcmp(icon_readers[k].sys, sys);
+        if (!l && !carries)
+            l = db_icon(sys, card, id, base_id, local_game, own, sizeof(own));
         if (l) {
             icon = own;
             ilen = l;
-            has_own = true;
+            better = true;
         }
     }
-    if (!has_icon && (rep->pushed > pushed || has_own) && icon) {
-        if (smc_select_card(b, sys, id, card, NULL) < 0 || smc_write_file(b, ICON_BIN, icon, (uint32_t)ilen, 1) != SMC_OK)
+    if (icon && ((!has_icon && (rep->pushed > pushed || better)) || (is_default && better))) {
+        uint32_t gen = icon_at >= 0 ? files[icon_at].gen + 1 : 1;
+        if (smc_select_card(b, sys, id, card, NULL) < 0 || smc_write_file(b, ICON_BIN, icon, (uint32_t)ilen, gen) != SMC_OK)
             logf_("couldn't put the icon on the card: %s/%s", sys, local_game);
     }
     /* and what the game is, for a frontend's save list (game name, ID) */

@@ -69,6 +69,16 @@ int smc_mgl_read(const char *path, struct smc_mgl *m);
 const uint8_t *smc_system_icon(const char *sys, size_t *len);
 /* A PS1 card image's own save icon (its first save's) as icon.bin: length, 0 if none (smc_icons.c). */
 size_t smc_ps1_icon(const uint8_t *img, size_t len, uint8_t *out, size_t out_max);
+/* A 32x32 icon.bin made from a game's box art (PNG or JPEG; smc_art_icon.c): length, 0 if it can't be read. */
+size_t smc_art_icon(const char *path, uint8_t *out, size_t out_max);
+/* Save icons for games whose saves carry none (smc_sync.c, docs/05-design.md): the download list made by the syncs is
+ * worked through with fetch() (url, file to write: 0 on success; smcd: curl), each game's picture made into its icon in
+ * the icon database. Returns how many icons were made. Run it where waiting on the net is fine (not in a sync). */
+int smc_fetch_icons(const struct smc_sync_cfg *cfg, int (*fetch)(const char *url, const char *to));
+/* The icons made since: onto the card, over the system's placeholder only. Returns how many. */
+int smc_apply_icons(const struct smc_bus *b, const struct smc_sync_cfg *cfg);
+/* A manual card read: games with no picture found are asked for again (else once in 30 days). */
+void smc_icons_retry(bool on);
 
 /* When to sync (docs/05 §3): like a PS1, the card is only read or written when a save is loaded or saved, and the card
  * is only reachable from the menu core, so around a game:

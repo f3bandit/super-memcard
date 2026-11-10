@@ -105,7 +105,24 @@ screen is monochrome). A PSX card image (the PSX core's per-game card in `saves/
 icon, copied as it is (palette and 1-3 frames): what Console Mode already shows for PS1 saves. No other system's
 saves carry an icon (NES/SNES/Game Boy/GBA/N64/Mega Drive/SMS/TurboGrafx saves are raw memory; Saturn and Mega-CD
 backup RAM entries have a name and comment, no picture; N64 Controller Pak notes a name only), so they get their
-system's icon.
+system's icon until it has a picture:
+
+| order | where the picture comes from |
+|---|---|
+| 1 | the save's own icon: PSX only, always (never downloaded) |
+| 2 | ours: `icons/<system>/<game ID>.png` in the public super-memcard-cores repo, for mods, patched games and homebrew (and to replace a wrong cover) |
+| 3 | libretro's cover (thumbnails.libretro.com, `Named_Boxarts`), by the game's official name from the game lists |
+| 4 | Console Mode's art beside the game (`media/<game>.png`), offline |
+| 5 | none: the system's icon stays |
+
+smcd turns the picture into a 32x32, 15-colour icon in the same layout (`width`/`height` 32: Console Mode draws save
+icons at 32x32, so 1:1), keeps it on the SuperStation (`<state>/icons/<system>/<game ID>.bin`, about half a KB) and
+never downloads that game again. A sync never waits for the internet: a game without an icon yet gets its system's,
+goes on the download list, and smcd fetches in the background; the icon goes on the card the next time smcd opens it.
+A manual card read does it all within the read, and asks again for games where nothing was found (otherwise once a
+month). Adding a game on our side: put a picture named by its game ID in the repo's `icons/<system>/`; it reaches
+users at their next card read. Only over the system's icon: a game's own icon is never replaced.
+
 
 ### Virtual cards, and which core is running
 

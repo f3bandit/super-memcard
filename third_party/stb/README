@@ -1,0 +1,2 @@
+stb_image.h from https://github.com/nothings/stb (commit 013ac3b, 2024-05-31, v2.30), unchanged. Public domain (Unlicense) or MIT, its choice of either: see the end of the file.
+smcd reads the games' box art with it (PNG and JPEG) to make their save icons (host/smc_art_icon.c).

@@ -65,6 +65,10 @@ $(B)/smc_sync.o: ../../host/smc_sync.c ../../host/smc_sync.h ../../host/smc.h
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -fno-pie -c $< -o $@
 
+# a save icon from the game's box art (stb_image, third_party/stb)
+$(B)/smc_art_icon.o: ../../host/smc_art_icon.c ../../host/smc_sync.h
+	@mkdir -p $(dir $@)
+	$(CC) $(OPT) -Wall -I../../host -I../../third_party/stb -fno-pie -c $< -o $@
 $(B)/smc_icons.o: ../../host/smc_icons.c ../../host/smc_sync.h
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -fno-pie -c $< -o $@
@@ -90,7 +94,7 @@ $(B)/smccli.o: ../../tools/smccli/smccli.c
 	$(CC) $(CFLAGS) -I../../host -fno-pie -c $< -o $@
 
 # the frontend's commands from a shell, against vcardd (tools/smccli)
-$(B)/smccli: $(B)/smccli.o $(B)/smc_vcard.o $(B)/smc_host.o $(B)/smc_genuine.o $(B)/monocypher.o $(B)/smc_sync.o $(B)/smc_icons.o $(B)/smc_ident.o $(B)/smc_gameid.o $(B)/smc_gamedb.o
+$(B)/smccli: $(B)/smccli.o $(B)/smc_vcard.o $(B)/smc_host.o $(B)/smc_genuine.o $(B)/monocypher.o $(B)/smc_sync.o $(B)/smc_icons.o $(B)/smc_art_icon.o $(B)/smc_ident.o $(B)/smc_gameid.o $(B)/smc_gamedb.o
 	$(CC) $^ $(LDFLAGS) $(LDFLAGS_STATIC) -o $@
 
 $(B)/smcd.o: ../../smcd/smcd.c
@@ -98,7 +102,7 @@ $(B)/smcd.o: ../../smcd/smcd.c
 	$(CC) $(CFLAGS) -I../../host -fno-pie -c $< -o $@
 
 # Super MemCard on the SuperStation (smcd/): the program beside Main
-$(B)/smcd: $(B)/smcd.o $(B)/smc_vcard.o $(B)/smc_host.o $(B)/smc_genuine.o $(B)/monocypher.o $(B)/smc_sync.o $(B)/smc_icons.o $(B)/smc_ident.o $(B)/smc_gameid.o $(B)/smc_gamedb.o
+$(B)/smcd: $(B)/smcd.o $(B)/smc_vcard.o $(B)/smc_host.o $(B)/smc_genuine.o $(B)/monocypher.o $(B)/smc_sync.o $(B)/smc_icons.o $(B)/smc_art_icon.o $(B)/smc_ident.o $(B)/smc_gameid.o $(B)/smc_gamedb.o
 	$(CC) $^ $(LDFLAGS) $(LDFLAGS_STATIC) -o $@
 
 # test only: main/smc_shim.cpp as Main runs it, with vcardd for the front ports
@@ -127,7 +131,7 @@ $(B)/%.o: %.c $(if $(filter 1,$(SMC)),$(B)/fw/.ready)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -fno-pie -c $< -o $@
 
-$(B)/test_card: $(B)/tests/test_card.o $(B)/tests/bus.o $(B)/host/vcard_client.o $(B)/smc_host.o $(B)/smc_genuine.o $(B)/smc_sync.o $(B)/smc_icons.o $(B)/smc_ident.o $(B)/smc_gameid.o $(B)/smc_gamedb.o $(HOST_OBJ) $(FW_OBJ)
+$(B)/test_card: $(B)/tests/test_card.o $(B)/tests/bus.o $(B)/host/vcard_client.o $(B)/smc_host.o $(B)/smc_genuine.o $(B)/smc_sync.o $(B)/smc_icons.o $(B)/smc_art_icon.o $(B)/smc_ident.o $(B)/smc_gameid.o $(B)/smc_gamedb.o $(HOST_OBJ) $(FW_OBJ)
 	$(CC) $^ $(LDFLAGS) $(LDFLAGS_STATIC) -o $@
 
 test: $(B)/test_card
