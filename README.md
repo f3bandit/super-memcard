@@ -69,3 +69,7 @@ By f3bandit.
 The cores are built in the public repo [f3bandit/super-memcard-cores](https://github.com/f3bandit/super-memcard-cores)
 (free Actions minutes): the pinned cores, the card driver for `sys/` and the build workflow. `core/sys/` here is
 the same driver, for the bus simulation; a change to it goes to both.
+
+Licence: closed, all rights reserved, licensed exclusively to Retro Remake, except the GPL parts
+(card firmware additions, core driver, Main front-port code): see [LICENSE](LICENSE) and
+[docs/11-licensing.md](docs/11-licensing.md).

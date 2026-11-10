@@ -1,0 +1,42 @@
+Super MemCard
+Copyright (C) 2026 f3bandit. All rights reserved.
+
+DRAFT: to be reviewed by a lawyer before it is relied on. The agreement with Retro Remake
+(docs/11-licensing.md) is the document that governs; this file states what the code is under.
+
+1. The closed parts
+
+Everything in this repository is the confidential, proprietary work of f3bandit, except the files
+listed in section 2. No one may use, copy, modify, distribute, sublicense, sell, decompile or
+reverse-engineer it, in source or binary form, without a written licence from f3bandit.
+
+f3bandit grants Retro Remake an exclusive licence to it, on the terms of the agreement between
+them (docs/11-licensing.md). f3bandit keeps ownership.
+
+End users of Retro Remake products receive the closed parts only as part of those products, in
+binary form, for use on Retro Remake hardware, and receive no other rights.
+
+2. The open parts (GNU General Public License, version 3 or later)
+
+These files are free software, copyright f3bandit, licensed under the GNU General Public License
+as published by the Free Software Foundation, version 3 or (at your option) any later version,
+because they are built into GPL works:
+
+  firmware/                 the Super MemCard additions to sd2psXtd (sd2psXtd is GPL-3.0; its own
+                            code belongs to its authors)
+  core/sys/                 the front-port card driver built into MiSTer cores' sys_top
+                            (published in f3bandit/super-memcard-cores)
+  main/smc_frontport.cpp    the front-port access compiled into a MiSTer Main (Main_MiSTer is
+  main/smc_frontport.h      GPL-3.0)
+
+and the Main shim that passes card frames between a MiSTer Main and smcd, when it is written.
+
+They are distributed WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details:
+<https://www.gnu.org/licenses/>.
+
+3. Other people's work used here
+
+  sd2psXtd (firmware the card runs, sim/card builds it): GPL-3.0, its authors.
+  MiSTer-devel cores and Main_MiSTer: their own licences, their authors.
+  libretro-database game lists: fetched at run time, not included, used under their own terms.

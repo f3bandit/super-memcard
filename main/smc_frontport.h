@@ -1,6 +1,6 @@
 // Super MemCard: the SuperStation One's front ports from a MiSTer Main, through the front-port driver in the loaded
 // core (core/sys/smc_port.sv: in the menu core on hps_io's EXT_BUS, in a game core in sys_top). Copyright (C) 2026
-// f3bandit.
+// f3bandit. GPL-3.0-or-later, as Main_MiSTer.
 #pragma once
 #include <stdint.h>
 

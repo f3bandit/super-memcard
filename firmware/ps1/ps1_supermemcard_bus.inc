@@ -1,3 +1,5 @@
+/* Copyright (C) 2026 f3bandit. Super MemCard additions to sd2psXtd: GPL-3.0-or-later, as sd2psXtd.
+ * This program is distributed WITHOUT ANY WARRANTY; see the GNU General Public License. */
 /* Super MemCard: the bus side (core 1) of commands 81 60..68.
  *
  * Included into sd2psXtd's src/ps1/ps1_memory_card.c (see firmware/patches), so it uses that

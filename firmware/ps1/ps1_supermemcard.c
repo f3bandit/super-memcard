@@ -1,3 +1,5 @@
+/* Copyright (C) 2026 f3bandit. Super MemCard additions to sd2psXtd: GPL-3.0-or-later, as sd2psXtd.
+ * This program is distributed WITHOUT ANY WARRANTY; see the GNU General Public License. */
 /* Super MemCard for sd2psXtd's PS1 mode: the SD card side (core 0).
  *
  * Core 1 (ps1_supermemcard_bus.inc) posts each complete request here; ps1_supermemcard_task(),

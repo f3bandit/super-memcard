@@ -1,3 +1,5 @@
+/* Copyright (C) 2026 f3bandit. Super MemCard additions to sd2psXtd: GPL-3.0-or-later, as sd2psXtd.
+ * This program is distributed WITHOUT ANY WARRANTY; see the GNU General Public License. */
 /* Super MemCard for sd2psXtd's PS1 mode: commands 81 60..6A (docs/05-design.md §2).
  *
  * Other systems' saves live on the card's SD card under SuperMemCard/<system>/Card<N>/<game ID>/, never
