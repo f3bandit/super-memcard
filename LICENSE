@@ -28,8 +28,8 @@ because they are built into GPL works:
                             (published in f3bandit/super-memcard-cores)
   main/smc_frontport.cpp    the front-port access compiled into a MiSTer Main (Main_MiSTer is
   main/smc_frontport.h      GPL-3.0)
-
-and the Main shim that passes card frames between a MiSTer Main and smcd, when it is written.
+  main/smc_shim.cpp         the Main shim that passes card frames between a MiSTer Main and smcd
+  main/smc_shim.h
 
 They are distributed WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
 FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details:
@@ -38,5 +38,7 @@ FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more de
 3. Other people's work used here
 
   sd2psXtd (firmware the card runs, sim/card builds it): GPL-3.0, its authors.
+  Monocypher 4.0.2 (third_party/monocypher, the card identity's signatures, in the firmware and in
+  smcd): public domain (CC0) or 2-clause BSD, Loup Vaillant and its contributors.
   MiSTer-devel cores and Main_MiSTer: their own licences, their authors.
   libretro-database game lists: fetched at run time, not included, used under their own terms.

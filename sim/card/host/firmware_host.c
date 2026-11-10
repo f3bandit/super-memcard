@@ -5,6 +5,9 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+
+#include "pico/rand.h"
 
 #include "settings.h"
 #include "input.h"
@@ -40,6 +43,21 @@ void settings_set_ps1_autoboot(bool x) { s.ps1_autoboot = x; }
 bool settings_get_ps1_game_id(void) { return s.ps1_game_id; }
 void settings_set_ps1_game_id(bool x) { s.ps1_game_id = x; }
 int settings_get_ps2_variant(void) { return PS2_VARIANT_RETAIL; }
+
+/* Super MemCard's identity: the chip ID and the identity's flash page, in the card's flash (kept across power-offs) */
+void smc_hw_uid(uint8_t uid[8]) {
+    static const uint8_t zero[8];
+    if (!memcmp(s.smc_uid, zero, 8)) {
+        uint64_t r = get_rand_64();
+        memcpy(s.smc_uid, &r, 8);
+    }
+    memcpy(uid, s.smc_uid, 8);
+}
+void smc_hw_ident_read(uint8_t *buf, int len) { memcpy(buf, s.smc_ident, (size_t)len); }
+void smc_hw_ident_write(const uint8_t *buf, int len) {
+    memset(s.smc_ident, 0xFF, sizeof(s.smc_ident));
+    memcpy(s.smc_ident, buf, (size_t)len);
+}
 
 void input_task(void) {}
 int input_get_pressed(void) { return 0; }

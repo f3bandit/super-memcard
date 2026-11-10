@@ -85,7 +85,7 @@ int main(int argc, char **argv) {
         }
     }
     if (a >= argc) {
-        fprintf(stderr, "usage: smccli [options] hello|launch|back|read|systems|list|delete|conflicts|keep|core|mgl ...\n");
+        fprintf(stderr, "usage: smccli [options] hello|chip|launch|back|read|systems|list|delete|conflicts|keep|core|mgl ...\n");
         return 2;
     }
     const char *cmd = argv[a++];
@@ -138,6 +138,22 @@ int main(int argc, char **argv) {
 
     if (!strcmp(cmd, "hello")) {
         printf("card %s, protocol %u, features 0x%02x, free %u KB\n", card.id, card.version, card.features, card.free_kb);
+    } else if (!strcmp(cmd, "chip")) {
+        /* the card's chip ID (for smccert issue) and whether it's a genuine Retro Remake card */
+        uint8_t chip[8], pub[32], cert[64];
+        char why[96];
+        int c = smc_cert(&bus, chip, pub, cert);
+        if (c < 0) {
+            printf("the card doesn't answer CERT (%d)\n", c);
+            rc = 1;
+        } else {
+            printf("chip ");
+            for (int i = 0; i < 8; i++)
+                printf("%02x", chip[i]);
+            int g = smc_genuine(&bus, &card, why, sizeof(why));
+            printf("\n%s%s%s\n", g == 1 ? "genuine" : "not genuine", g == 1 ? "" : ": ", g == 1 ? "" : why);
+            rc = g == 1 ? 0 : 3;
+        }
     } else if (!strcmp(cmd, "launch") && left >= 1) {
         /* Main, before it loads a core (fpga_load_rbf): which save folder, then Core and the game's save */
         struct smc_mgl m = {0};

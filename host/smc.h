@@ -86,6 +86,23 @@ int smc_list_card(const struct smc_bus *b, const char *sys, int card, int idx, c
 #define SMC_CARDS_MAX 99
 #define SMC_PROTOCOL 2 /* 2: Core and virtual cards */
 
+/* ---- the card's identity (docs/12-card-identity.md) ---- */
+#define SMC_FEATURE_IDENTITY 0x10 /* Hello's features: the card has CERT, AUTH and AUTHSIG */
+/* CERT: the card's chip ID, and its public key and Retro Remake's certificate. 1: the card has an identity (all
+ * filled in), 0: none (only chip filled in: what Retro Remake's smccert issues an identity for), <0: error. */
+int smc_cert(const struct smc_bus *b, uint8_t chip[8], uint8_t pub[32], uint8_t cert[64]);
+/* AUTH: the card signs this challenge (after answering: AUTHSIG gets the signature). SMC_OK, or <0
+ * (SMC_E_NOT_FOUND: no identity). */
+int smc_auth(const struct smc_bus *b, const uint8_t challenge[32]);
+/* AUTHSIG: 1 the signature (sig filled in), 0 not signed yet, SMC_E_NOT_FOUND no challenge, <0 error. */
+int smc_authsig(const struct smc_bus *b, uint8_t sig[64]);
+/* Is this a genuine Retro Remake card? Checks its certificate against Retro Remake's key (host/smc_rrkey.h) and
+ * that it holds the key the certificate names (a random challenge, signed). 1: genuine, 0: not (why says why),
+ * <0: the card stopped answering. A card that isn't genuine is used as a PS1 card only. */
+int smc_genuine(const struct smc_bus *b, const struct smc_card *card, char *why, size_t why_len);
+/* smcd built with the test key (tools/smccert/test-rr.key) instead of Retro Remake's */
+bool smc_genuine_test_key(void);
+
 /* A whole command frame (81 cmd, request, answer); exposed for tests. Returns SMC_OK or
  * SMC_E_NO_REPLY. */
 int smc_frame(const struct smc_bus *b, uint8_t cmd, const uint8_t *req, int rlen, uint8_t *ans, int alen);

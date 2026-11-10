@@ -5,7 +5,7 @@ FW      ?= firmware
 ifeq ($(SMC),1)
 B       ?= build-smc
 FWSRC   = $(B)/fw
-DEFS    = -DWITH_SUPERMEMCARD=1
+DEFS    = -DWITH_SUPERMEMCARD=1 -DSMC_SIM=1 -DSMC_TEST_RR_KEY='"$(abspath ../../tools/smccert/test-rr.key)"'
 else
 FWSRC   = $(FW)
 endif
@@ -32,14 +32,14 @@ FW_SRC  = src/ps1.c src/ps1/ps1_memory_card.c src/ps1/ps1_mc_data_interface.c sr
           src/ps1/ps1_cardman.c src/ps1/ps1_mmce.c src/ps1/ps1_empty_card.c src/card_config.c \
           src/util.c src/game_db/game_db.c src/bigmem.c ext/inih/ini.c
 ifeq ($(SMC),1)
-FW_SRC += src/ps1/ps1_supermemcard.c
+FW_SRC += src/ps1/ps1_supermemcard.c src/ps1/ps1_supermemcard_id.c src/ps1/monocypher.c
 endif
 HOST_SRC = host/vcard.c host/vcard_wire.c host/sd_host.c host/firmware_host.c
 B       ?= build
 FW_OBJ  = $(addprefix $(B)/fw/,$(FW_SRC:.c=.o))
 HOST_OBJ = $(addprefix $(B)/,$(HOST_SRC:.c=.o))
 
-all: $(B)/test_card $(B)/vcardd $(if $(filter 1,$(SMC)),$(B)/smccli $(B)/smcd $(B)/shimtest)
+all: $(B)/test_card $(B)/vcardd $(if $(filter 1,$(SMC)),$(B)/smccli $(B)/smcd $(B)/shimtest $(B)/smccert)
 
 # for the SS1 (armv7, static so it doesn't depend on MiSTer Linux's glibc):
 #   make ss1    ->  build-ss1/vcardd, build-ss1/test_card
@@ -49,6 +49,17 @@ ss1:
 $(B)/smc_host.o: ../../host/smc.c ../../host/smc.h
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -fno-pie -c $< -o $@
+
+# the genuine-card check (docs/12-card-identity.md) and Monocypher for the programs without the card's firmware in them
+$(B)/smc_genuine.o: ../../host/smc_genuine.c ../../host/smc.h ../../host/smc_rrkey.h
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -I../../third_party/monocypher -fno-pie -c $< -o $@
+$(B)/monocypher.o: ../../third_party/monocypher/monocypher.c
+	@mkdir -p $(dir $@)
+	$(CC) $(OPT) -fno-pie -c $< -o $@
+# Retro Remake's tool for card identities
+$(B)/smccert: ../../tools/smccert/smccert.c $(B)/monocypher.o
+	$(CC) $(OPT) -Wall -I../../third_party/monocypher -fno-pie $^ $(LDFLAGS_STATIC) -no-pie -o $@
 
 $(B)/smc_sync.o: ../../host/smc_sync.c ../../host/smc_sync.h ../../host/smc.h
 	@mkdir -p $(dir $@)
@@ -79,7 +90,7 @@ $(B)/smccli.o: ../../tools/smccli/smccli.c
 	$(CC) $(CFLAGS) -I../../host -fno-pie -c $< -o $@
 
 # the frontend's commands from a shell, against vcardd (tools/smccli)
-$(B)/smccli: $(B)/smccli.o $(B)/smc_vcard.o $(B)/smc_host.o $(B)/smc_sync.o $(B)/smc_icons.o $(B)/smc_ident.o $(B)/smc_gameid.o $(B)/smc_gamedb.o
+$(B)/smccli: $(B)/smccli.o $(B)/smc_vcard.o $(B)/smc_host.o $(B)/smc_genuine.o $(B)/monocypher.o $(B)/smc_sync.o $(B)/smc_icons.o $(B)/smc_ident.o $(B)/smc_gameid.o $(B)/smc_gamedb.o
 	$(CC) $^ $(LDFLAGS) $(LDFLAGS_STATIC) -o $@
 
 $(B)/smcd.o: ../../smcd/smcd.c
@@ -87,7 +98,7 @@ $(B)/smcd.o: ../../smcd/smcd.c
 	$(CC) $(CFLAGS) -I../../host -fno-pie -c $< -o $@
 
 # Super MemCard on the SuperStation (smcd/): the program beside Main
-$(B)/smcd: $(B)/smcd.o $(B)/smc_vcard.o $(B)/smc_host.o $(B)/smc_sync.o $(B)/smc_icons.o $(B)/smc_ident.o $(B)/smc_gameid.o $(B)/smc_gamedb.o
+$(B)/smcd: $(B)/smcd.o $(B)/smc_vcard.o $(B)/smc_host.o $(B)/smc_genuine.o $(B)/monocypher.o $(B)/smc_sync.o $(B)/smc_icons.o $(B)/smc_ident.o $(B)/smc_gameid.o $(B)/smc_gamedb.o
 	$(CC) $^ $(LDFLAGS) $(LDFLAGS_STATIC) -o $@
 
 # test only: main/smc_shim.cpp as Main runs it, with vcardd for the front ports
@@ -100,7 +111,7 @@ $(B)/tests/test_card.o: tests/test_smc.inc tests/test_sync.inc
 $(B)/vcardd: $(B)/host/vcardd.o $(HOST_OBJ) $(FW_OBJ)
 	$(CC) $^ $(LDFLAGS) $(LDFLAGS_STATIC) -o $@
 
-$(B)/fw/.ready: $(wildcard ../../firmware/ps1/* ../../firmware/patches/*)
+$(B)/fw/.ready: $(wildcard ../../firmware/ps1/* ../../firmware/patches/* ../../third_party/monocypher/*)
 	rm -rf $(B)/fw && mkdir -p $(B)/fw && cp -r $(FW)/src $(FW)/ext $(FW)/CMakeLists.txt $(B)/fw/
 	../../firmware/apply.sh $(B)/fw
 	touch $@
@@ -116,7 +127,7 @@ $(B)/%.o: %.c $(if $(filter 1,$(SMC)),$(B)/fw/.ready)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -fno-pie -c $< -o $@
 
-$(B)/test_card: $(B)/tests/test_card.o $(B)/tests/bus.o $(B)/host/vcard_client.o $(B)/smc_host.o $(B)/smc_sync.o $(B)/smc_icons.o $(B)/smc_ident.o $(B)/smc_gameid.o $(B)/smc_gamedb.o $(HOST_OBJ) $(FW_OBJ)
+$(B)/test_card: $(B)/tests/test_card.o $(B)/tests/bus.o $(B)/host/vcard_client.o $(B)/smc_host.o $(B)/smc_genuine.o $(B)/smc_sync.o $(B)/smc_icons.o $(B)/smc_ident.o $(B)/smc_gameid.o $(B)/smc_gamedb.o $(HOST_OBJ) $(FW_OBJ)
 	$(CC) $^ $(LDFLAGS) $(LDFLAGS_STATIC) -o $@
 
 test: $(B)/test_card
@@ -128,5 +139,5 @@ clean:
 	rm -rf $(B)
 
 # header dependencies (a stale object once hid a wire-protocol change, 08)
--include $(shell find $(B) -name '*.d' 2>/dev/null)
+-include $(shell find $(B) -name '*.d' -type f 2>/dev/null)
 .PHONY: all test clean ss1

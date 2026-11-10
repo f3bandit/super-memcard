@@ -7,7 +7,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 B=${B:-$here/../sim/card/build-smc}
 w=$(mktemp -d)
 pids=
-trap 'for p in $pids; do kill $p 2>/dev/null; done; wait 2>/dev/null; [ -n "$KEEP" ] && echo "kept $w" || rm -rf "$w"' EXIT
+trap 'for p in $pids; do kill $p 2>/dev/null || true; done; wait 2>/dev/null; [ -n "$KEEP" ] && echo "kept $w" || rm -rf "$w"' EXIT
 fail=0
 ok() { echo "ok   $1"; }
 bad() { echo "FAIL $1"; fail=1; }
@@ -29,8 +29,23 @@ python3 -c "import os,sys; open(sys.argv[1],'wb').write(b'NES\x1a\x01\x00'+bytes
 python3 -c "import os,sys; open(sys.argv[1],'wb').write(os.urandom(8192))" "$w/saves/NES/Test Game.sav"
 printf '<mistergamedescription><rbf>_Console/NES</rbf><file delay="1" type="f" index="0" path="%s/games/NES/Test Game.nes"/></mistergamedescription>' "$w" > "$w/game.mgl"
 
-"$B/vcardd" "$w/sd" "$w/vc.sock" > "$w/vcardd.log" 2>&1 & pids="$pids $!"
-for i in $(seq 50); do [ -S "$w/vc.sock" ] && break; sleep 0.1; done
+vcard() { "$B/vcardd" "$w/sd" "$w/vc.sock" > "$w/vcardd.log" 2>&1 & vc=$!; pids="$pids $vc"
+    for i in $(seq 50); do [ -S "$w/vc.sock" ] && break; sleep 0.1; done; }
+vcard_off() { kill $vc; wait $vc 2>/dev/null || true; rm -f "$w/vc.sock"; }
+vcard
+# 0. a card without an identity: smcd uses it as a PS1 card only
+"$B/smcd" -S "$w/saves" -T "$w/state" -g "$w/games" -d "$w/lists" -v "$w/vc.sock" & sm=$!; pids="$pids $sm"
+for i in $(seq 50); do [ -S /tmp/smcd.sock ] && break; sleep 0.1; done
+ask HELLO | grep -q "^notgenuine .*no identity" && ok "card without an identity: notgenuine" || bad "card without an identity: $(ask HELLO)"
+ask READ | grep -q "^notgenuine" && [ ! -d "$w/sd/SuperMemCard/NES" ] && ok "  and READ leaves it alone" || bad "  READ on a card that isn't genuine"
+grep -q "isn't a genuine Retro Remake card" /tmp/smcd.log && ok "  said once in the log" || bad "  the log"
+[ "$(grep -c "isn't a genuine" /tmp/smcd.log)" = 1 ] || bad "  said more than once"
+kill $sm; wait $sm 2>/dev/null || true; rm -f /tmp/smcd.sock
+# Retro Remake gives the card its identity (the test key), as at the factory
+chip=$("$B/smccli" -s "$w/vc.sock" chip | sed -n 's/^chip //p')
+"$B/smccert" issue "$here/../tools/smccert/test-rr.key" "$chip" "$w/sd/smc_key.bin" > /dev/null
+vcard_off; vcard
+"$B/smccli" -s "$w/vc.sock" chip | grep -qx genuine && [ ! -f "$w/sd/smc_key.bin" ] && ok "identity issued for chip $chip: genuine, key file gone" || bad "identity"
 rm -f /tmp/smcd.log
 "$B/smcd" -S "$w/saves" -T "$w/state" -g "$w/games" -d "$w/lists" -v "$w/none.sock" & pids="$pids $!"
 for i in $(seq 50); do [ -S /tmp/smcd.sock ] && break; sleep 0.1; done

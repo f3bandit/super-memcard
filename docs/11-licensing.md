@@ -22,8 +22,8 @@ commands, the documentation, the guide and the tools.
 | Ownership | f3bandit keeps ownership; this is a licence, not an assignment |
 | Source | Retro Remake receives the source; products ship it in binary form only |
 | End users | Binary only, on Retro Remake hardware; no right to copy, modify, redistribute or reverse-engineer |
-| Hardware | The features run only with genuine Retro Remake hardware (the card's certificate; the SuperStation check) |
-| Signing keys | Held by Retro Remake (card certificates, update signatures) |
+| Hardware | The features run only with genuine Retro Remake hardware: the card's identity ([12](12-card-identity.md)); the SuperStation check (to come) |
+| Signing keys | Held by Retro Remake (the key that signs card identities, update signatures) |
 | Credit | f3bandit is credited for his contributions in Console Mode's credits, in `smcd`'s about screen, and in the documentation of products that use his work |
 | Consideration | Retro Remake sends f3bandit, free of charge, one unit of every product Retro Remake releases from now on, as it's released, so he can keep testing and building features for Retro Remake products. No other payment |
 | If it ends | (for the lawyer) e.g. if Retro Remake stops shipping it or doesn't meet the terms, the rights return to f3bandit |

@@ -508,6 +508,164 @@ static void t_smc_free_space(void) {
     CHECK_EQ(c.free_kb, before - 64);
 }
 
+
+/* ---- the card's identity (ps1_supermemcard_id.c, docs/12-card-identity.md) ---- */
+#include "monocypher.h"
+
+/* Retro Remake's test key (tools/smccert/test-rr.key): what smccert issue does, for a chip */
+static void issue_identity(const uint8_t chip[8], uint8_t out[96], bool test_key) {
+    uint8_t rr[64], seed[32], csk[64], cpk[32], m[48];
+    if (test_key) {
+        FILE *f = fopen(SMC_TEST_RR_KEY, "rb");
+        CHECK(f);
+        CHECK(fread(rr, 1, 64, f) == 64);
+        fclose(f);
+    } else {
+        for (int i = 0; i < 32; i++)
+            seed[i] = (uint8_t)(i * 13 + 5); /* someone else's key */
+        crypto_eddsa_key_pair(rr, cpk, seed);
+    }
+    for (int i = 0; i < 32; i++)
+        out[i] = (uint8_t)(rand() & 0xFF);
+    memcpy(seed, out, 32);
+    crypto_eddsa_key_pair(csk, cpk, seed);
+    memcpy(m, "SMC-CERT", 8);
+    memcpy(m + 8, chip, 8);
+    memcpy(m + 16, cpk, 32);
+    crypto_eddsa_sign(out + 32, rr, m, sizeof(m));
+}
+
+static bool sd_has(const char *rel) {
+    char p[512];
+    path(p, sizeof(p), rel);
+    return access(p, F_OK) == 0;
+}
+
+/* the card's chip ID, from CERT (what a card without an identity answers too) */
+static void chip_of(const struct smc_bus *b, uint8_t chip[8]) {
+    uint8_t pub[32], cert[64];
+    CHECK(smc_cert(b, chip, pub, cert) >= 0);
+}
+
+static void power_cycle(void) {
+    vcard_stop();
+    CHECK_EQ(vcard_start(sd), 0);
+}
+
+static void give_identity(bool test_key, bool right_chip) {
+    struct smc_card c;
+    uint8_t chip[8], id[96];
+    CHECK_EQ(smc_hello(&vbus, SMC_HOST_TEST, 0, &c), 1);
+    chip_of(&vbus, chip);
+    if (!right_chip)
+        chip[0] ^= 1;
+    issue_identity(chip, id, test_key);
+    write_file("smc_key.bin", id, sizeof(id));
+    power_cycle();
+    /* the card takes the file at its first pass after the start: by its first command's answer */
+    CHECK_EQ(smc_hello(&vbus, SMC_HOST_TEST, 0, &c), 1);
+    chip_of(&vbus, chip);
+}
+
+static void t_smc_id_none(void) {
+    struct smc_card c;
+    char why[96];
+    CHECK_EQ(smc_hello(&vbus, SMC_HOST_TEST, 0, &c), 1);
+    CHECK(c.features & SMC_FEATURE_IDENTITY);
+    uint8_t chip[8], pub[32], cert[64], zero[8] = {0};
+    CHECK_EQ(smc_cert(&vbus, chip, pub, cert), 0); /* no identity, only the chip ID */
+    CHECK(memcmp(chip, zero, 8) != 0);
+    uint8_t ch[32] = {1};
+    CHECK_EQ(smc_auth(&vbus, ch), SMC_E_NOT_FOUND);
+    CHECK_EQ(smc_genuine(&vbus, &c, why, sizeof(why)), 0);
+    CHECK(strstr(why, "no identity") != NULL);
+}
+
+static void t_smc_id_genuine(void) {
+    give_identity(true, true);
+    CHECK(!sd_has("smc_key.bin")); /* moved into the card's flash */
+    CHECK(!sd_has("smc_key.bad"));
+    struct smc_card c;
+    char why[96];
+    CHECK_EQ(smc_hello(&vbus, SMC_HOST_TEST, 0, &c), 1);
+    CHECK_EQ(smc_genuine(&vbus, &c, why, sizeof(why)), 1);
+    CHECK_EQ(smc_genuine(&vbus, &c, why, sizeof(why)), 1); /* again: a new challenge */
+    /* kept in flash across a power-off; the SD card holds no key */
+    power_cycle();
+    CHECK_EQ(smc_hello(&vbus, SMC_HOST_TEST, 0, &c), 1);
+    CHECK_EQ(smc_genuine(&vbus, &c, why, sizeof(why)), 1);
+    /* through the front ports' whole frames too */
+    CHECK_EQ(smc_genuine(&fbus, &c, why, sizeof(why)), 1);
+    /* and the card still keeps saves as before */
+    static uint8_t save[2048], back[2048];
+    fill(save, sizeof(save), 9);
+    CHECK_EQ(smc_select(&vbus, "SNES", "id test"), 0);
+    CHECK_EQ(smc_write_file(&vbus, "save.sav", save, sizeof(save), 1), SMC_OK);
+    CHECK_EQ(smc_read_file(&vbus, 0, sizeof(back), back), SMC_OK);
+    CHECK(memcmp(save, back, sizeof(save)) == 0);
+}
+
+static void t_smc_id_other_chip(void) {
+    give_identity(true, false); /* Retro Remake's signature, for another chip */
+    CHECK(!sd_has("smc_key.bin"));
+    CHECK(sd_has("smc_key.bad"));
+    struct smc_card c;
+    char why[96];
+    CHECK_EQ(smc_hello(&vbus, SMC_HOST_TEST, 0, &c), 1);
+    CHECK_EQ(smc_genuine(&vbus, &c, why, sizeof(why)), 0);
+}
+
+static void t_smc_id_not_retro_remake(void) {
+    give_identity(false, true); /* for this chip, signed by someone else's key */
+    CHECK(sd_has("smc_key.bad"));
+    struct smc_card c;
+    char why[96];
+    CHECK_EQ(smc_hello(&vbus, SMC_HOST_TEST, 0, &c), 1);
+    CHECK_EQ(smc_genuine(&vbus, &c, why, sizeof(why)), 0);
+}
+
+static void t_smc_id_flash_copied(void) {
+    /* a genuine card's flash copied onto another card (another chip): not genuine */
+    give_identity(true, true);
+    struct smc_card c;
+    CHECK_EQ(smc_hello(&vbus, SMC_HOST_TEST, 0, &c), 1);
+    CHECK_EQ(smc_genuine(&vbus, &c, NULL, 0), 1);
+    vcard_stop();
+    host_settings()->smc_uid[3] ^= 0x40; /* the same flash, another chip */
+    CHECK_EQ(vcard_start(sd), 0);
+    char why[96];
+    CHECK_EQ(smc_hello(&vbus, SMC_HOST_TEST, 0, &c), 1);
+    CHECK_EQ(smc_genuine(&vbus, &c, why, sizeof(why)), 0);
+}
+
+/* a card that copied a genuine card's certificate but hasn't its key: its signatures are wrong */
+static int forge_frame(void *ctx, const uint8_t *out, uint8_t *in, int len) {
+    int n = bus_frame_cb(ctx, out, in, len);
+    if (len >= 67 && out[1] == 0x6D && in[2] == 0x47)
+        in[2 + 1 + 10] ^= 0x01;
+    return n;
+}
+
+static void t_smc_id_copied_certificate(void) {
+    give_identity(true, true);
+    const struct smc_bus forged = {NULL, NULL, NULL, forge_frame};
+    struct smc_card c;
+    char why[96];
+    CHECK_EQ(smc_hello(&forged, SMC_HOST_TEST, 0, &c), 1);
+    CHECK_EQ(smc_genuine(&forged, &c, why, sizeof(why)), 0);
+    CHECK(strstr(why, "doesn't hold the key") != NULL);
+}
+
+static void t_smc_id_menu_off(void) {
+    /* Super MemCard off in the card's menu: a stock PS1 card, no identity commands either */
+    give_identity(true, true);
+    write_file("SuperMemCard/settings.ini", "saves=0\n", 8);
+    power_cycle();
+    CHECK_EQ(smc_hello(&vbus, SMC_HOST_TEST, 0, NULL), 0);
+    uint8_t chip[8], pub[32], cert[64];
+    CHECK_EQ(smc_cert(&vbus, chip, pub, cert), SMC_E_NO_REPLY);
+}
+
 #define SMC_TESTS \
     {"SMC: whole-frame transport (the front ports' way)", t_smc_frame_transport, true, NULL}, \
     {"SMC: slow SD card (2.7 ms a write), 128 KB save", t_smc_slow_sd_card, true, NULL}, \
@@ -526,4 +684,11 @@ static void t_smc_free_space(void) {
     {"SMC: Core: the buttons pick the system's card", t_smc_core_buttons_pick_the_card, true, NULL}, \
     {"SMC: a PS1 read ends the system mode", t_smc_ps1_use_ends_system_mode, true, NULL}, \
     {"SMC: card menu: saves off makes it a stock card", t_smc_menu_saves_off, true, NULL}, \
-    {"SMC: card menu: free space, then Hello reports it", t_smc_free_space, true, NULL},
+    {"SMC: card menu: free space, then Hello reports it", t_smc_free_space, true, NULL}, \
+    {"SMC id: no identity: not genuine", t_smc_id_none, true, NULL}, \
+    {"SMC id: identity from the SD card into flash: genuine", t_smc_id_genuine, true, NULL}, \
+    {"SMC id: identity for another chip refused", t_smc_id_other_chip, true, NULL}, \
+    {"SMC id: identity not signed by Retro Remake refused", t_smc_id_not_retro_remake, true, NULL}, \
+    {"SMC id: flash copied onto another chip: not genuine", t_smc_id_flash_copied, true, NULL}, \
+    {"SMC id: copied certificate without the key: not genuine", t_smc_id_copied_certificate, true, NULL}, \
+    {"SMC id: saves off in the card menu: no identity commands", t_smc_id_menu_off, true, NULL},

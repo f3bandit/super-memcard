@@ -28,11 +28,16 @@ enum {
     SMC_DELETE = 0x6A, /* file gen[4] time[4]                  -> end (1): the save is deleted at generation gen; the
                         * card keeps a tombstone (Info answers 44 'D') so other SS1s delete their copy too, and
                         * the file itself in <game>/.deleted/ */
+    /* the card's identity (ps1_supermemcard_id.c, docs/12-card-identity.md) */
+    SMC_CERT    = 0x6B, /* (none)                             -> status chip_id[8] pub[32] cert[64] (105); status 4F:
+                         * no identity (only the chip ID) */
+    SMC_AUTH    = 0x6C, /* challenge[32]                      -> status (1): the card signs it after answering */
+    SMC_AUTHSIG = 0x6D, /* (none)                             -> status sig[64] (65); status 50: not signed yet */
 };
 
 /* answer status / end bytes, as the PS1 commands use them */
 enum { SMC_GOOD = 0x47, SMC_BAD_CHECKSUM = 0x4E, SMC_FAIL = 0xFF, SMC_NOT_FOUND = 0x4F, SMC_NO_SET = 0x53,
-       SMC_DELETED = 0x44 };
+       SMC_DELETED = 0x44, SMC_PENDING = 0x50 };
 
 /* host IDs in Hello */
 enum { SMC_HOST_MAIN = 1, SMC_HOST_CONSOLE_MODE = 2, SMC_HOST_CORE = 3, SMC_HOST_TEST = 0x7F };
@@ -60,6 +65,17 @@ void ps1_supermemcard_ps1_used(void);
 
 /* core 0: call from the main loop (src/ps1.c ps1_task) */
 void ps1_supermemcard_task(void);
+
+/* core 0: the card's identity (ps1_supermemcard_id.c) */
+int ps1_supermemcard_id_req_len(uint8_t cmd);
+int ps1_supermemcard_id_command(uint8_t cmd, const uint8_t *req, uint8_t *ans);
+void ps1_supermemcard_id_task(void);
+bool ps1_supermemcard_has_identity(void);
+/* the hardware under it (ps1_supermemcard_id.c on the RP2040; sim/card for the virtual card): the chip's unique ID,
+ * and the identity's place in flash */
+void smc_hw_uid(uint8_t uid[8]);
+void smc_hw_ident_read(uint8_t *buf, int len);
+void smc_hw_ident_write(const uint8_t *buf, int len);
 
 /* core 0, for the card's screen and buttons (src/gui.c) */
 /* The system whose core is running ("" when none: the buttons pick the PS1 card as before). */

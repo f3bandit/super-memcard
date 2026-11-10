@@ -47,6 +47,7 @@ int smc_vcard_open(const char *path, struct smc_bus *bus) {
         return -1;
     }
     vfd = fd;
+    memset(bus, 0, sizeof(*bus));   /* byte by byte: no frame callback (left unset, it held whatever was there) */
     bus->ctx = &vfd;
     bus->select = v_select;
     bus->xfer = v_xfer;

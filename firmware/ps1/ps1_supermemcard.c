@@ -66,6 +66,9 @@ int ps1_supermemcard_req_len(uint8_t cmd, const uint8_t *r, int have) {
         return 1 + r[0] + 1 + 2;
     case SMC_INFO: return 1;
     case SMC_DELETE: return 9;
+    case SMC_CERT:
+    case SMC_AUTH:
+    case SMC_AUTHSIG: return ps1_supermemcard_id_req_len(cmd);
     case SMC_CORE:
         if (have < 1) return 1;
         if (r[0] == 0 || r[0] > SMC_SYS_LEN) return -1;
@@ -476,7 +479,7 @@ static int do_command(uint8_t cmd, const uint8_t *r, int len, uint8_t *a) {
         a[0] = 'S';
         a[1] = 'M';
         a[2] = SMC_VERSION;
-        a[3] = 0x0F; /* features: save files, list, virtual cards (Core), delete */
+        a[3] = 0x1F; /* features: save files, list, virtual cards (Core), delete, identity (CERT/AUTH) */
         for (int i = 0; i < 8; i++) {
             unsigned v;
             sscanf(card_id + i * 2, "%2x", &v);
@@ -672,6 +675,11 @@ static int do_command(uint8_t cmd, const uint8_t *r, int len, uint8_t *a) {
         return 1;
     }
 
+    case SMC_CERT:
+    case SMC_AUTH:
+    case SMC_AUTHSIG:
+        return ps1_supermemcard_id_command(cmd, r, a);
+
     case SMC_STATUS:
         a[0] = a[1] = 0; /* every write above is on the SD card before it's answered */
         return 2;
@@ -734,9 +742,13 @@ void ps1_supermemcard_task(void) {
         save_mode_card();
 
     uint32_t seq = __atomic_load_n(&posted, __ATOMIC_ACQUIRE);
-    if (seq == __atomic_load_n(&done, __ATOMIC_ACQUIRE))
-        return;
-    mb_alen = do_command(mb_cmd, mb_req, mb_len, mb_ans);
-    last_cmd_at = time_us_64();
-    __atomic_store_n(&done, seq, __ATOMIC_RELEASE);
+    if (seq != __atomic_load_n(&done, __ATOMIC_ACQUIRE)) {
+        mb_alen = do_command(mb_cmd, mb_req, mb_len, mb_ans);
+        last_cmd_at = time_us_64();
+        __atomic_store_n(&done, seq, __ATOMIC_RELEASE);
+    }
+    /* the identity: deployed from the SD card at the first pass, a challenge signed once its AUTH is answered */
+    if (ps1_supermemcard_enabled())
+        ps1_supermemcard_has_identity();
+    ps1_supermemcard_id_task();
 }

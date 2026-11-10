@@ -5,8 +5,9 @@
 #include <string.h>
 #include <unistd.h>
 
-enum { C_HELLO = 0x60, C_SELECT, C_READ, C_WRITE, C_CREATE, C_COMMIT, C_STATUS, C_LIST, C_INFO, C_CORE, C_DELETE };
-enum { GOOD = 0x47, BAD_CHECKSUM = 0x4E, NOT_FOUND = 0x4F, DELETED = 0x44 };
+enum { C_HELLO = 0x60, C_SELECT, C_READ, C_WRITE, C_CREATE, C_COMMIT, C_STATUS, C_LIST, C_INFO, C_CORE, C_DELETE,
+       C_CERT, C_AUTH, C_AUTHSIG };
+enum { GOOD = 0x47, BAD_CHECKSUM = 0x4E, NOT_FOUND = 0x4F, DELETED = 0x44, PENDING = 0x50 };
 #define RETRIES 3
 
 int smc_frame(const struct smc_bus *b, uint8_t cmd, const uint8_t *req, int rlen, uint8_t *ans, int alen) {
@@ -269,4 +270,40 @@ int smc_list_card(const struct smc_bus *b, const char *sys, int card, int idx, c
     memcpy(game, a + 1, SMC_GAME_MAX);
     game[SMC_GAME_MAX] = 0;
     return SMC_OK;
+}
+
+int smc_cert(const struct smc_bus *b, uint8_t chip[8], uint8_t pub[32], uint8_t cert[64]) {
+    uint8_t a[105];
+    int rc = smc_frame(b, C_CERT, NULL, 0, a, sizeof(a));
+    if (rc)
+        return rc;
+    if (a[0] != GOOD && a[0] != NOT_FOUND)
+        return SMC_E_BAD;
+    memcpy(chip, a + 1, 8);
+    if (a[0] != GOOD)
+        return 0;
+    memcpy(pub, a + 9, 32);
+    memcpy(cert, a + 41, 64);
+    return 1;
+}
+
+int smc_auth(const struct smc_bus *b, const uint8_t challenge[32]) {
+    uint8_t a[1];
+    int rc = smc_frame(b, C_AUTH, challenge, 32, a, 1);
+    if (rc)
+        return rc;
+    return a[0] == GOOD ? SMC_OK : a[0] == NOT_FOUND ? SMC_E_NOT_FOUND : SMC_E_BAD;
+}
+
+int smc_authsig(const struct smc_bus *b, uint8_t sig[64]) {
+    uint8_t a[65];
+    int rc = smc_frame(b, C_AUTHSIG, NULL, 0, a, sizeof(a));
+    if (rc)
+        return rc;
+    if (a[0] == PENDING)
+        return 0;
+    if (a[0] != GOOD)
+        return a[0] == NOT_FOUND ? SMC_E_NOT_FOUND : SMC_E_BAD;
+    memcpy(sig, a + 1, 64);
+    return 1;
 }

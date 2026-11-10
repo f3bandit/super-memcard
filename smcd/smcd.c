@@ -181,6 +181,34 @@ static void hold(struct conn *c, int on) {
     read_line(c->front.fd, l, sizeof(l), 2000);
 }
 
+/* the last card that answered Hello but isn't a genuine Retro Remake card: the frontend's HELLO says so */
+static char not_genuine_id[17], not_genuine_why[96];
+
+/* Super MemCard only with a genuine Retro Remake card (docs/12-card-identity.md); any other card is a PS1 card here.
+ * 1: genuine. */
+static int genuine(struct conn *c) {
+    char why[96];
+    int g = smc_genuine(&c->bus, &c->card, why, sizeof(why));
+    if (g == 1) {
+        not_genuine_id[0] = 0;
+        return 1;
+    }
+    if (g < 0) {
+        lg("card %s: the identity check didn't finish (%s): not used this time", c->card.id, why[0] ? why : "no answer");
+        return 0;
+    }
+    static char logged[17 + 96];   /* said once per card and reason */
+    char key[sizeof(logged)];
+    snprintf(key, sizeof(key), "%s %s", c->card.id, why);
+    if (strcmp(logged, key)) {
+        lg("card %s isn't a genuine Retro Remake card (%s): only a PS1 card here", c->card.id, why);
+        snprintf(logged, sizeof(logged), "%s", key);
+    }
+    snprintf(not_genuine_id, sizeof(not_genuine_id), "%s", c->card.id);
+    snprintf(not_genuine_why, sizeof(not_genuine_why), "%s", why);
+    return 0;
+}
+
 /* the card: vcardd if it runs, else the first front port whose card answers Hello. 1: a card. */
 static int card_open(struct conn *c) {
     struct stat st;
@@ -188,7 +216,7 @@ static int card_open(struct conn *c) {
     c->front.fd = -1;
     if (stat(vcard_path, &st) == 0 && smc_vcard_open(vcard_path, &c->bus) == 0) {
         c->vcard = 1;
-        if (smc_hello(&c->bus, SMC_HOST_MAIN, 0, &c->card) == 1)
+        if (smc_hello(&c->bus, SMC_HOST_MAIN, 0, &c->card) == 1 && genuine(c))
             return 1;
         smc_vcard_close(&c->bus);
         return 0;
@@ -202,8 +230,10 @@ static int card_open(struct conn *c) {
     for (int p = 1; p <= 2; p++) {
         c->front.port = p;
         int h = smc_hello(&c->bus, SMC_HOST_MAIN, 0, &c->card);
-        if (h == 1)
+        if (h == 1 && genuine(c))
             return 1;
+        if (h == 1)
+            break;   /* a Super MemCard card, not genuine: a PS1 card (Main goes on as without Super MemCard) */
         if (h < 0 && p == 1) {
             uint8_t o[2] = {0x81, 0x60}, i[2];
             if (front_raw(&c->front, o, i, 0, 0) == -1)
@@ -353,8 +383,12 @@ static void conflict_cb(const char *sys, int card, const char *save, uint32_t ge
 /* a frontend's command; the answer ends with END */
 static void do_command(int fd, char *l) {
     struct conn c;
+    not_genuine_id[0] = 0;
     if (!card_open(&c)) {
-        say(fd, "nocard\nEND\n");
+        if (not_genuine_id[0])
+            say(fd, "notgenuine %s %s\nEND\n", not_genuine_id, not_genuine_why);
+        else
+            say(fd, "nocard\nEND\n");
         return;
     }
     struct smc_sync_cfg k = cfg();
@@ -464,6 +498,8 @@ int main(int argc, char **argv) {
         return 1;
     }
     lg("smcd started");
+    if (smc_genuine_test_key())
+        lg("built with the TEST Retro Remake key (tools/smccert/test-rr.key): not for a release");
     for (;;) {
         struct pollfd p = {lfd, POLLIN, 0};
         if (poll(&p, 1, 1000) > 0) {
