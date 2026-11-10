@@ -123,9 +123,9 @@ Memory Cards / Port 1 keeps everything it shows today (Card options, the PS1 sav
 a section of their own, fed only by `SECTION`, so it can go wherever suits the screen, and moving it changes nothing
 in `smcd`:
 
-- **below the PS1 card's saves**, with its own heading (`Other systems · Super MemCard`), its own options row, then
+- **below the PSX saves**, with its own heading (`Other systems`), its own options row, then
   each system's heading and games; or
-- **its own tab** (`PS1 card` | `Other systems`, L1/R1).
+- **its own tab** (`PSX` | `Other systems`, L1/R1).
 
 Mockups of both, on Console Mode's own screen: the "Super MemCard Saves Screen" design.
 
