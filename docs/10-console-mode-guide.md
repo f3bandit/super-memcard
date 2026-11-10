@@ -12,10 +12,14 @@ saved. The card stays a plain PS1 card for everything else (a real PS1/PS2, the 
 
 | where | what | from |
 |---|---|---|
-| the card (RP2040 firmware) | `81 60`-`6A` commands, the saves on its SD card, virtual cards per system, its own screen | `firmware/` (a patch to sd2psXtd, GPL-3.0) |
+| the card (RP2040 firmware) | `81 60`-`6D` commands, the saves on its SD card, virtual cards per system, its own screen, its identity | `firmware/` (a patch to sd2psXtd, GPL-3.0) |
 | menu core | send a frame of any length (up to 255 bytes) to a front port and give back the card's bytes | `core/sys/smc_port.sv` (`SMC_RAW`, version 3) |
-| host (`MiSTer_ConsoleMode`) | the library, two calls around each game (and one during it), `@memcard` commands for the screen | `host/` (plain C, no allocation), `main/` (the Main side, ready to copy) |
-| frontend | a Super MemCard view in Media › Memory Cards | (Console Mode's own screens) |
+| `smcd` | all of Super MemCard: which save, the sync, game IDs and names, the genuine-card check, the memory manager's commands | `smcd/` with `host/` (closed, Retro Remake's licence), one program beside Main |
+| `MiSTer_ConsoleMode` | the shim: passes `smcd`'s card frames to the front ports, tells it when a game starts and when the menu is back | `main/smc_shim.*`, `main/smc_frontport.*` (GPL-3.0, as Main) |
+| frontend | a Super MemCard view in Media › Memory Cards, through `smcd`'s socket | (Console Mode's own screens) |
+
+`smcd` is its own program and talks to Main over a local socket, the way Console Mode's frontend already talks to its
+Main, so nothing of it is in a GPL program (11). With no `smcd` running, Main works exactly as without Super MemCard.
 
 ## 2. Menu core: raw frames
 
@@ -34,108 +38,89 @@ game core's `sys_top`), as Main drives it over `EXT_BUS` / UIO (`main/smc_frontp
 speed: 0 = 250 kHz as a PS1 (Hello and every PS1 command), 1 = 500 kHz, 2 = 1 MHz, 3 = 2 MHz
 ```
 
-The test Main sends Hello at speed 0 and Super MemCard frames at 2, and steps down by one when a frame comes back
-short (`front_frame()` in `main/supermemcard.cpp`). The speed the real card handles is still to measure. PS1
+`smcd` sends Hello at speed 0 and Super MemCard frames at 2, and steps down by one when a frame comes back
+short (`front_frame()` in `smcd/smcd.c`). The speed the real card handles is still to measure. PS1
 reads in Console Mode 2.0-RC-1 take ~17 ms a sector (06): if its menu core has its own raw command, only the frame
 length (≤255) and the ACK wait matter.
 
 Controller reads pause while a frame runs (they share the bus), as `smc_port.sv` does.
 
-## 3. Host: the library
+## 3. smcd and the shim
 
-Copy `host/` (smc, smc_sync, smc_gameid, smc_ident, smc_gamedb, smc_icons; smc_vcard only for testing) into the
-host and fill a `struct smc_sync_cfg`:
+### In `MiSTer_ConsoleMode` (the shim)
 
-```c
-static const char *games[] = { "/media/fat/games", "/media/usb0/games", /* ... usb5 */ "/media/fat/cifs/games", NULL };
-struct smc_sync_cfg cfg = {
-    "/media/fat/saves",                 /* saves_dir */
-    "/media/fat/supermemcard",          /* state_dir: what was last synced, per card */
-    smc_console_systems,                /* the save folders the card keeps */
-    SMC_HOST_CONSOLE_MODE, log_fn,
-    games,                              /* to find each save's game: its game ID */
-    "/media/fat/supermemcard/gamelists" /* libretro's lists (tools/gamedb/fetch.sh): official names */
-};
+Copy `main/smc_shim.cpp/.h` and `main/smc_frontport.cpp/.h` into its source (GPL, as Main) and add three calls:
+
+| call | where |
+|---|---|
+| `smc_shim_core_start(rbf, mgl)` | in `fpga_load_rbf()`, before a core that isn't the menu loads. Waits for `smcd` (the game's save from the card, at most 30 s; a second or two normally), passing its card frames meanwhile |
+| `smc_shim_menu_start()` | in `main()`, after `user_io_init()`, when Main starts with the menu core |
+| `smc_shim_poll()` | in Main's loop: passes `smcd`'s frames (also while a game runs, through the core's `sys_top` driver) |
+
+That is all of it in Main. Sockets (text lines):
+
+```
+/tmp/smcd.sock            smcd listens.  Main sends   LAUNCH <rbf>\t<mgl>   -> DONE (after the game's save)
+                                                      MENU                 -> DONE (at once; smcd works after)
+/tmp/smc_frontport.sock   Main listens.  smcd sends   FRAME <port> <speed> <ack ms> <hex>  -> OK <count> <hex> | ERR <code>
+                                                      HOLD <0|1>                           -> OK
 ```
 
-Opening the card: send Hello on port 1 then port 2 (`smc_hello()`, it asks twice). 1 = a Super MemCard card; 0 = a
-plain PS1 card or none: do nothing more. After a refused Hello leave the card alone ~100 ms.
+### `smcd`
 
-### The two moments around a game
+Started once at boot, before Main (from Console Mode's start-up script):
 
-**Before the core loads** (where Main loads the `.rbf`; `main/supermemcard.cpp`'s `supermemcard_core_start()`, called
-from `fpga_load_rbf()` when the core isn't the menu):
-
-```c
-struct smc_mgl m;
-if (smc_mgl_read(mgl_path, &m)) memset(&m, 0, sizeof(m));     /* no MGL: just the .rbf */
-const char *sys = smc_launch_system(rbf, m.setname, m.same_dir); /* the save folder, as Main's CoreName2 */
-if (sys) {
-    int card = smc_core(&bus, sys, true);          /* the card shows the system, its buttons pick its virtual card */
-    if (card > 0 && m.game[0])
-        smc_sync_game(&bus, &cfg, sys, m.game, &rep);  /* the card's newer copy comes in before the game starts */
-    remember(sys, m.game);                         /* for the menu, after the game */
-}
+```
+smcd -S /media/fat/saves -T /media/fat/supermemcard -g /media/fat/games -g /media/usb0/games ... -d /media/fat/supermemcard/gamelists
 ```
 
-`smc_launch_system()` follows the MGL's `<setname>` the way Main names the save folder: Console Mode's
-`GameboyColor.mgl` starts the Gameboy core with saves in `GBC`, `Game Gear.mgl` the SMS core with `GameGear`;
-`Mega Duck.mgl` and `Atari 2600.mgl` aren't systems the card keeps (NULL). Every console core takes part, PSX too:
-its per-game card images in `saves/PSX` are that game's saves. If the PSX core uses the PS1 card itself, the card's
-first PS1 read or write ends system mode, and its buttons pick PS1 cards again.
+It logs to `/tmp/smcd.log`. What it does:
 
-**Back in the menu core** after that game (not at every menu start):
-
-```c
-if (game[0]) smc_sync_game(&bus, &cfg, sys, game, &rep);  /* its save goes to the card if it changed */
-else         smc_sync_changed(&bus, &cfg, sys, &rep);     /* started from the core's own file browser */
-smc_core(&bus, NULL, true);                               /* the card's buttons are the PS1 card's again */
-```
-
-Run it after Console Mode's own exit snapshot, so the snapshot is always first. Nothing happens if no game was
-played. Both calls only touch one game (or the saves that changed) and return quickly when nothing changed.
+- **A game starts** (`LAUNCH`): the save folder from the `.rbf` and the MGL's `<setname>`, the way Main names it
+  (`GameboyColor.mgl` → `GBC`, `Game Gear.mgl` → `GameGear`; `Mega Duck` and `Atari 2600` aren't kept). The card shows
+  the system and its buttons pick that system's virtual card (Core); the card's copy of that game's save comes in if
+  it's newer. Every console core takes part, PSX too (its card images in `saves/PSX` are its saves); a PS1 read or
+  write on the card ends system mode.
+- **While it runs**: the game's save goes to the card as soon as the game saves (the files changed and settled for a
+  second), in cores with the card driver in `sys_top` (below).
+- **Back in the menu** (`MENU`): the game just played goes to the card if it changed, and the card's buttons are the
+  PS1 card's again. Nothing happens if no game was played. Run it after Console Mode's own exit snapshot.
+- **Only with a genuine Retro Remake card** (12): any other card is a PS1 card to `smcd`.
 
 ### Memory Cards (the memory manager)
 
-- **Read card** (the step the screen already has before its other options): `smc_sync()`, everything both ways.
-- **The list**, per system (`smc_list(&bus, ".", i, sys)` gives the systems the card has):
-  `smc_list_card(&bus, sys, 0, i, id)` then `smc_game_info(&bus, sys, 0, id, &gi)`: `gi.name` (official name, else
-  `gi.title`, else `gi.save_name`), `gi.id` (the game's own code: `NSME`, `SLUS-00594`, `CRC-1A2B3C4D`), `gi.time`
-  (when the save was made, UTC), `gi.files`, `gi.bytes`, `gi.has_icon`. Show `gi.save_name` too: two saves of one
-  game on one SuperStation (one ROM under two names, each with its own progress) are two entries with the same name
-  and ID.
-- **The icon**: `icon.bin` beside the saves, the PS1 save-icon layout (16x16, 16 colours, 1-3 frames; 05). Every
-  system has a default one for now (`icons/sheet.png`); PS1 saves have their own and need none.
-- **Delete**: `smc_delete_save(&bus, &cfg, sys, save_file_name)`. Other SuperStations delete their copy at their
-  next sync; nothing is lost (the card and each SuperStation keep the file aside).
-- **Both copies changed** (played on two SuperStations): the sync keeps both and counts it in `rep.conflicts`;
-  `smc_conflicts()` lists them, `smc_resolve(..., SMC_KEEP_LOCAL | SMC_KEEP_CARD)` settles one.
-- **Virtual cards**: `smc_core(&bus, sys, false)` asks which one a system is on; `smc_list_card()`/`smc_game_info()`
-  take a card number (1-99) to look at another.
+The frontend sends `smcd` one command a line on `/tmp/smcd.sock`; each answer ends with `END`. With no card, or a card
+that isn't Super MemCard, the answer is `nocard`; a Super MemCard card that isn't genuine: `notgenuine <card> <why>`.
 
-Suggested `@memcard` commands for the frontend, next to SS1 Tool's `read`/`write` (06): `smc-read`, `smc-list
-<sys>`, `smc-delete <sys>|<save>`, `smc-keep <local|card> <sys>|<save>`, answers in `/tmp/consolemode_memcard.txt`
-as today. `tools/smccli` does each of these from a shell (section 6), so their output can be copied from it.
+| command | answer lines |
+|---|---|
+| `HELLO` | `card <id> version <n> features <hex> free_kb <n>` |
+| `READ` | Read card, everything both ways: `read ok card=<id> pushed= pulled= unchanged= conflicts= skipped= failed= deleted=` |
+| `SYSTEMS` | `<system>\t<its current virtual card>` per system on the card |
+| `LIST <sys> [<card>]` | per game: `name \t id \t time \t files \t bytes \t icon \t save name \t folder` |
+| `DELETE <sys>\t<save>` | `delete <rc>`: other SuperStations delete their copy at their next sync; nothing is lost |
+| `CONFLICTS` | saves whose two copies both changed (played on two SuperStations) |
+| `KEEP <local\|card> <sys>\t<save>` | `keep <rc>`: settles one |
+
+`name` is the official name (else the header's title, else the save's name); `id` the game's own code (`NSME`,
+`SLUS-00594`, `CRC-1A2B3C4D`); `time` when the save was made (UTC). Show the save name too: two saves of one game on
+one SuperStation (one ROM under two names) are two entries with the same name and ID. Icons: `icon.bin` beside the
+saves, the PS1 save-icon layout (16x16, 16 colours, 1-3 frames; 05); every system has a default one for now.
 
 ### Shared bus
 
-One user of the card at a time: Memory Cards, SS1 Tool's card reads and the Super MemCard calls take a lock file
-(like `/tmp/ss1_bt.busy` for Bluetooth) while they run.
+One user of the card at a time: Memory Cards' own PS1 card reads, SS1 Tool's and `smcd` take a lock file (like
+`/tmp/ss1_bt.busy` for Bluetooth) while they run.
 
 ### During the game (phase 2)
 
-Cores built with `tools/sys-patch.sh` (the front-port card driver in their `sys_top`, no change to the core itself)
-reach the card while the game runs, through the same commands as the menu core. A host then sends a game's save to the
-card as soon as it changes (`main/supermemcard.cpp`'s `supermemcard_poll()`: the save files changed and settled for a second, then
-`smc_sync_game()`). Not in the PSX core, which uses the front ports itself, nor Saturn, which has no room left in
-the FPGA: those two, and any core without it, work as in phase 1.
+Cores built with `tools/sys-patch.sh` (the front-port card driver in their `sys_top`, no change to the core itself;
+public: f3bandit/super-memcard-cores) reach the card while the game runs, through the same shim. Not in the PSX core,
+which uses the front ports itself, nor Saturn, which has no room left in the FPGA: those two, and any core without
+the driver, get their saves to the card when the menu is back.
 
-What it takes in a host, beyond phase 1:
-- Ask `SMC_ID` (`80`) in the game core as in the menu core; `0x534D` ('SM') back means the front ports are there. Only the
-  raw-frame commands answer in a game core (`SMC_ID`, `SMC_MODE`, `SMC_RAW`, `SMC_RAW_STATUS`): no controller reads or
-  sector commands.
-- Turn the ports on (`SMC_MODE` 1) only for the frames, and off again after: until then the user port is the core's.
-- Never in the PSX core.
+What the driver answers in a game core: `SMC_ID` (`80`, `0x534D` 'SM'), `SMC_MODE`, `SMC_RAW`, `SMC_RAW_STATUS` only
+(no controller reads or sector commands). The shim turns the ports on only for the frames.
 
 Built and timing met in NES, Game Boy, GBA, Genesis, Mega Drive, N64, Mega-CD, 32X, SMS, SNES, Jaguar,
 TurboGrafx-16 and Neo Geo (08). Read the PS1 card in port 1 from the NES core on an SS1.
@@ -158,12 +143,13 @@ header title. Identities are cached (`<state>/ids.txt`), so a ROM is read once.
 ## 6. Testing without the card
 
 - `sim/card`: the card's firmware running on a PC or the SS1 (`vcardd <sd folder> <socket>`), with the test suite
-  (`make test`).
-- `tools/smccli`: each frontend call from a shell against vcardd: `hello`, `launch <rbf> [<mgl>]`, `back <sys>
-  [<game>]`, `read`, `systems`, `list <sys>`, `delete`, `conflicts`, `keep`, `core`, `mgl <file>`. Build for the SS1:
-  `make -C sim/card SMC=1 B=build-ss1-smc CC=arm-linux-gnueabihf-gcc LDFLAGS_STATIC=-static`.
-- `sim/bus`: the front-port driver (`core/sys`) bit by bit against the card firmware (Icarus Verilog): checks a menu
-  core's raw frames against the real card code.
+  (`make SMC=1 test`).
+- `smcd -v <vcardd socket>` uses the simulated card instead of the front ports. `smcd/test.sh` runs the whole chain on
+  a PC (the frontend's commands, Main's LAUNCH and MENU through the shim, a game saving); `smcd/ss1test.sh` does it on an
+  SS1 with a test Main.
+- `tools/smccli`: the same calls from a shell against vcardd, and `chip` (the card's chip ID, genuine or not). Build
+  for the SS1: `make -C sim/card SMC=1 B=build-ss1 CC=arm-none-linux-gnueabihf-gcc LDFLAGS_STATIC=-static`.
+- `sim/bus`: the front-port driver (`core/sys`) bit by bit against the card firmware (Icarus Verilog).
 
 ## 7. Checked against Console Mode 2.0-RC-1's SD card (Nov 9 2026)
 
@@ -178,7 +164,9 @@ SuperStation each get their own set. Details in 08.
 
 - The shipping card's firmware: sd2psXtd-based? Its source (GPL-3.0) to apply `firmware/` to.
 - Raw frames in Console Mode's menu core: the same `SMC_RAW` or its own command; its timing.
-- Where the two hooks go in `MiSTer_ConsoleMode`'s launch path.
+- Where the shim's three calls go in `MiSTer_ConsoleMode`, and starting `smcd` at boot.
+- Retro Remake's own signing key in `smcd` and the firmware (12); the test key until then.
+- The SuperStation check (features only on a genuine SS1): how Console Mode recognizes one.
 - The real card's speed limit, and a power pull mid-save on the real card (works in the simulation).
 - On the real card with this firmware: a real PS1 and PS2 (plain PS1 card, no Hello ever sent), FreePSXBoot booting
   from it on a real PS1, and the stock PSX core and Memory Cards reading it as today.
