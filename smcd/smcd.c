@@ -560,6 +560,13 @@ static int fetch(const char *url, const char *to) {
             dup2(nul, 1);
             dup2(nul, 2);
         }
+        /* MiSTer's curl has no certificate bundle of its own: Console Mode's (kept current with it), the MiSTer
+         * downloader's, else Linux's (2021). Always checked: never without verifying. */
+        static const char *const ca[] = {"/media/fat/ConsoleMode/cacert.pem", "/media/fat/Scripts/.config/downloader/cacert.pem",
+                                         "/etc/ssl/certs/cacert.pem"};
+        for (size_t i = 0; i < sizeof(ca) / sizeof(ca[0]); i++)
+            if (access(ca[i], R_OK) == 0)
+                execlp("curl", "curl", "-fsSL", "--max-time", "30", "--cacert", ca[i], "-o", to, url, (char *)NULL);
         execlp("curl", "curl", "-fsSL", "--max-time", "30", "-o", to, url, (char *)NULL);
         _exit(127);
     }

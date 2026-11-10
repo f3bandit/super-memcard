@@ -47,7 +47,7 @@ head -c 8192 /dev/urandom > "$w/saves/NES/Nothing Known.sav"
 "$B/vcardd" "$w/sd" "$w/vc.sock" > /dev/null 2>&1 & vc=$!; pids="$pids $vc"
 for i in $(seq 50); do [ -S "$w/vc.sock" ] && break; sleep 0.1; done
 chip=$("$B/smccli" -s "$w/vc.sock" chip | sed -n 's/^chip //p')
-"$B/smccert" issue "$here/../tools/smccert/test-rr.key" "$chip" "$w/sd/smc_key.bin" > /dev/null
+"$B/smccert" issue "${KEY:-$here/../tools/smccert/test-rr.key}" "$chip" "$w/sd/smc_key.bin" > /dev/null
 kill $vc; wait $vc 2>/dev/null || true
 "$B/vcardd" "$w/sd" "$w/vc.sock" > /dev/null 2>&1 & vc=$!; pids="$pids $vc"
 for i in $(seq 50); do [ -S "$w/vc.sock" ] && break; sleep 0.1; done
