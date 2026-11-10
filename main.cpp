@@ -1,0 +1,133 @@
+/*
+Copyright 2005, 2006, 2007 Dennis van Weeren
+Copyright 2008, 2009 Jakub Bednarski
+Copyright 2012 Till Harbaum
+
+This file is part of Minimig
+
+Minimig is free software; you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation; either version 3 of the License, or
+(at your option) any later version.
+
+Minimig is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <http://www.gnu.org/licenses/>.
+*/
+
+#include <stdlib.h>
+#include <unistd.h>
+#include <stdio.h>
+#include <sched.h>
+#include <inttypes.h>
+#include <ctype.h>
+#include <string.h>
+#include <signal.h>
+#include <ucontext.h>
+#include "menu.h"
+#include "user_io.h"
+#include "input.h"
+#include "frame_timer.h"
+#include "fpga_io.h"
+#include "phosphor.h"
+#include "supermemcard.h"
+#include "gameport.h"
+#include "hybrid.h"
+#include "scheduler.h"
+#include "osd.h"
+#include "offload.h"
+#include "support/physical_disc/physical_disc_launch.h"
+#include "achievements.h"
+
+const char *version = "$VER:" VDATE;
+
+static void fault_handler(int sig, siginfo_t *si, void *ctx)
+{
+	ucontext_t *uc = (ucontext_t *)ctx;
+	char msg[160];
+	int n = snprintf(msg, sizeof(msg),
+		"\n*** %s: addr=%p pc=0x%08lx lr=0x%08lx ***\n",
+		sig == SIGBUS ? "SIGBUS" : "SIGSEGV", si->si_addr,
+		(unsigned long)uc->uc_mcontext.arm_pc,
+		(unsigned long)uc->uc_mcontext.arm_lr);
+	if (n > 0) write(2, msg, n);
+	signal(sig, SIG_DFL);
+	raise(sig);
+}
+
+int main(int argc, char *argv[])
+{
+	setvbuf(stdout, NULL, _IOLBF, 0);
+
+	struct sigaction sa = {};
+	sa.sa_sigaction = fault_handler;
+	sa.sa_flags = SA_SIGINFO;
+	sigaction(SIGSEGV, &sa, NULL);
+	sigaction(SIGBUS, &sa, NULL);
+
+	// Always pin main worker process to core #1 as core #0 is the
+	// hardware interrupt handler in Linux.  This reduces idle latency
+	// in the main loop by about 6-7x.
+	cpu_set_t set;
+	CPU_ZERO(&set);
+	CPU_SET(1, &set);
+	sched_setaffinity(0, sizeof(set), &set);
+
+	offload_start();
+
+	fpga_io_init();
+
+	DISKLED_OFF;
+
+	printf("\nMinimig by Dennis van Weeren");
+	printf("\nARM Controller by Jakub Bednarski");
+	printf("\nMiSTer code by Sorgelig\n\n");
+
+	printf("Version %s\n\n", version + 5);
+
+	if (argc > 1) printf("Core path: %s\n", argv[1]);
+	if (argc > 2) printf("XML path: %s\n", argv[2]);
+
+	if (!is_fpga_ready(1))
+	{
+		printf("\nGPI[31]==1. FPGA is uninitialized or incompatible core loaded.\n");
+		printf("Quitting. Bye bye...\n");
+		exit(0);
+	}
+
+	FindStorage();
+	user_io_init((argc > 1) ? argv[1] : "",(argc > 2) ? argv[2] : NULL);
+	gameport_begin((argc > 1) ? argv[1] : "");   // Phosphor: Quake, Duke3D... run here (gameport.cpp)
+	achievements_init();
+
+	physical_disc_launch_startup();
+	supermemcard_menu_start();             // Phosphor: Super MemCard phase 1 (supermemcard.cpp)
+
+#ifdef USE_SCHEDULER
+	scheduler_init();
+	scheduler_run();
+#else
+	while (1)
+	{
+		if (!is_fpga_ready(1))
+		{
+			fpga_wait_to_reset();
+		}
+
+		user_io_poll();
+		frame_timer();
+		input_poll(0);
+		physical_disc_launch_poll();
+		HandleUI();
+		OsdUpdate();
+		phosphor_poll();                       // Phosphor: local API (phosphor.cpp)
+		gameport_poll();                       // Phosphor: a game port's game (gameport.cpp)
+		hybrid_poll();                         // Phosphor: a hybrid core's launcher (hybrid.cpp)
+	}
+#endif
+	return 0;
+}
