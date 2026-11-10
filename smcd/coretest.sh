@@ -5,7 +5,7 @@
 # Copyright (C) 2026 f3bandit. All rights reserved.
 T=/media/fat/phosphor/tmp-test
 dir=${1:?usage: coretest.sh <folder of .rbf>}
-out=/tmp/smc_cores.txt
+out=/media/fat/phosphor/tmp-test/smc_cores.txt   # on the SD card: the restart at the end clears /tmp
 : > $out
 
 grep -v '^main=ConsoleMode/MiSTer_ConsoleMode' /media/fat/MiSTer.ini > /tmp/MiSTer_smctest.ini

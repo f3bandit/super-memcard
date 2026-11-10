@@ -149,8 +149,10 @@ the driver, get their saves to the card when the menu is back.
 What the driver answers in a game core: `SMC_ID` (`80`, `0x534D` 'SM'), `SMC_MODE`, `SMC_RAW`, `SMC_RAW_STATUS` only
 (no controller reads or sector commands). The shim turns the ports on only for the frames.
 
-Built and timing met in NES, Game Boy, GBA, Genesis, Mega Drive, N64, Mega-CD, 32X, SMS, SNES, Jaguar,
-TurboGrafx-16 and Neo Geo (08). Read the PS1 card in port 1 from the NES core on an SS1.
+Built with the driver in all 13: NES, SNES, N64, Game Boy, GBA, SMS, Genesis, Mega Drive, Mega-CD, 32X,
+TurboGrafx-16, Jaguar and Neo Geo (public builds: f3bandit/super-memcard-cores). All meet timing except Jaguar, which
+misses it by the same amount without the driver (upstream's). On an SS1 (Nov 10 2026), each one read the PS1 card in
+port 1 through its own driver: a whole sector, the card's ID and its ACKs (`smcd/coretest.sh`).
 
 ## 4. Settings
 
