@@ -77,8 +77,9 @@ if (sys) {
 
 `smc_launch_system()` follows the MGL's `<setname>` the way Main names the save folder: Console Mode's
 `GameboyColor.mgl` starts the Gameboy core with saves in `GBC`, `Game Gear.mgl` the SMS core with `GameGear`;
-`Mega Duck.mgl` and `Atari 2600.mgl` aren't systems the card keeps (NULL). PSX is never one: the PSX core uses the
-PS1 card itself.
+`Mega Duck.mgl` and `Atari 2600.mgl` aren't systems the card keeps (NULL). Every console core takes part, PSX too:
+its per-game card images in `saves/PSX` are that game's saves. If the PSX core uses the PS1 card itself, the card's
+first PS1 read or write ends system mode, and its buttons pick PS1 cards again.
 
 **Back in the menu core** after that game (not at every menu start):
 

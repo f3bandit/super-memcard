@@ -45,8 +45,9 @@ struct smc_sync_report {
 extern const char *const smc_console_systems[];
 
 /* The save folder (system) of a game core about to be loaded, from its .rbf path ("_Console/SNES_20250101.rbf"
- * -> "SNES"), for Core; NULL for any other core. Not PSX: the PSX core uses the PS1 card itself, so the card's
- * buttons stay the PS1 card's. */
+ * -> "SNES"), for Core; NULL for any other core. Every console core, PSX too: its per-game card images in saves/PSX
+ * are that game's saves. (If the PSX core uses the PS1 card itself, the card's first PS1 read or write ends system
+ * mode: its buttons are the PS1 card's again.) */
 const char *smc_core_system(const char *rbf);
 
 /* The save folder of a launch (Main's CoreName2): an MGL's <setname> names it unless same_dir="1"

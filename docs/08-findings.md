@@ -39,6 +39,10 @@ checked before and after); the games came from its USB drive and SD card, names 
 - Time: 5 minutes each way for 2.6 MB through the simulated card on the SS1 (its socket wire, not the bus); the ten
   128 KB PSX card images are half of it. On the real card at a PS1's speed (~11 KB/s) about 4 minutes, less at the
   faster frame speeds: a first Read card of a full saves folder wants a progress bar.
+- **PSX like every other core.** Loading the PSX core didn't talk to the card (it was left out so the card's buttons
+  would stay the PS1 card's), so PSX saves only moved at Read card. Now the PSX core is a system like the rest: Core
+  PSX at its start, that game's save in, and out after it. The buttons still go back to PS1 cards as soon as anything
+  reads or writes the PS1 card (system mode already ends there).
 - Console Mode's games folders include `cifs/games` (a network share): added to the games folders searched.
 
 ### Faster Super MemCard frames (PH_RAW speed)

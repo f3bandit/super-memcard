@@ -25,7 +25,7 @@ const char *const smc_console_systems[] = {
 static const struct { const char *core, *sys; } core_systems[] = {
     {"NES", "NES"}, {"SNES", "SNES"}, {"N64", "N64"}, {"Gameboy", "GAMEBOY"}, {"GBA", "GBA"}, {"SMS", "SMS"},
     {"Genesis", "Genesis"}, {"MegaDrive", "MegaDrive"}, {"MegaCD", "MegaCD"}, {"S32X", "S32X"},
-    {"Saturn", "Saturn"}, {"TurboGrafx16", "TGFX16"}, {"Jaguar", "Jaguar"}, {"NeoGeo", "NEOGEO"},
+    {"Saturn", "Saturn"}, {"TurboGrafx16", "TGFX16"}, {"Jaguar", "Jaguar"}, {"NeoGeo", "NEOGEO"}, {"PSX", "PSX"},
 };
 
 const char *smc_core_system(const char *rbf) {
@@ -47,7 +47,7 @@ const char *smc_launch_system(const char *rbf, const char *setname, bool same_di
         return NULL;
     for (int i = 0; smc_console_systems[i]; i++)
         if (!strcasecmp(setname, smc_console_systems[i]))
-            return strcmp(smc_console_systems[i], "PSX") ? smc_console_systems[i] : NULL;
+            return smc_console_systems[i];
     return NULL; /* Mega Duck, Atari 2600 ...: not a system the card keeps */
 }
 

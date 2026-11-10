@@ -312,7 +312,7 @@ static void t_sync_core_system_names(void) {
     CHECK(strcmp(smc_core_system("/media/fat/_Console/TurboGrafx16_20240922.rbf"), "TGFX16") == 0);
     CHECK(strcmp(smc_core_system("Gameboy.rbf"), "GAMEBOY") == 0);
     CHECK(strcmp(smc_core_system("_Console/NeoGeo_20250301.rbf"), "NEOGEO") == 0);
-    CHECK(smc_core_system("_Console/PSX_20250101.rbf") == NULL);
+    CHECK(strcmp(smc_core_system("_Console/PSX_20250101.rbf"), "PSX") == 0); /* every console core */
     CHECK(smc_core_system("_Console/NESticle_1.rbf") == NULL);
     CHECK(smc_core_system("menu.rbf") == NULL);
     CHECK(smc_core_system("_Computer/ao486_20250101.rbf") == NULL);
