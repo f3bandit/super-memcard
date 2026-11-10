@@ -27,7 +27,9 @@ the design depends on. Newest first. Each entry says where it came from so it ca
   needed 4296 LABs of 4191, PSX 4265): the driver had phosphor_ext's controller reads, sector commands and controller
   commands, which a game core never uses (~1000 LUTs, ~700 registers by Yosys' count, ~1400 ALMs in Quartus on NES).
   Now `RAW_ONLY` keeps only the raw frames (~640 LUTs, ~530 registers); the menu core is unchanged (phosphor-menu's
-  simulation identical). PSX doesn't get it: it uses the front ports itself.
+  simulation identical). PSX doesn't get it: it uses the front ports itself. With `RAW_ONLY` GBA fits; Saturn needed
+  4200 LABs, then 4199 with the faster speeds worked out by shifts (~450 registers): Saturn fills the FPGA without
+  the driver, so it stays on phase 1 (its saves go before and after the game). 13 of the 15 cores carry it.
 - The same core built with and without the driver, each loaded by Console Mode's own Main and played: both look and
   play the same. (A bad picture seen first came from starting a core by hand with Phosphor's test Main on Console
   Mode's SD card, not from the core.)

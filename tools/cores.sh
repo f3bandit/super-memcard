@@ -56,8 +56,9 @@ patch)
     known "$2"
     for p in patches/sys/*.patch; do [ -e "$p" ] && git -C "cores/$2" apply --directory=sys -v "../../$p"; done
     for p in patches/"$2"/*.patch; do [ -e "$p" ] && git -C "cores/$2" apply -v "../../$p"; done
-    # phase 2: the front-port card driver in sys_top (core/sys); not in the PSX core, which uses the front ports itself
-    [ "${SMC_SYS:-1}" = 0 ] || [ "$2" = PSX ] || tools/sys-patch.sh "cores/$2"
+    # phase 2: the front-port card driver in sys_top (core/sys). Not in PSX, which uses the front ports itself, nor in
+    # Saturn, which fills the FPGA without it (8 LABs short even with the smallest driver, docs/08): phase 1 there
+    case "$2" in PSX|Saturn) ;; *) [ "${SMC_SYS:-1}" = 0 ] || tools/sys-patch.sh "cores/$2" ;; esac
     true ;;
 pr-all)
     git fetch -q origin

@@ -152,7 +152,9 @@ the original hardware"). So while any other core runs the bus is free, and Main 
   those and the cores' own `EXT_BUS` users answer `34`/`35`. Its timings scale with the core's clock, measured against
   the board's 50 MHz clock, so the bus keeps a PS1's timing in every core (bus simulation at 33-100 MHz, and through
   `smc_sys` at 42.95 and 85.9 MHz). The user port stays the core's own until Main turns the front ports on for a
-  frame, so a core that uses SNAC isn't disturbed; Main never does it in the PSX core.
+  frame, so a core that uses SNAC isn't disturbed; Main never does it in the PSX core. It's built into every console
+  core except PSX (it uses the front ports) and Saturn (no room left in the FPGA): those two save before and after
+  the game only.
 - **Main** (phosphor-main `supermemcard_poll()`): while a game runs, when its save files change (Main wrote them as
   the core saved) and have settled for a second, that game's save goes to the card (`smc_sync_game()`), there and
   then. A core without the driver, or no card: nothing, and the save goes after the game as in phase 1.
