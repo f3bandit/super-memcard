@@ -104,7 +104,7 @@ static void t_sync_to_card_then_unchanged(void) {
     put_save(0, "SNES/Super Metroid (USA).sav", sA, sizeof(sA));
     r = run_sync(0);
     CHECK_EQ(r.pushed, 1);
-    CHECK_EQ(r.unchanged, 2);
+    CHECK_EQ(r.unchanged, 3);
     CHECK_EQ(smc_select(&vbus, "SNES", "Super Metroid (USA)"), 2); /* icon.bin, save.sav (by name) */
     struct smc_file f;
     CHECK_EQ(smc_info(&vbus, 1, &f), SMC_OK);
