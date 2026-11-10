@@ -60,6 +60,23 @@ apart):
 - The source of the RC1 menu core and host isn't published yet (`menu_ConsoleMode` is at 1.2): their card
   timing is still to compare with phosphor-menu's when it is.
 
+### On an SS1 with Console Mode 2.0-RC-1 (Nov 9)
+
+Looked at with backups first (saves, config, `ConsoleMode/memcards`, binaries' checksums), all unchanged after.
+
+- Console Mode boots **its own menu core**, `ConsoleMode/menu_ConsoleMode.rbf` (`MiSTer.ini`: `main=ConsoleMode/MiSTer_ConsoleMode`);
+  `/media/fat/menu.rbf` is a different file. Loading that one (as on Phosphor) leaves Main in the menu without
+  Console Mode's frontend: a reboot brings it back. The Super MemCard hooks have to come back to Console Mode's menu
+  core, the way its own launches do.
+- Save folders: as Main's, plus **`GBC`** (Game Boy Color saves apart from `GAMEBOY`) and `SS1_MemCard` (the SS1
+  memory card core's images). GBC added to the systems.
+- A game started from an MGL by `/dev/MiSTer_cmd` writes only `/tmp/CORENAME` and `/tmp/RBFNAME`; the game is in
+  the MGL (as Phosphor's hooks read it). `FULLPATH`/`ACTIVEGAME`/`last_launch` are written by the frontend's own
+  launches.
+- `@memcard read 1` written to `/dev/MiSTer_RR_cmd` by hand got no answer (no `/tmp/consolemode_memcard.txt`):
+  the screen's own request isn't just that line. Not looked into further (nothing taken apart); the Memory Cards
+  screen itself is the baseline to use.
+
 ## Open points for Taki
 
 - Is the shipping card's firmware sd2psXtd-based, and can we have its source? It's GPL-3.0.
