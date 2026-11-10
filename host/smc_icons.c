@@ -240,3 +240,40 @@ const uint8_t *smc_system_icon(const char *sys, size_t *len) {
         }
     return NULL;
 }
+
+/* A PS1 card image's own save icon, as icon.bin (the same pixels and palette: a PS1 save icon's own layout). The first
+ * save in it: its title frame's palette and its 1-3 icon frames (docs/05-design.md). Raw images (MiSTer's PSX core,
+ * .mcd/.mcr/.sav, 128 KB), DexDrive .gme and PSP .vmp. Returns icon.bin's length, 0 if the image has no save. */
+size_t smc_ps1_icon(const uint8_t *img, size_t len, uint8_t *out, size_t out_max) {
+    size_t base = 0;
+    if (len == 131072 + 3904 && !memcmp(img, "123-456-STD", 11))
+        base = 3904; /* DexDrive */
+    else if (len == 131072 + 0x80 && !memcmp(img, "\0PMV", 4))
+        base = 0x80; /* PSP */
+    else if (len != 131072)
+        return 0;
+    const uint8_t *c = img + base;
+    if (c[0] != 'M' || c[1] != 'C')
+        return 0;
+    for (int blk = 1; blk <= 15; blk++) {
+        const uint8_t *dir = c + 128 * blk;
+        if (dir[0] != 0x51) /* the first block of a save */
+            continue;
+        const uint8_t *t = c + 8192 * blk;
+        if (t[0] != 'S' || t[1] != 'C')
+            continue;
+        int frames = t[2] == 0x11 ? 1 : t[2] == 0x12 ? 2 : t[2] == 0x13 ? 3 : 0;
+        size_t need = 8 + 32 + (size_t)frames * 128;
+        if (!frames || out_max < need)
+            continue;
+        memcpy(out, "SMIC", 4);
+        out[4] = 1;
+        out[5] = (uint8_t)frames;
+        out[6] = 16;
+        out[7] = 16;
+        memcpy(out + 8, t + 0x60, 32);              /* palette: 16 PS1 colours, little-endian */
+        memcpy(out + 40, t + 0x80, (size_t)frames * 128); /* the frames, 4 bits a pixel */
+        return need;
+    }
+    return 0;
+}

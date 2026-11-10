@@ -67,6 +67,8 @@ int smc_mgl_read(const char *path, struct smc_mgl *m);
 /* The default save icon of a system as icon.bin bytes (smc_icons.c, made by tools/icons/make_icons.py), or NULL.
  * The sync puts it beside a game's saves on the card the first time the game goes there. */
 const uint8_t *smc_system_icon(const char *sys, size_t *len);
+/* A PS1 card image's own save icon (its first save's) as icon.bin: length, 0 if none (smc_icons.c). */
+size_t smc_ps1_icon(const uint8_t *img, size_t len, uint8_t *out, size_t out_max);
 
 /* When to sync (docs/05 §3): like a PS1, the card is only read or written when a save is loaded or saved, and the card
  * is only reachable from the menu core, so around a game:

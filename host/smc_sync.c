@@ -808,6 +808,30 @@ static int sync_one_(const struct smc_bus *b, struct entry *e, const char *id, i
 /* ---- the whole sync ---- */
 
 /* everything the card has for one game ID, then the local files of that game */
+
+/* The PS1 icon of this game's card image in the saves folder (PSX), as icon.bin: its length, 0 if none */
+static size_t psx_own_icon(const char *dir, const char *game, uint8_t *out, size_t out_max) {
+    DIR *d = opendir(dir);
+    struct dirent *de;
+    size_t got = 0;
+    while (d && !got && (de = readdir(d))) {
+        char g[256], f[17], path[1300];
+        if (de->d_name[0] == '.' || !split_name(de->d_name, g, sizeof(g), f, sizeof(f)) || strcmp(g, game))
+            continue;
+        snprintf(path, sizeof(path), "%s/%s", dir, de->d_name);
+        FILE *fp = fopen(path, "rb");
+        if (!fp)
+            continue;
+        static uint8_t img[131072 + 3904 + 1];
+        size_t n = fread(img, 1, sizeof(img), fp);
+        fclose(fp);
+        got = smc_ps1_icon(img, n, out, out_max);
+    }
+    if (d)
+        closedir(d);
+    return got;
+}
+
 static int sync_game(const struct smc_bus *b, const char *sys, int card, const char *game, const char *id,
                      struct smc_sync_report *rep) {
     struct smc_file files[16];
@@ -877,10 +901,21 @@ static int sync_game(const struct smc_bus *b, const char *sys, int card, const c
     }
     if (d)
         closedir(d);
-    /* a game new on the card gets its system's icon, until games have their own (smc_icons.c) */
+    /* a game new on the card gets its system's icon, until games have their own (smc_icons.c); a PSX card image has
+     * its own: its first save's PS1 icon, as Console Mode shows it for the card in the port */
     size_t ilen;
     const uint8_t *icon = smc_system_icon(sys, &ilen);
-    if (!has_icon && rep->pushed > pushed && icon) {
+    static uint8_t own[8 + 32 + 3 * 128];
+    bool own_icon = false;
+    if (!has_icon && !strcmp(sys, "PSX")) {
+        size_t l = psx_own_icon(dir, local_game, own, sizeof(own));
+        if (l) {
+            icon = own;
+            ilen = l;
+            own_icon = true;
+        }
+    }
+    if (!has_icon && (rep->pushed > pushed || own_icon) && icon) {
         if (smc_select_card(b, sys, id, card, NULL) < 0 || smc_write_file(b, ICON_BIN, icon, (uint32_t)ilen, 1) != SMC_OK)
             logf_("couldn't put the icon on the card: %s/%s", sys, local_game);
     }

@@ -100,6 +100,13 @@ icon.bin   'S' 'M' 'I' 'C', version 1, frames (1-3), width 16, height 16,
 
 The same pixel layout as a PS1 save icon, so a frontend that draws PS1 icons draws these with the same code.
 
+Only Console Mode on the SuperStation shows icons; the card keeps `icon.bin` as a file and never draws it (its
+screen is monochrome). A PSX card image (the PSX core's per-game card in `saves/PSX`) gets its own first save's PS1
+icon, copied as it is (palette and 1-3 frames): what Console Mode already shows for PS1 saves. No other system's
+saves carry an icon (NES/SNES/Game Boy/GBA/N64/Mega Drive/SMS/TurboGrafx saves are raw memory; Saturn and Mega-CD
+backup RAM entries have a name and comment, no picture; N64 Controller Pak notes a name only), so they get their
+system's icon.
+
 ### Virtual cards, and which core is running
 
 Like PS1 mode's Card1, Card2..., every system has virtual cards (1-99): one set of saves per card, for two

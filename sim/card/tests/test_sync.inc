@@ -113,6 +113,35 @@ static void t_sync_to_card_then_unchanged(void) {
     CHECK(memcmp(got, sA, sizeof(sA)) == 0);
 }
 
+/* a PSX card image's own save icon goes to the card as its icon.bin: palette and frames as the PS1 has them */
+static void t_sync_psx_own_icon(void) {
+    sync_setup();
+    static uint8_t img[131072], icon[8 + 32 + 384];
+    memset(img, 0, sizeof(img));
+    img[0] = 'M';
+    img[1] = 'C';
+    img[128 * 2] = 0x51;               /* the save starts in block 2 (block 1 free) */
+    uint8_t *t = img + 8192 * 2;
+    t[0] = 'S';
+    t[1] = 'C';
+    t[2] = 0x13;                       /* 3 frames */
+    for (int k = 0; k < 32; k++)
+        t[0x60 + k] = (uint8_t)(k * 7 + 1);
+    for (int k = 0; k < 384; k++)
+        t[0x80 + k] = (uint8_t)(k * 13 + 5);
+    put_save(0, "PSX/Lahan Village.sav", img, sizeof(img));
+    CHECK_EQ(run_sync(0).pushed, 1);
+    CHECK_EQ(file_size("SuperMemCard/PSX/Card1/Lahan Village/icon.bin"), (long)sizeof(icon));
+    CHECK_EQ(read_file_at("SuperMemCard/PSX/Card1/Lahan Village/icon.bin", 0, (char *)icon, sizeof(icon)), 0);
+    CHECK(memcmp(icon, "SMIC\x01\x03\x10\x10", 8) == 0);
+    CHECK(memcmp(icon + 8, t + 0x60, 32) == 0);
+    CHECK(memcmp(icon + 40, t + 0x80, 384) == 0);
+    /* and nothing else on the card changes at the next sync */
+    struct smc_sync_report r = run_sync(0);
+    CHECK_EQ(r.pushed, 0);
+    CHECK_EQ(r.failed, 0);
+}
+
 static void t_sync_reinstall_gets_everything_back(void) {
     sync_setup();
     put_save(0, "SNES/Super Metroid (USA).sav", sA, sizeof(sA));
@@ -771,6 +800,7 @@ static void t_sync_like_a_ps1(void) {
 }
 
 #define SYNC_TESTS \
+    {"sync: a PSX card image's own PS1 icon on the card", t_sync_psx_own_icon, true, NULL}, \
     {"sync: saves to the card, then nothing to do, then a change", t_sync_to_card_then_unchanged, true, NULL}, \
     {"sync: a reinstall gets every save back", t_sync_reinstall_gets_everything_back, true, NULL}, \
     {"sync: one card, two SuperStations", t_sync_between_two_superstations, true, NULL}, \
