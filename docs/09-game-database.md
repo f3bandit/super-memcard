@@ -35,7 +35,7 @@ the identity above.
 | N64 | 4-character game code (header 0x3B), any byte order | `NSME` |
 | GBA | 4-character game code (0xAC) | `AMTE` |
 | Genesis, MegaDrive, S32X | product number (0x180) | `GM 00001009-00` |
-| SMS (and Game Gear) | product code in the TMR SEGA header | `SMS-7069` |
+| SMS, GameGear | product code in the TMR SEGA header | `SMS-7069` (Game Gear: `GG-…`) |
 | SNES, GAMEBOY | 4-character game code of later carts (checked header) | `SNES-AXXE`, `GB-AXXE` |
 | PSX, Saturn, MegaCD | disc product code | `SLUS-00594` |
 | the rest (NES, TurboGrafx-16, Jaguar, older carts) | CRC32 as No-Intro counts it | `CRC-1A2B3C4D` |
@@ -81,7 +81,9 @@ name (`CASTLEVANIA2`). A frontend shows `name`, else `title`, else the save's fi
 Each save file's time (when Main wrote it) goes with it to the card (Commit) and comes back onto other SuperStations'
 files.
 
-Every SuperStation with the game, whatever its ROM file is called, then finds the same save set. Unknown games (no
+Every SuperStation with the game, whatever its ROM file is called, then finds the same save set. Two saves of one game
+on one SuperStation (one ROM under two names, each with its own progress) are two sets: the second is
+`<id>~<CRC of its save name>`, and both come back under their own names (08). Unknown games (no
 ROM found, no list, not in the list) keep today's naming: the save file's name. `name.txt` still records the local
 save name the set came from, so a SuperStation without the ROM gets the save back under that name.
 

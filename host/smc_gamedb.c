@@ -27,6 +27,7 @@ static const struct { const char *sys; const char *lr[3]; int disc; } MAP[] = {
 	{ "GAMEBOY",   { "Nintendo - Game Boy", "Nintendo - Game Boy Color" }, 0 },
 	{ "GBC",       { "Nintendo - Game Boy Color", "Nintendo - Game Boy" }, 0 },   /* Console Mode's own folder */
 	{ "GBA",       { "Nintendo - Game Boy Advance" }, 0 },
+	{ "GameGear",  { "Sega - Game Gear", "Sega - Master System - Mark III" }, 0 },   /* Console Mode's Game Gear.mgl */
 	{ "Jaguar",    { "Atari - Jaguar" }, 0 },
 };
 #define NMAP (int)(sizeof(MAP) / sizeof(MAP[0]))

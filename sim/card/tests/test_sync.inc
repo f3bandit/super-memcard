@@ -318,6 +318,31 @@ static void t_sync_core_system_names(void) {
     CHECK(smc_core_system("_Computer/ao486_20250101.rbf") == NULL);
 }
 
+/* Console Mode's MGLs (seen on its SD card, 08): <setname> is the save folder, as Main's CoreName2 */
+static void t_sync_mgl_setname(void) {
+    char p[400];
+    struct smc_mgl m;
+    snprintf(p, sizeof(p), "%s/gbc.mgl", ss[0]);
+    mkdir(ss[0], 0755);
+    FILE *f = fopen(p, "w");
+    CHECK(f);
+    fputs("<mistergamedescription>\n\t<rbf>_Console/Gameboy</rbf>\n\t<setname>GBC</setname>\n"
+          "\t<file delay=\"1\" type=\"f\" index=\"1\" path=\"../../../media/usb0/games/GBC/Zelda &amp; Link (USA).gbc\"/>\n"
+          "</mistergamedescription>\n", f);
+    fclose(f);
+    CHECK(smc_mgl_read(p, &m) == 0);
+    CHECK(strcmp(m.rbf, "_Console/Gameboy") == 0);
+    CHECK(strcmp(m.game, "Zelda & Link (USA)") == 0);
+    CHECK(strcmp(smc_launch_system(m.rbf, m.setname, m.same_dir), "GBC") == 0);
+    CHECK(strcmp(smc_launch_system("_Console/SMS", "GameGear", false), "GameGear") == 0);
+    CHECK(strcmp(smc_launch_system("_Console/Gameboy", "Tetris", true), "GAMEBOY") == 0);   /* same_dir="1" */
+    CHECK(smc_launch_system("_Console/Gameboy", "MegaDuck", false) == NULL);
+    CHECK(smc_launch_system("_Console/Atari7800", "Atari2600", false) == NULL);
+    CHECK(strcmp(smc_launch_system("_Console/SNES_20260603.rbf", "", false), "SNES") == 0);
+    CHECK(smc_system_icon("GameGear", &(size_t){0}) != NULL);
+    CHECK(smc_mgl_read("/nonexistent.mgl", &m) != 0);
+}
+
 static struct smc_sync_cfg cfg_of(int which) {
     static char saves[2][400], state[2][400];
     snprintf(saves[which], sizeof(saves[which]), "%s/saves", ss[which]);
@@ -517,6 +542,8 @@ static void t_game_ids_from_headers(void) {
     make_sms(p);
     CHECK_EQ(smc_game_header_id("SMS", p, id, title), 0);
     CHECK(strcmp(id, "SMS-7069") == 0);
+    CHECK_EQ(smc_game_header_id("GameGear", p, id, title), 0); /* Console Mode's Game Gear.mgl: saves/GameGear */
+    CHECK(strcmp(id, "GG-7069") == 0);
     snprintf(p, sizeof(p), "%s-host/roms/f.nes", sd);
     make_nes(p);
     CHECK_EQ(smc_game_header_id("NES", p, id, title), -1);
@@ -631,6 +658,75 @@ static struct smc_sync_report one_game(int which, const char *sys, const char *g
     return r;
 }
 
+/* one game, with the games folder (game IDs) */
+static struct smc_sync_report game_roms(int which, const char *sys, const char *game) {
+    static char saves[400], state[400], games[400], lists[400];
+    static const char *dirs[2];
+    snprintf(saves, 400, "%s/saves", ss[which]);
+    snprintf(state, 400, "%s/state", ss[which]);
+    snprintf(games, 400, "%s/games", ss[which]);
+    snprintf(lists, 400, "%s/lists", ss[which]);
+    dirs[0] = games;
+    dirs[1] = NULL;
+    struct smc_sync_cfg cfg = {saves, state, smc_console_systems, SMC_HOST_TEST, slog, dirs, lists};
+    struct smc_sync_report r;
+    CHECK_EQ(smc_sync_game(&vbus, &cfg, sys, game, &r), 0);
+    return r;
+}
+
+static void t_sync_two_saves_one_game(void) {
+    /* one ROM under two names here, each with its own progress (Console Mode's SD card: "Final Fantasy III (TWUE)" and
+     * "Final Fantasy VI (TWUE)" are one ROM): two save sets, neither dropped, and both come back */
+    sync_setup();
+    char p[700];
+    snprintf(p, sizeof(p), "%s/games/NES/FF3.nes", ss[0]);
+    make_nes(p);
+    snprintf(p, sizeof(p), "%s/games/NES/FF6.nes", ss[0]);
+    make_nes(p);
+    put_save(0, "NES/FF3.sav", sA, 8192);
+    put_save(0, "NES/FF6.sav", sB, 8192);
+    struct smc_sync_report r = run_sync_games(0);
+    CHECK_EQ(r.pushed, 2);
+    CHECK_EQ(r.skipped + r.failed + r.conflicts, 0);
+    char g0[65], g1[65], g2[65];
+    CHECK_EQ(smc_list_card(&vbus, "NES", 1, 0, g0), SMC_OK);
+    CHECK_EQ(smc_list_card(&vbus, "NES", 1, 1, g1), SMC_OK);
+    CHECK_EQ(smc_list_card(&vbus, "NES", 1, 2, g2), SMC_E_NOT_FOUND);
+    CHECK(strchr(g0, '~') || strchr(g1, '~'));
+    struct smc_game_info gi;
+    CHECK_EQ(smc_game_info(&vbus, "NES", 0, strchr(g0, '~') ? g0 : g1, &gi), SMC_OK);
+    CHECK(strncmp(gi.id, "CRC-", 4) == 0 && !strchr(gi.id, '~')); /* the game's ID, for the memory manager */
+    CHECK(strcmp(gi.save_name, "FF3") == 0 || strcmp(gi.save_name, "FF6") == 0);
+    r = run_sync_games(0);
+    CHECK_EQ(r.pushed + r.pulled, 0);
+    CHECK_EQ(r.unchanged, 2);
+    /* one played: it goes to its own set */
+    sleep(1);
+    put_save(0, "NES/FF6.sav", sA, 8192);
+    r = game_roms(0, "NES", "FF6");
+    CHECK_EQ(r.pushed, 1);
+    r = game_roms(0, "NES", "FF3");
+    CHECK_EQ(r.pushed + r.pulled, 0);
+    /* another SuperStation with the same two ROMs gets both, each under its own name */
+    snprintf(p, sizeof(p), "%s/games/NES/FF3.nes", ss[1]);
+    make_nes(p);
+    snprintf(p, sizeof(p), "%s/games/NES/FF6.nes", ss[1]);
+    make_nes(p);
+    CHECK_EQ(run_sync_games(1).pulled, 2);
+    CHECK_EQ(get_save(1, "NES/FF3.sav", got, sizeof(got)), 8192);
+    CHECK(memcmp(got, sA, 8192) == 0);
+    CHECK_EQ(get_save(1, "NES/FF6.sav", got, sizeof(got)), 8192);
+    CHECK(memcmp(got, sA, 8192) == 0);
+    /* a reinstall without the ROMs: both back under their names */
+    wipe(0);
+    snprintf(p, sizeof(p), "rm -rf '%s/games/NES'", ss[0]);
+    CHECK(system(p) == 0);
+    CHECK_EQ(run_sync_games(0).pulled, 2);
+    CHECK_EQ(get_save(0, "NES/FF3.sav", got, sizeof(got)), 8192);
+    CHECK(memcmp(got, sA, 8192) == 0);
+    CHECK_EQ(get_save(0, "NES/FF6.sav", got, sizeof(got)), 8192);
+}
+
 static void t_sync_like_a_ps1(void) {
     /* the card is read or written only when a game's save is loaded or saved */
     sync_setup();
@@ -685,9 +781,11 @@ static void t_sync_like_a_ps1(void) {
     {"sync: another virtual card picked: saves go to the old one first", t_sync_virtual_card_switch, true, NULL}, \
     {"sync: no switch until the old card has every save", t_sync_switch_waits_when_old_card_fails, true, NULL}, \
     {"sync: a core's save folder from its .rbf", t_sync_core_system_names, true, NULL}, \
+    {"sync: an MGL's setname is the save folder (Console Mode GBC, Game Gear)", t_sync_mgl_setname, true, NULL}, \
     {"sync: a deleted save is deleted on every SuperStation", t_sync_delete_reaches_every_superstation, true, NULL}, \
     {"sync: deleted on one, played on another: the save stays", t_sync_delete_vs_played_since, true, NULL}, \
     {"sync: both changed, settled either way", t_sync_conflict_settled, true, NULL}, \
     {"game IDs from the games' own headers", t_game_ids_from_headers, true, NULL}, \
     {"sync: one save set per game, filed by game ID, with its time", t_sync_by_game_id, true, NULL}, \
+    {"sync: two saves here for one game: two sets, both kept", t_sync_two_saves_one_game, true, NULL}, \
     {"sync: like a PS1: a game's save in at its start, out after it", t_sync_like_a_ps1, true, NULL},

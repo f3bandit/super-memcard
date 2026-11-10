@@ -49,6 +49,18 @@ extern const char *const smc_console_systems[];
  * buttons stay the PS1 card's. */
 const char *smc_core_system(const char *rbf);
 
+/* The save folder of a launch (Main's CoreName2): an MGL's <setname> names it unless same_dir="1"
+ * (Console Mode's GameboyColor.mgl starts the Gameboy core with saves/GBC). NULL: not a system the card keeps. */
+const char *smc_launch_system(const char *rbf, const char *setname, bool same_dir);
+
+/* An MGL file: the core it starts, its <setname>, and the game file's name without folder or extension (Main names
+ * the save after it; "" when it starts no file). 0 if it could be read. */
+struct smc_mgl {
+    char rbf[256], setname[64], game[256];
+    bool same_dir;
+};
+int smc_mgl_read(const char *path, struct smc_mgl *m);
+
 /* The default save icon of a system as icon.bin bytes (smc_icons.c, made by tools/icons/make_icons.py), or NULL.
  * The sync puts it beside a game's saves on the card the first time the game goes there. */
 const uint8_t *smc_system_icon(const char *sys, size_t *len);

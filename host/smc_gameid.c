@@ -104,7 +104,7 @@ static int sega16(FILE *f, char *id, char *title) {
 
 static int bcd(unsigned v) { return (int)((v >> 4) * 10 + (v & 15)); }
 
-static int sms(FILE *f, char *id, char *title) {
+static int sms(FILE *f, char *id, char *title, const char *pre) {
     static const long at[] = {0x7FF0, 0x3FF0, 0x1FF0};
     unsigned char h[16];
     title[0] = 0;
@@ -113,7 +113,7 @@ static int sms(FILE *f, char *id, char *title) {
             int code = (h[14] >> 4) * 10000 + bcd(h[13]) * 100 + bcd(h[12]);
             if (!code)
                 return -1;
-            snprintf(id, 65, "SMS-%d", code);
+            snprintf(id, 65, "%s-%d", pre, code);
             return 0;
         }
     return -1;
@@ -170,7 +170,9 @@ int smc_game_header_id(const char *sys, const char *path, char id[65], char titl
     else if (!strcmp(sys, "Genesis") || !strcmp(sys, "MegaDrive") || !strcmp(sys, "S32X"))
         rc = sega16(f, id, title);
     else if (!strcmp(sys, "SMS"))
-        rc = sms(f, id, title);
+        rc = sms(f, id, title, "SMS");
+    else if (!strcmp(sys, "GameGear")) /* Console Mode's Game Gear.mgl: the SMS core, saves/GameGear */
+        rc = sms(f, id, title, "GG");
     else if (!strcmp(sys, "SNES"))
         rc = snes(f, id, title);
     else if (!strcmp(sys, "GAMEBOY") || !strcmp(sys, "GBC")) /* Console Mode keeps Color saves apart (GBC) */

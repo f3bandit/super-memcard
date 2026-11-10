@@ -5,6 +5,42 @@ the design depends on. Newest first. Each entry says where it came from so it ca
 
 ## 2026-11-09
 
+### Console Mode 2.0-RC-1's SD card: every save onto the card and back
+
+On the SS1 with Console Mode's SD card, with `tools/smccli` (each frontend call from a shell) and the card
+simulated by `vcardd`. A copy of `saves/` went through Read card (the real folder untouched: contents and file times
+checked before and after); the games came from its USB drive and SD card, names from libretro's lists.
+
+- **32 saves in 5 systems onto the card, then all 32 back onto an empty saves folder, identical, with their file
+  times** (NES 4, SNES 3, N64 14 in 4 games with Controller Pak files, NEOGEO 1, PSX 10). `SS1_MemCard/Test.mcd` (the
+  SS1 memory card core's images) isn't a console save folder: not taken.
+- Game IDs and names as the memory manager shows them: `NTEA` *1080 Snowboarding (Japan, USA) (En,Ja)*, `ND4E`
+  *Castlevania - Legacy of Darkness (USA)*, `NHTE` *Hydro Thunder (USA)*, `NOBE` *Ogre Battle 64*, `SCUS-94604`
+  *Carnage Heart (USA)*, NES by CRC (*Final Fantasy (USA)*, *Legend of Zelda, The (USA)*; the translations aren't in
+  the lists: their save names), `SNES-AO7J` *Tactics Ogre* (a translation: header title), a FFT hack's own disc code
+  `TLW-294221`. PSX saves with no matching disc found keep their save names.
+- **Found: two saves of one game on one SuperStation.** `Final Fantasy III (TWUE)(3.06).sfc` and `Final Fantasy VI
+  (TWUE 3.06).sfc` are one ROM (same CRC) with separate saves, and two FFT hack saves share the hack's disc code. The
+  sync filed both under the one game ID and **skipped the second save without saying so** (not lost here, but not on
+  the card either). Fixed: the second save gets its own set, `<id>~<CRC of its save name>` (`card_id_of_save()`);
+  the card's set keeps belonging to the save named in its `name.txt`. Both come back on a reinstall under their own
+  names. A memory manager shows the save's name next to the game's (two entries of one game otherwise look the same).
+  Test: *two saves here for one game*.
+- **MGL `<setname>` is the save folder** (Main's `CoreName2`, unless `same_dir="1"`). Console Mode's
+  `GameboyColor.mgl` starts the Gameboy core with saves in `GBC`, `Game Gear.mgl` the SMS core with `GameGear`. The
+  hooks used the `.rbf` only, so a Game Boy Color game's save would have been looked for in `GAMEBOY`. Fixed:
+  `smc_mgl_read()` and `smc_launch_system()` in the library (Phosphor's Main uses them now). `GameGear` added as a
+  system (game ID `GG-<product code>`, its icon, the Game Gear list). Mega Duck, Atari 2600, WonderSwan Color and
+  Pocket Challenge V2 MGLs aren't systems the card keeps.
+- A game's load and save around a launch from an MGL written the way Console Mode's are: N64 (`Hydro Thunder.n64`:
+  load unchanged, played, back: 1 to the card; the other SuperStation's launch: 1 from the card, identical), Game Boy
+  Color (`1942.gbc` through `GameboyColor.mgl`: filed as `GB-AQ4E` *1942 (USA, Europe)*, back into `saves/GBC` on the
+  other). No Game Gear games on this SD card to try.
+- Time: 5 minutes each way for 2.6 MB through the simulated card on the SS1 (its socket wire, not the bus); the ten
+  128 KB PSX card images are half of it. On the real card at a PS1's speed (~11 KB/s) about 4 minutes, less at the
+  faster frame speeds: a first Read card of a full saves folder wants a progress bar.
+- Console Mode's games folders include `cifs/games` (a network share): added to the games folders searched.
+
 ### Faster Super MemCard frames (PH_RAW speed)
 
 Where a 140-byte frame's 10.9 ms went on the SS1: ~4.5 ms of bits at a PS1's 250 kHz, ~4.2 ms of 30 us gaps after

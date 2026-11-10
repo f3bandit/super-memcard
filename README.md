@@ -25,6 +25,9 @@ then handed to Retro Remake as a set: protocol spec, `sys/` and Main patches, ca
 | [docs/06-console-mode.md](docs/06-console-mode.md) | how it works with Console Mode |
 | [docs/07-virtual-ss1.md](docs/07-virtual-ss1.md) | testing without an SS1: virtual card, bus simulation, virtual Main |
 | [docs/08-findings.md](docs/08-findings.md) | findings log: bugs found and fixed, facts learned along the way |
+| [docs/09-game-database.md](docs/09-game-database.md) | which game a save belongs to: game IDs, official names |
+| [docs/10-console-mode-guide.md](docs/10-console-mode-guide.md) | the guide for Retro Remake: everything Console Mode adds, in one place |
+| [tools/smccli](tools/smccli/smccli.c) | each frontend call from a shell, against the simulated card (testing, and a reference) |
 | [cores/](cores/README.md) | the 15 console cores we build against, pinned to MiSTer-devel and watched for changes |
 | [sim/card](sim/card/README.md) | the virtual card (layer 1, working): sd2psXtd's PS1 code on a PC, with tests |
 

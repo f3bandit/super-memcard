@@ -39,7 +39,7 @@ B       ?= build
 FW_OBJ  = $(addprefix $(B)/fw/,$(FW_SRC:.c=.o))
 HOST_OBJ = $(addprefix $(B)/,$(HOST_SRC:.c=.o))
 
-all: $(B)/test_card $(B)/vcardd
+all: $(B)/test_card $(B)/vcardd $(if $(filter 1,$(SMC)),$(B)/smccli)
 
 # for the SS1 (armv7, static so it doesn't depend on MiSTer Linux's glibc):
 #   make ss1    ->  build-ss1/vcardd, build-ss1/test_card
@@ -69,6 +69,18 @@ $(B)/smc_gameid.o: ../../host/smc_gameid.c ../../host/smc_ident.h
 $(B)/smc_gamedb.o: ../../host/smc_gamedb.c ../../host/smc_gamedb.h
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -fno-pie -c $< -o $@
+
+$(B)/smc_vcard.o: ../../host/smc_vcard.c ../../host/smc_vcard.h
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -fno-pie -c $< -o $@
+
+$(B)/smccli.o: ../../tools/smccli/smccli.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -I../../host -fno-pie -c $< -o $@
+
+# the frontend's commands from a shell, against vcardd (tools/smccli)
+$(B)/smccli: $(B)/smccli.o $(B)/smc_vcard.o $(B)/smc_host.o $(B)/smc_sync.o $(B)/smc_icons.o $(B)/smc_ident.o $(B)/smc_gameid.o $(B)/smc_gamedb.o
+	$(CC) $^ $(LDFLAGS) $(LDFLAGS_STATIC) -o $@
 
 $(B)/tests/test_card.o: tests/test_smc.inc tests/test_sync.inc
 
