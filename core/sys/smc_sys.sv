@@ -8,7 +8,8 @@
 //
 // The front ports stay the core's until Main turns them on (PH_MODE) for a card frame; until then USER_OUT is the
 // core's own, so a core using SNAC (the PSX core) is never disturbed. Main only turns them on in cores that don't
-// (05-design.md, phase 2). Controllers aren't read here (PADS 0): Main's input comes from USB as always.
+// (05-design.md, phase 2). Raw card frames only (PADS 0, RAW_ONLY 1): no controller reads or sector commands, so it
+// fits next to big cores. Main's input comes from USB as always.
 //
 // sys_top's clk_sys is the core's clock, which differs per core: it's measured against the 50 MHz board clock, so
 // the bus has a PS1's timing in every core.
@@ -52,7 +53,7 @@ wire [15:0] dout;
 wire        dout_en;
 wire        sel1_n, sel2_n, sclk, scmd;
 
-phosphor_ext #(.PADS(0)) phosphor_ext
+phosphor_ext #(.PADS(0), .RAW_ONLY(1)) phosphor_ext
 (
 	.clk(clk_sys),
 	.reset(reset),

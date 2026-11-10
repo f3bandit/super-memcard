@@ -144,15 +144,20 @@ module tb;
 		begin_cmd(16'h81); w(16'h0001, r); end_cmd;
 		#(2_000_000);
 
-		// 1. the card as a plain PS1 card, through the existing sector read
-		min_reset;
+`ifndef SMC_SYS
+		// 1. the card as a plain PS1 card, through the existing sector read (the menu core's; a game core's sys_top
+		// has raw frames only)
 		ps1_read(0);
-		check_half("PS1 read at a PS1's 250 kHz", 2000.0);
 		check("PS1 read of sector 0: OK", rst, 16'h4000);
 		check("sector 0 formatted (MC)", data[0], 16'h434D);
+`endif
 
-		// the same sector as a raw frame: 81 52 00 MSB LSB, then 134 x 00
+		// the same sector as a raw frame: 81 52 00 MSB LSB, then 134 x 00 (a PS1 command: at a PS1's speed). The
+		// card's first select after it starts may go unanswered (ps1_read tries 3 times, Main's Hello twice): once more
+		min_reset;
 		start_frame(8'h52); zeros(138); raw_frame(0, fl);
+		if (rst[7:0] != 140) begin start_frame(8'h52); zeros(138); raw_frame(0, fl); end
+		check_half("PS1 read at a PS1's 250 kHz", 2000.0);
 		check("raw sector read: 140 bytes", rst[7:0], 140);
 		check("raw sector read: MC", {fr[10], fr[11]}, 16'h4D43);
 		check("raw sector read: end 47", fr[139], 8'h47);
@@ -219,9 +224,15 @@ module tb;
 		end
 
 		// 8. the PS1 card is untouched by all of it
+`ifndef SMC_SYS
 		ps1_read(0);
 		check("PS1 read after Super MemCard: OK", rst, 16'h4000);
 		check("sector 0 still MC", data[0], 16'h434D);
+`else
+		start_frame(8'h52); zeros(138); raw_frame(0, fl);
+		check("PS1 read after Super MemCard: 140 bytes", rst[7:0], 140);
+		check("sector 0 still MC", {fr[10], fr[11]}, 16'h4D43);
+`endif
 
 		// 9. an empty port 2
 		start_frame(8'h60); put("S"); put("M"); put(8'd1); put(8'd1); put(8'd0); zeros(16); raw_frame(1, fl);

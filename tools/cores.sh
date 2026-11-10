@@ -56,7 +56,8 @@ patch)
     known "$2"
     for p in patches/sys/*.patch; do [ -e "$p" ] && git -C "cores/$2" apply --directory=sys -v "../../$p"; done
     for p in patches/"$2"/*.patch; do [ -e "$p" ] && git -C "cores/$2" apply -v "../../$p"; done
-    [ "${SMC_SYS:-1}" = 0 ] || tools/sys-patch.sh "cores/$2"   # phase 2: the front-port card driver in sys_top (core/sys)
+    # phase 2: the front-port card driver in sys_top (core/sys); not in the PSX core, which uses the front ports itself
+    [ "${SMC_SYS:-1}" = 0 ] || [ "$2" = PSX ] || tools/sys-patch.sh "cores/$2"
     true ;;
 pr-all)
     git fetch -q origin
