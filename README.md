@@ -65,3 +65,7 @@ then handed to Retro Remake as a set: protocol spec, `sys/` and Main patches, ca
 - Licence (the card firmware and MiSTer parts are GPL-3.0; f3bandit's own code TBD).
 
 By f3bandit.
+
+The cores are built in the public repo [f3bandit/super-memcard-cores](https://github.com/f3bandit/super-memcard-cores)
+(free Actions minutes): the pinned cores, the card driver for `sys/` and the build workflow. `core/sys/` here is
+the same driver, for the bus simulation; a change to it goes to both.
