@@ -22,6 +22,12 @@ the design depends on. Newest first. Each entry says where it came from so it ca
   Actions, timing met, 79% of the logic) loaded under Phosphor's Main; Main found the front ports in the game core
   (PH_ID) and read sector 0 of the Sony PS1 card in port 1 through it: 140 bytes, `MC`, checksum, `47`; port 2
   (empty) answered nothing. The driver works in a game core on the real hardware.
+- **Every core built with the driver** (Actions, Quartus 17.0.2): NES, Gameboy, Genesis, MegaDrive, N64, MegaCD,
+  S32X, SMS, SNES, Jaguar, TurboGrafx16 and NeoGeo fit and meet timing. GBA, Saturn and PSX didn't fit (Saturn
+  needed 4296 LABs of 4191, PSX 4265): the driver had phosphor_ext's controller reads, sector commands and controller
+  commands, which a game core never uses (~1000 LUTs, ~700 registers by Yosys' count, ~1400 ALMs in Quartus on NES).
+  Now `RAW_ONLY` keeps only the raw frames (~640 LUTs, ~530 registers); the menu core is unchanged (phosphor-menu's
+  simulation identical). PSX doesn't get it: it uses the front ports itself.
 - The same core built with and without the driver, each loaded by Console Mode's own Main and played: both look and
   play the same. (A bad picture seen first came from starting a core by hand with Phosphor's test Main on Console
   Mode's SD card, not from the core.)
