@@ -809,8 +809,24 @@ static int sync_one_(const struct smc_bus *b, struct entry *e, const char *id, i
 
 /* everything the card has for one game ID, then the local files of that game */
 
-/* The PS1 icon of this game's card image in the saves folder (PSX), as icon.bin: its length, 0 if none */
-static size_t psx_own_icon(const char *dir, const char *game, uint8_t *out, size_t out_max) {
+/* Systems whose saves carry the game's own icon, and how to read it into icon.bin's layout (docs/05-design.md). A save
+ * with its own icon shows that one in Console Mode and SS1 Tool; every other save its system's icon. A new system
+ * whose saves carry an icon is one more entry here. */
+static const struct {
+    const char *sys;
+    size_t (*read)(const uint8_t *save, size_t len, uint8_t *out, size_t out_max);
+} icon_readers[] = {
+    {"PSX", smc_ps1_icon}, /* a PS1 card image: its first save's icon */
+};
+
+/* The game's own icon from its save file in the saves folder, as icon.bin: its length, 0 if none */
+static size_t own_icon(const char *sys, const char *dir, const char *game, uint8_t *out, size_t out_max) {
+    size_t (*read)(const uint8_t *, size_t, uint8_t *, size_t) = NULL;
+    for (size_t i = 0; i < sizeof(icon_readers) / sizeof(icon_readers[0]); i++)
+        if (!strcmp(icon_readers[i].sys, sys))
+            read = icon_readers[i].read;
+    if (!read)
+        return 0;
     DIR *d = opendir(dir);
     struct dirent *de;
     size_t got = 0;
@@ -822,10 +838,10 @@ static size_t psx_own_icon(const char *dir, const char *game, uint8_t *out, size
         FILE *fp = fopen(path, "rb");
         if (!fp)
             continue;
-        static uint8_t img[131072 + 3904 + 1];
+        static uint8_t img[256 * 1024 + 1];   /* the biggest save with an icon read whole */
         size_t n = fread(img, 1, sizeof(img), fp);
         fclose(fp);
-        got = smc_ps1_icon(img, n, out, out_max);
+        got = read(img, n, out, out_max);
     }
     if (d)
         closedir(d);
@@ -901,14 +917,14 @@ static int sync_game(const struct smc_bus *b, const char *sys, int card, const c
     }
     if (d)
         closedir(d);
-    /* a game new on the card gets its system's icon, until games have their own (smc_icons.c); a PSX card image has
-     * its own: its first save's PS1 icon, as Console Mode shows it for the card in the port */
+    /* the game's own icon when its save carries one (icon_readers: a PS1 card image's, as Console Mode shows it for the
+     * card in the port); else a game new on the card gets its system's icon (smc_icons.c) */
     size_t ilen;
     const uint8_t *icon = smc_system_icon(sys, &ilen);
     static uint8_t own[8 + 32 + 3 * 128];
     bool own_icon = false;
-    if (!has_icon && !strcmp(sys, "PSX")) {
-        size_t l = psx_own_icon(dir, local_game, own, sizeof(own));
+    if (!has_icon) {
+        size_t l = own_icon(sys, dir, local_game, own, sizeof(own));
         if (l) {
             icon = own;
             ilen = l;
