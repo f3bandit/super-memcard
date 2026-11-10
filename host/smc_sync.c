@@ -859,7 +859,6 @@ static int begin(const struct smc_bus *b, const struct smc_sync_cfg *cfg, struct
     nents = 0;
     nroms = nindexed = 0;
     load_state();
-    rep->first = nents == 0; /* nothing synced with this card yet: a new card, or a reinstall */
     load_locals();
     return 1;
 }
@@ -933,25 +932,19 @@ int smc_sync_game(const struct smc_bus *b, const struct smc_sync_cfg *cfg, const
     int ok = begin(b, cfg, rep);
     if (ok <= 0)
         return ok;
-    if (rep->first) {
-        /* the first time with this card: everything (a reinstall gets every save back) */
-        for (const char *const *s = cfg->systems; *s; s++)
-            sync_system_now(b, *s, NULL, rep);
-    } else
-        sync_system_now(b, sys, game, rep);
+    sync_system_now(b, sys, game, rep);
     done_log("game sync", rep);
     return end();
 }
 
-int smc_sync_changed(const struct smc_bus *b, const struct smc_sync_cfg *cfg, struct smc_sync_report *rep) {
+int smc_sync_changed(const struct smc_bus *b, const struct smc_sync_cfg *cfg, const char *sys,
+                     struct smc_sync_report *rep) {
     int ok = begin(b, cfg, rep);
     if (ok <= 0)
         return ok;
     for (const char *const *s = cfg->systems; *s; s++) {
-        if (rep->first) {
-            sync_system_now(b, *s, NULL, rep);
+        if (sys && strcmp(sys, *s))
             continue;
-        }
         /* only local saves new or changed since they were last synced: the folder is read, no file, no ROM, and the
          * card isn't asked anything unless one changed */
         char dir[1024];

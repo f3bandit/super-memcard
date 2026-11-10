@@ -5,6 +5,16 @@ the design depends on. Newest first. Each entry says where it came from so it ca
 
 ## 2026-11-09
 
+### The card only when a save is loaded or saved (like a PS1)
+
+The first phase-1 version synced every save at every menu start; that read the card and the whole saves folder each
+time, and a first run took over a minute identifying games. Now (as a PS1 uses its card): nothing at menu start, a
+game's own save before it starts and after it, everything only from the memory manager ("read card").
+
+On the SS1 (test Main, vcardd): menu start left the card alone; an N64 game started through an MGL (as Phosphor and
+Console Mode start games) checked only its save (under a second, unchanged); back in the menu only that game's saves
+went to the card, including the 32 KB `.sra` the real N64 core wrote while it ran. Restored after as before.
+
 ### Game IDs, names and times on the SS1, with its own games
 
 Test Main (bind-mounted) + vcardd + libretro's lists fetched onto the SS1 (`tools/gamedb/fetch.sh`, 19 lists, 14 MB),

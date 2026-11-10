@@ -127,18 +127,18 @@ blocks, a background task writes them to the SD card, and a flush happens before
 
 ### Phase 1: at game start and game end (no core changes)
 
-Both frontends can reach the card from their menu core (04).
+Like a PS1, the card is only read or written when a save is loaded or saved; nothing happens at menu start. The card
+is reachable from the menu core only, so around a game (`host/smc_sync.h`):
 
-1. **Game start**, before the core loads: Hello → Core (the system, running) → Select (system, game ID from Main's `/tmp/GAMEID`,
-   or the same calculation done before loading) → if the card's generation is newer than the
-   mirror's, read the files into `saves/<core>/` (the files Main mounts, 01).
+1. **Game start**, before the core loads: Core (the system, running), then that one game (`smc_sync_game()`, the
+   game from the MGL that starts it): the card's newer copy comes in ("load"). A reinstall gets each game's save
+   back this way, the first time the game is started.
 2. The game plays exactly as today: Main writes the save to the SD card as the core saves.
-3. **Game end**, back in the menu: if the save files changed, write them to the card → Commit →
-   Status until 0 → update the mirror's generation.
-
-If the SS1 loses power mid-game, the SD card already has the newest save (Main writes `O_SYNC`); it
-goes to the card at the next game end. The cost is speed: ~11 KB/s measured on the SS1 (08), so a 32 KB save takes ~3 s
-and a 128 KB one ~11 s, shown with a progress bar.
+3. **Game end**, back in the menu: that game's save goes to the card if it changed ("save"), then Core `.` gives the
+   card's buttons back to the PS1 card. A game started from the core's own file browser (no MGL): that system's saves
+   that changed (`smc_sync_changed()`, a folder read; nothing sent when nothing changed).
+4. **Read card** (Console Mode's memory manager, which has to read the card before its other options): everything
+   (`smc_sync()`).
 
 ### Phase 2 (later): during the game
 

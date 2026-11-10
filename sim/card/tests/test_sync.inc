@@ -616,50 +616,57 @@ static const struct smc_bus cbus = {NULL, cnt_sel, bus_x, NULL};
 static struct smc_sync_report quick(int which) {
     struct smc_sync_cfg c = cfg_of(which);
     struct smc_sync_report r;
-    CHECK_EQ(smc_sync_changed(&cbus, &c, &r), 0);
+    CHECK_EQ(smc_sync_changed(&cbus, &c, NULL, &r), 0);
+    return r;
+}
+static struct smc_sync_report one_game(int which, const char *sys, const char *game) {
+    struct smc_sync_cfg c = cfg_of(which);
+    struct smc_sync_report r;
+    CHECK_EQ(smc_sync_game(&cbus, &c, sys, game, &r), 0);
     return r;
 }
 
-static void t_sync_quick_and_one_game(void) {
+static void t_sync_like_a_ps1(void) {
+    /* the card is read or written only when a game's save is loaded or saved */
     sync_setup();
     put_save(0, "SNES/Super Metroid (USA).sav", sA, sizeof(sA));
     put_save(0, "N64/Super Mario 64 (USA).eep", eep, sizeof(eep));
-    /* the first time with this card: everything */
-    struct smc_sync_report r = quick(0);
-    CHECK(r.first);
-    CHECK_EQ(r.pushed, 2);
-    /* nothing changed: nothing asked of the card but Hello */
-    frames = 0;
-    r = quick(0);
-    CHECK(!r.first);
-    CHECK_EQ(r.pushed + r.pulled + r.unchanged + r.failed, 0);
-    CHECK(frames <= 2);
-    /* a game played: only that one goes */
-    sleep(1); /* a new file time */
+    /* a game played and left: its save goes; the other one isn't touched */
+    struct smc_sync_report r = one_game(0, "SNES", "Super Metroid (USA)");
+    CHECK_EQ(r.pushed, 1);
+    CHECK_EQ(file_size("SuperMemCard/N64/Card1/Super Mario 64 (USA)/save.eep"), -1);
+    /* started again, nothing changed: nothing written */
+    r = one_game(0, "SNES", "Super Metroid (USA)");
+    CHECK_EQ(r.pushed + r.pulled, 0);
+    CHECK_EQ(r.unchanged, 1);
+    /* the memory manager's "read card": everything */
+    CHECK_EQ(run_sync(0).pushed, 1);
+    /* a game started from the core's own file browser: that system's changed saves, after it */
+    sleep(1);
     put_save(0, "SNES/Super Metroid (USA).sav", sB, sizeof(sB));
     frames = 0;
-    r = quick(0);
+    struct smc_sync_cfg c0 = cfg_of(0);
+    CHECK_EQ(smc_sync_changed(&cbus, &c0, "N64", &r), 0);
+    CHECK_EQ(r.pushed, 0);
+    CHECK(frames <= 2); /* only the Hello */
+    CHECK_EQ(smc_sync_changed(&cbus, &c0, "SNES", &r), 0);
     CHECK_EQ(r.pushed, 1);
-    CHECK_EQ(r.unchanged, 0);
-    /* a newer save from another SuperStation waits until the game is started here */
+    /* another SuperStation's newer save comes in when the game is started here, not before */
     CHECK_EQ(run_sync(1).pulled, 2);
     put_save(1, "N64/Super Mario 64 (USA).eep", sA, sizeof(eep));
-    CHECK_EQ(quick(1).pushed, 1);
-    r = quick(0);
-    CHECK_EQ(r.pulled, 0);
-    struct smc_sync_cfg c0 = cfg_of(0);
-    CHECK_EQ(smc_sync_game(&vbus, &c0, "N64", "Super Mario 64 (USA)", &r), 0);
+    CHECK_EQ(one_game(1, "N64", "Super Mario 64 (USA)").pushed, 1);
+    CHECK_EQ(quick(0).pulled, 0);
+    r = one_game(0, "N64", "Super Mario 64 (USA)");
     CHECK_EQ(r.pulled, 1);
     CHECK_EQ(get_save(0, "N64/Super Mario 64 (USA).eep", got, sizeof(got)), sizeof(eep));
     CHECK(memcmp(got, sA, sizeof(eep)) == 0);
-    /* and just pulled: the quick sync after the game has nothing to do */
-    r = quick(0);
-    CHECK_EQ(r.pushed + r.pulled, 0);
-    /* a reinstall: the first quick sync brings everything back */
+    CHECK_EQ(quick(0).pushed + quick(0).pulled, 0); /* just pulled: nothing to save after */
+    /* a reinstall: a game's save comes back when it's started */
     wipe(0);
-    r = quick(0);
-    CHECK(r.first);
-    CHECK_EQ(r.pulled, 2);
+    r = one_game(0, "SNES", "Super Metroid (USA)");
+    CHECK_EQ(r.pulled, 1);
+    CHECK_EQ(get_save(0, "SNES/Super Metroid (USA).sav", got, sizeof(got)), sizeof(sB));
+    CHECK(memcmp(got, sB, sizeof(sB)) == 0);
 }
 
 #define SYNC_TESTS \
@@ -678,4 +685,4 @@ static void t_sync_quick_and_one_game(void) {
     {"sync: both changed, settled either way", t_sync_conflict_settled, true, NULL}, \
     {"game IDs from the games' own headers", t_game_ids_from_headers, true, NULL}, \
     {"sync: one save set per game, filed by game ID, with its time", t_sync_by_game_id, true, NULL}, \
-    {"sync: quick after a game, one game before it, everything the first time", t_sync_quick_and_one_game, true, NULL},
+    {"sync: like a PS1: a game's save in at its start, out after it", t_sync_like_a_ps1, true, NULL},
