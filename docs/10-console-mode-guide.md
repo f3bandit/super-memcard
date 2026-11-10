@@ -124,7 +124,18 @@ One user of the card at a time: Memory Cards, SS1 Tool's card reads and the Supe
 Cores built with `tools/sys-patch.sh` (the front-port card driver in their `sys_top`, no change to the core itself)
 reach the card while the game runs, through the same commands as the menu core. A host then sends a game's save to the
 card as soon as it changes (Phosphor: `supermemcard_poll()`: the save files changed and settled for a second, then
-`smc_sync_game()`). Not in the PSX core, which uses the front ports itself. Cores without it work as in phase 1.
+`smc_sync_game()`). Not in the PSX core, which uses the front ports itself, nor Saturn, which has no room left in
+the FPGA: those two, and any core without it, work as in phase 1.
+
+What it takes in a host, beyond phase 1:
+- Ask `PH_ID` (`80`) in the game core as in the menu core; `0x5048` back means the front ports are there. Only the
+  raw-frame commands answer in a game core (`PH_ID`, `PH_MODE`, `PH_RAW`, `PH_RAW_STATUS`): no controller reads or
+  sector commands.
+- Turn the ports on (`PH_MODE` 1) only for the frames, and off again after: until then the user port is the core's.
+- Never in the PSX core.
+
+Built and timing met in NES, Game Boy, GBA, Genesis, Mega Drive, N64, Mega-CD, 32X, SMS, SNES, Jaguar,
+TurboGrafx-16 and Neo Geo (08). Read the PS1 card in port 1 from the NES core on an SS1.
 
 ## 4. Settings
 
