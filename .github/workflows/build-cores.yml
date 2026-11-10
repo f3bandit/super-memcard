@@ -1,6 +1,6 @@
 # Builds console cores with our patches (patches/sys, patches/<core>) on top of the pinned
 # upstream commit, with Quartus 17.0.2 Lite (the image MiSTer's own builds use). Started by hand
-# (Actions → Build cores → core name or "all") or by the upstream watcher for a moved core.
+# (Actions → Build cores → one core's name), one at a time so each is built and then tested on the SS1 before the next.
 # Big cores (N64, Saturn, PSX) take hours; a private repo's Actions minutes are limited.
 name: Build cores
 
@@ -8,9 +8,8 @@ on:
   workflow_dispatch:
     inputs:
       core:
-        description: 'Core to build (e.g. PSX), or "all"'
+        description: 'The one core to build (e.g. NES)'
         required: true
-        default: all
       card_driver:
         description: 'Add the Super MemCard card driver to sys_top (phase 2); "no" builds the core as upstream has it, to compare'
         required: false
@@ -32,7 +31,7 @@ jobs:
     timeout-minutes: 360
     strategy:
       fail-fast: false
-      max-parallel: 4
+      max-parallel: 1
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     name: ${{ matrix.core }}
     steps:

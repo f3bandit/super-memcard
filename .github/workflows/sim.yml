@@ -1,8 +1,9 @@
-# The virtual card on every push: sd2psXtd's PS1 card code, stock and with Super MemCard, and the phase 1 sync.
+# The virtual card: sd2psXtd's PS1 card code, stock and with Super MemCard, and the phase 1 sync. Started by hand
+# (Actions → Virtual card tests), not on every push: the private repo's Actions minutes are limited. The same tests run
+# locally: make -C sim/card test, sh sim/bus/run.sh.
 name: Virtual card tests
 
 on:
-  push:
   workflow_dispatch:
 
 jobs:
