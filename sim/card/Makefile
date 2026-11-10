@@ -20,7 +20,7 @@ endif
 # 10-byte buffer, a bug in the firmware that only overflows for IDs of 10+ digits.
 CFLAGS  = $(OPT) -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -std=gnu11 -Wall -Wno-unused-function -Wno-unused-variable -Wno-unused-but-set-variable \
            -Wno-format-truncation -Wno-stringop-truncation -Wno-array-bounds \
-           -MMD -MP -Istubs -Ihost $(DEFS) -I$(FWSRC)/src -I$(FWSRC)/src/ps1 -I$(FWSRC)/ext/inih -I$(FWSRC)/ext/ESP8266SdFatWrapper/include
+           -MMD -MP -Istubs -include compat.h -Ihost $(DEFS) -I$(FWSRC)/src -I$(FWSRC)/src/ps1 -I$(FWSRC)/ext/inih -I$(FWSRC)/ext/ESP8266SdFatWrapper/include
 ifdef DEBUG
 CFLAGS  += -DDEBUG_USB_UART
 endif
