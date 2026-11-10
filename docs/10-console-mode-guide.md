@@ -159,3 +159,5 @@ SuperStation each get their own set. Details in 08.
 - Raw frames in Console Mode's menu core: the same `PH_RAW` or its own command; its timing.
 - Where the two hooks go in `MiSTer_ConsoleMode`'s launch path.
 - The real card's speed limit, and a power pull mid-save on the real card (works in the simulation).
+- On the real card with this firmware: a real PS1 and PS2 (plain PS1 card, no Hello ever sent), FreePSXBoot booting
+  from it on a real PS1, and the stock PSX core and Memory Cards reading it as today.
