@@ -3,11 +3,17 @@
 // MemCard, on front port 1 bit by bit (vcard_bus + vcardd). Port 2 is empty.
 // Run: sh sim/bus/run.sh
 // Copyright (C) 2026 f3bandit.
-`timescale 1ns/1ns
+`timescale 1ns/1ps
 
 module tb;
+	// 100 MHz like the menu core; -DCLK_MHZ=50 (or any) as a game core's clock, where sys_top runs the same extension
+	// with its measured clock (phase 2)
+`ifndef CLK_MHZ
+`define CLK_MHZ 100
+`endif
 	reg clk = 0;
-	always #5 clk = ~clk;   // 100 MHz, like the menu core
+	always #(500.0 / `CLK_MHZ) clk = ~clk;
+	localparam integer CLK_U64 = $rtoi(64.0 * `CLK_MHZ);   // clk cycles in 64 us
 	reg reset = 1;
 
 	reg        io_strobe = 0, io_enable = 0;
@@ -16,15 +22,34 @@ module tb;
 	wire       dout_en, ports_on, show_static;
 	wire       sel1_n, sel2_n, sclk, scmd, dat1, ack1;
 
+`ifdef SMC_SYS
+	// phase 2: the module sys_top carries in every game core (core/sys/smc_sys.sv), its clock measured against a 50 MHz
+	// reference, the front ports on the user port's pins as sys_top drives them
+	reg clk50 = 0;
+	always #10 clk50 = ~clk50;
+	wire [6:0] uo;
+	wire [15:0] sys_dout;
+	assign dout_en = 1'b1;   // smc_sys gives 0 for anything not its own
+	assign io_dout = sys_dout;
+	assign {sclk, scmd, sel1_n} = {uo[5], uo[2], uo[1]};
+	smc_sys dut
+	(
+		.clk_sys(clk), .clk_50(clk50), .reset(reset),
+		.io_uio(io_enable), .io_strobe(io_strobe), .io_din(io_din), .io_dout(sys_dout),
+		.ports_on(ports_on), .user_out(uo), .user_in({2'b11, dat1, ack1, 3'b111})
+	);
+	assign sel2_n = uo[0];
+`else
 	// controllers are read rarely here: each poll of port 1 reaches the virtual card, which takes real time
 	phosphor_ext #(.GAP(23'h7FFFFF)) dut
 	(
-		.clk(clk), .reset(reset),
+		.clk(clk), .reset(reset), .clk_u64(16'(CLK_U64)),
 		.io_strobe(io_strobe), .io_enable(io_enable), .io_din(io_din), .io_dout(io_dout), .dout_en(dout_en),
 		.ports_on(ports_on), .show_static(show_static),
 		.sio_sel1_n(sel1_n), .sio_sel2_n(sel2_n), .sio_clk(sclk), .sio_cmd(scmd),
 		.sio_dat(dat1), .sio_ack(ack1)
 	);
+`endif
 
 	vcard_bus card(.sel_n(sel1_n), .sclk(sclk), .cmd(scmd), .dat(dat1), .ack_n(ack1));
 
@@ -46,6 +71,18 @@ module tb;
 	endtask
 
 	integer errors = 0;
+	// the bit clock on the wire: the shortest time between SCLK edges since min_reset (gaps between bytes are longer)
+	realtime t_edge = 0, min_half = 1e9;
+	always @(sclk) begin if ($realtime - t_edge < min_half) min_half = $realtime - t_edge; t_edge = $realtime; end
+	task min_reset; begin min_half = 1e9; t_edge = $realtime; end endtask
+	task check_half(input [255:0] what, input real want_ns);
+		begin
+			if (min_half < want_ns * 0.95 || min_half > want_ns * 1.05) begin
+				$display("FAIL %0s: half bit %0.0f ns, want %0.0f", what, min_half, want_ns); errors = errors + 1;
+			end else $display("ok   %0s (%0.0f ns at %0.2f MHz)", what, min_half, 1.0 * `CLK_MHZ);
+		end
+	endtask
+
 	task check(input [255:0] what, input [31:0] got, input [31:0] want);
 		begin
 			if (got !== want) begin $display("FAIL %0s: got %h want %h", what, got, want); errors = errors + 1; end
@@ -108,7 +145,9 @@ module tb;
 		#(2_000_000);
 
 		// 1. the card as a plain PS1 card, through the existing sector read
+		min_reset;
 		ps1_read(0);
+		check_half("PS1 read at a PS1's 250 kHz", 2000.0);
 		check("PS1 read of sector 0: OK", rst, 16'h4000);
 		check("sector 0 formatted (MC)", data[0], 16'h434D);
 
@@ -137,7 +176,9 @@ module tb;
 			start_frame(8'h69); put_str("SNES", 4); put(8'h01); zeros(2); raw_frame(0, fl);
 			check("Core: answered", rst[7:0], fl);
 			check("Core: 47, card 1", {fr[fl - 2], fr[fl - 1]}, 16'h4701);
+			min_reset;
 			start_frame(8'h61); put_str("SNES", 4); put_str("Bus Test", 8); put(8'h00); zeros(3); raw_frame(0, fl);
+			check_half("Super MemCard frame at 1 MHz", 500.0);
 			check("Select: answered", rst[7:0], fl);
 			check("Select: 47, no files yet, card 1", {fr[fl - 3], fr[fl - 2], fr[fl - 1]}, 24'h470001);
 

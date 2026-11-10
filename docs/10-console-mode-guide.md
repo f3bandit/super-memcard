@@ -119,6 +119,13 @@ as today. `tools/smccli` does each of these from a shell (section 6), so their o
 One user of the card at a time: Memory Cards, SS1 Tool's card reads and the Super MemCard calls take a lock file
 (like `/tmp/ss1_bt.busy` for Bluetooth) while they run.
 
+### During the game (phase 2)
+
+Cores built with `tools/sys-patch.sh` (the front-port card driver in their `sys_top`, no change to the core itself)
+reach the card while the game runs, through the same commands as the menu core. A host then sends a game's save to the
+card as soon as it changes (Phosphor: `supermemcard_poll()`: the save files changed and settled for a second, then
+`smc_sync_game()`). Not in the PSX core, which uses the front ports itself. Cores without it work as in phase 1.
+
 ## 4. Settings
 
 `SuperMemCard/settings.ini` on the card: `saves=0` turns Super MemCard off on the card itself (it then doesn't even

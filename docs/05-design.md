@@ -140,14 +140,25 @@ is reachable from the menu core only, so around a game (`host/smc_sync.h`):
 4. **Read card** (Console Mode's memory manager, which has to read the card before its other options): everything
    (`smc_sync()`).
 
-### Phase 2 (later): during the game
+### Phase 2: during the game
 
-The card driver goes into `sys/` (hps_io), so a game core rebuilt with it lets Main reach the card
-while the game runs. Main then sends each written save block to the card as it lands, and nothing
-waits at game end. This needs the cores rebuilt (Phosphor's updater can do it); phase 1 keeps working
-for cores that aren't.
+The SuperStation One's front ports are SNAC, wired straight to the FPGA's user port, and in a game only the PSX core
+uses them (Retro Remake's SuperStation documentation: the built-in ports work "only within the MiSTer core designed for
+the original hardware"). So while any other core runs the bus is free, and Main can reach the card then too.
 
-The N64 Controller Pak on the card (SS1_N64_MiSTer plan) is phase 2's first user.
+- **The card driver is in `sys_top`, not in the cores** (`core/sys/smc_sys.sv`, added to every core's `sys/` by
+  `tools/sys-patch.sh` at build time). It's phosphor-menu's own front-port logic (`phosphor_ext`, copied, port don't
+  rewrite) answering the same commands (`80`-`88`) on the UIO channel next to `sys_top`'s own; hps_io doesn't use
+  those and the cores' own `EXT_BUS` users answer `34`/`35`. Its timings scale with the core's clock, measured against
+  the board's 50 MHz clock, so the bus keeps a PS1's timing in every core (bus simulation at 33-100 MHz, and through
+  `smc_sys` at 42.95 and 85.9 MHz). The user port stays the core's own until Main turns the front ports on for a
+  frame, so a core that uses SNAC isn't disturbed; Main never does it in the PSX core.
+- **Main** (phosphor-main `supermemcard_poll()`): while a game runs, when its save files change (Main wrote them as
+  the core saved) and have settled for a second, that game's save goes to the card (`smc_sync_game()`), there and
+  then. A core without the driver, or no card: nothing, and the save goes after the game as in phase 1.
+- Phase 1 stays as it is around every game: the card's newer save in before the game, the save out after it, Core.
+
+The N64 Controller Pak on the card (SS1_N64_MiSTer plan) is phase 2's first user that needs more than whole files.
 
 ## 4. The card's menu
 

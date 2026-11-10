@@ -56,6 +56,7 @@ patch)
     known "$2"
     for p in patches/sys/*.patch; do [ -e "$p" ] && git -C "cores/$2" apply --directory=sys -v "../../$p"; done
     for p in patches/"$2"/*.patch; do [ -e "$p" ] && git -C "cores/$2" apply -v "../../$p"; done
+    tools/sys-patch.sh "cores/$2"   # phase 2: the front-port card driver in sys_top (core/sys)
     true ;;
 pr-all)
     git fetch -q origin

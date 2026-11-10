@@ -8,7 +8,7 @@ on:
 jobs:
   test:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - name: Fetch sd2psXtd
@@ -24,6 +24,8 @@ jobs:
           sudo apt-get install -y -q iverilog >/dev/null
           sh sim/bus/run.sh
           STOCK=1 sh sim/bus/run.sh
+      - name: Bus simulation, phase 2 (the card driver every game core's sys_top carries, at a game core's clock)
+        run: SMC_SYS=1 CLK_MHZ=42.95 sh sim/bus/run.sh
 
   firmware:
     # the real card firmware with Super MemCard, built for the RP2040 (GUI included) as sd2psXtd's own CI does

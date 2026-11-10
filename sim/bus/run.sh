@@ -4,11 +4,13 @@
 #   sh sim/bus/run.sh            (needs iverilog, and sim/card built: make -C sim/card SMC=1)
 #   STOCK=1                      against stock sd2psXtd instead (sim/card built with make -C sim/card)
 #   PHOSPHOR_MENU=<checkout>     use a local phosphor-menu instead of fetching the pinned commit
+#   CLK_MHZ=50                   the front-port logic at another clock (a game core's, phase 2)
+#   SMC_SYS=1                    through core/sys/smc_sys.sv, as every game core's sys_top carries it (phase 2)
 # Copyright (C) 2026 f3bandit.
 set -e
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../.." && pwd)
-PIN=105d86632827300d37b0dcbceaff99b7313035e7   # phosphor-menu, branch supermemcard (extension version 3)
+PIN=99a6aea2538235fad4959f493b8653b8d2db9cf6   # phosphor-menu, branch supermemcard (extension version 3, timings by clk_u64)
 work=$(mktemp -d)
 trap 'kill $vpid 2>/dev/null || true; wait $vpid 2>/dev/null || true; [ -n "$KEEP" ] && echo "kept $work" || rm -rf "$work"' EXIT
 
@@ -26,8 +28,17 @@ vcardd=${VCARDD:-$root/sim/card/$build/vcardd}
 
 cd "$here"
 iverilog-vpi vcard_vpi.c >/dev/null 2>&1
-iverilog -g2012 -o "$work/tb_bus.vvp" tb_bus.sv vcard_bus.sv \
-	"$rtl/rtl/phosphor/sio_byte.sv" "$rtl/rtl/phosphor/card_sector.sv" "$rtl/rtl/phosphor/phosphor_ext.sv"
+if [ -n "$SMC_SYS" ]; then
+	# the copies in core/sys (what the cores build), so they're checked too; they have to be phosphor-menu's
+	for f in sio_byte card_sector phosphor_ext; do
+		tail -n +2 "$root/core/sys/$f.sv" | cmp -s - "$rtl/rtl/phosphor/$f.sv" ||
+			{ echo "FAIL core/sys/$f.sv isn't phosphor-menu's (tools/sync-phosphor-ext.sh)"; exit 1; }
+	done
+	ext="$root/core/sys/smc_sys.sv $root/core/sys/sio_byte.sv $root/core/sys/card_sector.sv $root/core/sys/phosphor_ext.sv"
+else
+	ext="$rtl/rtl/phosphor/sio_byte.sv $rtl/rtl/phosphor/card_sector.sv $rtl/rtl/phosphor/phosphor_ext.sv"
+fi
+iverilog -g2012 ${CLK_MHZ:+-DCLK_MHZ=$CLK_MHZ} ${SMC_SYS:+-DSMC_SYS} -o "$work/tb_bus.vvp" tb_bus.sv vcard_bus.sv $ext
 
 mkdir "$work/sd"
 export VCARD_SOCKET=$work/vcard.sock

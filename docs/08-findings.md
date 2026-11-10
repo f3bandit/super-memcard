@@ -3,7 +3,21 @@
 What we've learned along the way: bugs found (and fixed), surprises, facts about the hardware and tools that
 the design depends on. Newest first. Each entry says where it came from so it can be checked again.
 
-## 2026-11-09
+## 2026-11-10
+
+### Phase 2: the card while a game runs, from sys_top
+
+- Retro Remake's documentation: the front ports are SNAC on the FPGA's user port, used in a game only by the PSX core
+  (other cores take USB/Bluetooth controllers). So the bus is free during any other core's game.
+- Every pinned core's `sys_top.v` decodes Main's UIO commands itself and owns the user port, at four lines all 15
+  share (4 different `sys_top.v` versions among them): the driver goes there, the cores' own code is untouched.
+  hps_io uses UIO commands up to `3E`; the cores' `EXT_BUS` users (SNES, Mega Drive MSU/CD, PSX, Saturn, Mega-CD,
+  TurboGrafx-16 CD) answer `34`/`35`. Phosphor's `80`-`88` are free in every core.
+- `sys_top`'s `clk_sys` is the core's clock (21-100+ MHz). phosphor_ext's timings were constants for the menu core's
+  100 MHz: now they're worked out from the clock (cycles in 64 us), which `smc_sys` measures against the 50 MHz board
+  clock. The menu core's results are identical (phosphor-menu's simulation, before and after); the bit clock on the
+  wire measured in the bus simulation: 2.0 us half-bits for PS1 frames, 0.5 us at 1 MHz, at 33, 42.95, 50, 85.9 and
+  100 MHz.
 
 ### Console Mode 2.0-RC-1's SD card: every save onto the card and back
 
