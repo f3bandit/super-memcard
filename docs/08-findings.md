@@ -17,8 +17,13 @@ answered whole.
 - phosphor-menu's simulation: 8.8 ms at 250 kHz, 4.0 ms at 500 kHz, 2.0 ms at 1 MHz, 1.2 ms at 2 MHz (the bus
   alone; a real card's answer time adds to it).
 - Bus simulation with the card firmware at 1 MHz: the whole round trip passes, stock firmware too.
-- Still to measure: the SS1's front ports at those clocks (the wiring and level shifting), and the real card's own
-  answer time, which decides what speed is worth it.
+- **The SS1's front ports at those clocks** (Sony card in port 1, PS1 sector reads as raw frames, compared with its
+  backup image; reads only): 250 kHz and 500 kHz 96 of 96 right, 1 MHz 93 of 96 (3 cut short), 2 MHz none (all cut
+  short). Never wrong data: the wiring carries the faster clocks cleanly, the Sony card's timing is the limit. A
+  Super MemCard card never gets fast frames unless it answered Hello, so this only says the ports can do it.
+- Phosphor's Main starts Super MemCard frames at 1 MHz and steps down one speed (500 kHz, then 250 kHz) for the
+  session when a frame isn't answered whole. The real card's answer time decides where it settles.
+- The menu core with speeds builds with timing met (worst setup slack +0.270 ns).
 
 ### The card only when a save is loaded or saved (like a PS1)
 
