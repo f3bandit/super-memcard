@@ -25,6 +25,7 @@ static const struct { const char *sys; const char *lr[3]; int disc; } MAP[] = {
 	{ "SMS",       { "Sega - Master System - Mark III", "Sega - Game Gear", "Sega - SG-1000" }, 0 },
 	{ "TGFX16",    { "NEC - PC Engine - TurboGrafx 16", "NEC - PC Engine SuperGrafx" }, 0 },
 	{ "GAMEBOY",   { "Nintendo - Game Boy", "Nintendo - Game Boy Color" }, 0 },
+	{ "GBC",       { "Nintendo - Game Boy Color", "Nintendo - Game Boy" }, 0 },   /* Console Mode's own folder */
 	{ "GBA",       { "Nintendo - Game Boy Advance" }, 0 },
 	{ "Jaguar",    { "Atari - Jaguar" }, 0 },
 };

@@ -17,7 +17,7 @@
 #include <unistd.h>
 
 const char *const smc_console_systems[] = {
-    "NES", "SNES", "N64", "GAMEBOY", "GBA", "SMS", "Genesis", "MegaDrive", "MegaCD", "S32X", "Saturn",
+    "NES", "SNES", "N64", "GAMEBOY", "GBC", "GBA", "SMS", "Genesis", "MegaDrive", "MegaCD", "S32X", "Saturn",
     "TGFX16", "Jaguar", "NEOGEO", "PSX", NULL,
 };
 

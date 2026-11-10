@@ -173,7 +173,7 @@ int smc_game_header_id(const char *sys, const char *path, char id[65], char titl
         rc = sms(f, id, title);
     else if (!strcmp(sys, "SNES"))
         rc = snes(f, id, title);
-    else if (!strcmp(sys, "GAMEBOY"))
+    else if (!strcmp(sys, "GAMEBOY") || !strcmp(sys, "GBC")) /* Console Mode keeps Color saves apart (GBC) */
         rc = gameboy(f, id, title);
     fclose(f);
     if (rc == 0) {

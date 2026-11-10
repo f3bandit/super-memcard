@@ -90,10 +90,15 @@ static void t_sync_to_card_then_unchanged(void) {
     CHECK_EQ(read_file_at("SuperMemCard/SNES/Card1/Super Metroid (USA)/icon.bin", 0, magic, 4), 0);
     CHECK(strcmp(magic, "SMIC") == 0);
     CHECK_EQ(file_size("SuperMemCard/N64/Card1/Super Mario 64 (USA)/icon.bin"), 168);
+    /* a PS1 save carries its own icons: no default one */
+    put_save(0, "PSX/Final Fantasy VII (USA).sav", sA, 8192);
+    CHECK_EQ(run_sync(0).pushed, 1);
+    CHECK_EQ(file_size("SuperMemCard/PSX/Card1/Final Fantasy VII (USA)/save.sav"), 8192);
+    CHECK_EQ(file_size("SuperMemCard/PSX/Card1/Final Fantasy VII (USA)/icon.bin"), -1);
     r = run_sync(0);
     CHECK_EQ(r.pushed, 0);
     CHECK_EQ(r.pulled, 0);
-    CHECK_EQ(r.unchanged, 3);
+    CHECK_EQ(r.unchanged, 4);
     /* a changed save goes to the card as the next generation */
     sA[100] ^= 0xFF;
     put_save(0, "SNES/Super Metroid (USA).sav", sA, sizeof(sA));

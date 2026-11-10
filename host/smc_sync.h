@@ -41,7 +41,7 @@ struct smc_sync_report {
     int deleted;  /* saves deleted on another SuperStation, deleted here too (kept aside) */
 };
 
-/* The 15 console cores' save folders (cores/cores.tsv; names from each core's CONF_STR). */
+/* The console cores' save folders (cores/cores.tsv; names from each core's CONF_STR), and Console Mode's GBC. */
 extern const char *const smc_console_systems[];
 
 /* The save folder (system) of a game core about to be loaded, from its .rbf path ("_Console/SNES_20250101.rbf"

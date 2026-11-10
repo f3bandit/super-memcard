@@ -41,6 +41,7 @@ SYSTEMS = [
     ("SNES",      "cart",   (176, 176, 190), (110, 80, 170),  "SNES"),
     ("N64",       "cart",   (70, 70, 80),    (240, 200, 40),  "N64"),
     ("GAMEBOY",   "handheld", (190, 190, 180), (60, 110, 60), "GB"),
+    ("GBC",       "handheld", (120, 60, 170), (60, 110, 60),  "GBC"),   # Console Mode keeps Color saves apart
     ("GBA",       "wide",   (90, 70, 170),   (60, 110, 60),   "GBA"),
     ("SMS",       "cart",   (40, 40, 44),    (220, 50, 50),   "SMS"),
     ("Genesis",   "cart",   (36, 36, 40),    (240, 200, 60),  "GEN"),
@@ -51,8 +52,9 @@ SYSTEMS = [
     ("TGFX16",    "card",   (230, 230, 225), (220, 120, 30),  "TG16"),
     ("Jaguar",    "cart",   (40, 40, 44),    (220, 40, 40),   "JAG"),
     ("NEOGEO",    "cart",   (40, 40, 48),    (230, 200, 60),  "NEO"),
-    ("PSX",       "disc",   (160, 165, 185), (60, 60, 70),    "PS1"),
 ]
+# No PSX: a PS1 save carries its own icon (its memory card directory) and Console Mode already shows it.
+# (N64 saves have none of their own: a Controller Pak note is a game code and a name, EEPROM/SRAM bare data.)
 
 OUTLINE = (16, 16, 20)
 WHITE = (240, 240, 240)
