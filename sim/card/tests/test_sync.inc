@@ -322,8 +322,8 @@ static void t_sync_core_system_names(void) {
 static void t_sync_mgl_setname(void) {
     char p[400];
     struct smc_mgl m;
+    sync_setup();
     snprintf(p, sizeof(p), "%s/gbc.mgl", ss[0]);
-    mkdir(ss[0], 0755);
     FILE *f = fopen(p, "w");
     CHECK(f);
     fputs("<mistergamedescription>\n\t<rbf>_Console/Gameboy</rbf>\n\t<setname>GBC</setname>\n"
