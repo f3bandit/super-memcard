@@ -73,9 +73,13 @@ Looked at with backups first (saves, config, `ConsoleMode/memcards`, binaries' c
 - A game started from an MGL by `/dev/MiSTer_cmd` writes only `/tmp/CORENAME` and `/tmp/RBFNAME`; the game is in
   the MGL (as Phosphor's hooks read it). `FULLPATH`/`ACTIVEGAME`/`last_launch` are written by the frontend's own
   launches.
-- `@memcard read 1` written to `/dev/MiSTer_RR_cmd` by hand got no answer (no `/tmp/consolemode_memcard.txt`):
-  the screen's own request isn't just that line. Not looked into further (nothing taken apart); the Memory Cards
-  screen itself is the baseline to use.
+- The card commands are SS1 Tool's (`memcard_cmports.go`, written for Console Mode 2.0): `@memcard read
+  <port>|<file>|<frames>` and `@memcard write <port>|<new file>|<current file>` on `/dev/MiSTer_RR_cmd`, answers in
+  `/tmp/consolemode_memcard.txt` (`reading 1 n total`, then `done read 1 <file>` or `error ...`). (A bare
+  `@memcard read 1` gets no answer.) Baseline with the Sony card in port 1: the whole card read in **17 s**, twice,
+  both reads identical (`MC` header): ~17 ms a sector, ~7.5 KB/s (Phosphor's raw frames: ~9-11 ms a sector at a
+  PS1's speed). That's the speed Console Mode's menu core gets today; Super MemCard's transfers there would be
+  measured the same way.
 
 ## Open points for Taki
 
