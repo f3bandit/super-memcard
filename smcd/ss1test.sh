@@ -89,12 +89,14 @@ EOF
     echo "== smcd.log"; cat /tmp/smcd.log
     ;;
 stop)
+    # Restart the SS1, never Console Mode's Main by hand: started again on top of the menu core the test Main
+    # loaded (the stock one), Console Mode has no front-port card reader ("the menu core has no memory card
+    # support") and a second frontend runs. A restart brings everything back as it boots.
     killall smcd vcardd 2>/dev/null
-    kill $(main_pid) 2>/dev/null; sleep 1
     mountpoint -q /media/fat/MiSTer.ini && umount /media/fat/MiSTer.ini
-    rm -f /tmp/smcd.sock /tmp/smc_frontport.sock /tmp/smc_vc.sock
+    rm -rf /tmp/smcd.sock /tmp/smc_frontport.sock /tmp/smc_vc.sock /tmp/smc_saves /tmp/smc_state /tmp/smc_lists /tmp/smc_sd
     sync
-    cd / && setsid /media/fat/ConsoleMode/MiSTer_ConsoleMode ConsoleMode/menu_ConsoleMode.rbf </dev/null >/dev/null 2>&1 &
-    sleep 3; ps -o pid,args | grep -E 'MiSTer|smcd|vcardd' | grep -v grep
+    (sleep 2; reboot -f) >/dev/null 2>&1 &
+    echo "restarting the SS1"
     ;;
 esac
