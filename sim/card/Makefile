@@ -39,7 +39,7 @@ B       ?= build
 FW_OBJ  = $(addprefix $(B)/fw/,$(FW_SRC:.c=.o))
 HOST_OBJ = $(addprefix $(B)/,$(HOST_SRC:.c=.o))
 
-all: $(B)/test_card $(B)/vcardd $(if $(filter 1,$(SMC)),$(B)/smccli)
+all: $(B)/test_card $(B)/vcardd $(if $(filter 1,$(SMC)),$(B)/smccli $(B)/smcd $(B)/shimtest)
 
 # for the SS1 (armv7, static so it doesn't depend on MiSTer Linux's glibc):
 #   make ss1    ->  build-ss1/vcardd, build-ss1/test_card
@@ -81,6 +81,19 @@ $(B)/smccli.o: ../../tools/smccli/smccli.c
 # the frontend's commands from a shell, against vcardd (tools/smccli)
 $(B)/smccli: $(B)/smccli.o $(B)/smc_vcard.o $(B)/smc_host.o $(B)/smc_sync.o $(B)/smc_icons.o $(B)/smc_ident.o $(B)/smc_gameid.o $(B)/smc_gamedb.o
 	$(CC) $^ $(LDFLAGS) $(LDFLAGS_STATIC) -o $@
+
+$(B)/smcd.o: ../../smcd/smcd.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -I../../host -fno-pie -c $< -o $@
+
+# Super MemCard on the SuperStation (smcd/): the program beside Main
+$(B)/smcd: $(B)/smcd.o $(B)/smc_vcard.o $(B)/smc_host.o $(B)/smc_sync.o $(B)/smc_icons.o $(B)/smc_ident.o $(B)/smc_gameid.o $(B)/smc_gamedb.o
+	$(CC) $^ $(LDFLAGS) $(LDFLAGS_STATIC) -o $@
+
+# test only: main/smc_shim.cpp as Main runs it, with vcardd for the front ports
+CXX ?= g++
+$(B)/shimtest: ../../smcd/shimtest.cpp ../../main/smc_shim.cpp $(B)/smc_vcard.o $(B)/smc_host.o
+	$(CXX) -O1 -g -no-pie -I../../smcd/teststub -I../../main -I../../host $^ -o $@
 
 $(B)/tests/test_card.o: tests/test_smc.inc tests/test_sync.inc
 

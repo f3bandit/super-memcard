@@ -1,0 +1,73 @@
+#!/bin/sh
+# smcd and the Main shim end to end on a PC: the frontend's commands and Main's LAUNCH/MENU go to smcd, its card frames
+# go through the shim (smc_shim.cpp, as Main runs it) to the virtual card (vcardd). Needs: make -C sim/card SMC=1.
+# Copyright (C) 2026 f3bandit. All rights reserved.
+set -e
+here=$(cd "$(dirname "$0")" && pwd)
+B=${B:-$here/../sim/card/build-smc}
+w=$(mktemp -d)
+pids=
+trap 'for p in $pids; do kill $p 2>/dev/null; done; wait 2>/dev/null; [ -n "$KEEP" ] && echo "kept $w" || rm -rf "$w"' EXIT
+fail=0
+ok() { echo "ok   $1"; }
+bad() { echo "FAIL $1"; fail=1; }
+ask() { python3 - "$1" <<'EOF'
+import socket, sys
+s = socket.socket(socket.AF_UNIX); s.connect("/tmp/smcd.sock"); s.settimeout(120)
+s.sendall((sys.argv[1] + "\n").encode()); buf = b""
+while not (buf.endswith(b"END\n") or buf.endswith(b"DONE\n")):
+    d = s.recv(4096)
+    if not d: break
+    buf += d
+print(buf.decode(), end="")
+EOF
+}
+
+mkdir -p "$w/sd" "$w/saves/NES" "$w/games/NES" "$w/state"
+# a NES game (iNES header + 16 KB) and its save
+python3 -c "import os,sys; open(sys.argv[1],'wb').write(b'NES\x1a\x01\x00'+bytes(10)+os.urandom(16384))" "$w/games/NES/Test Game.nes"
+python3 -c "import os,sys; open(sys.argv[1],'wb').write(os.urandom(8192))" "$w/saves/NES/Test Game.sav"
+printf '<mistergamedescription><rbf>_Console/NES</rbf><file delay="1" type="f" index="0" path="%s/games/NES/Test Game.nes"/></mistergamedescription>' "$w" > "$w/game.mgl"
+
+"$B/vcardd" "$w/sd" "$w/vc.sock" > "$w/vcardd.log" 2>&1 & pids="$pids $!"
+for i in $(seq 50); do [ -S "$w/vc.sock" ] && break; sleep 0.1; done
+rm -f /tmp/smcd.log
+"$B/smcd" -S "$w/saves" -T "$w/state" -g "$w/games" -d "$w/lists" -v "$w/none.sock" & pids="$pids $!"
+for i in $(seq 50); do [ -S /tmp/smcd.sock ] && break; sleep 0.1; done
+
+# 1. no Main passing frames yet: the frontend's command finds no card
+[ "$(ask HELLO | head -1)" = nocard ] && ok "no Main shim: no card" || bad "no Main shim: no card"
+
+# Main (the shim) passes frames from here on
+"$B/shimtest" "$w/vc.sock" serve 300 > "$w/shim.log" 2>&1 & shim=$!; pids="$pids $shim"
+sleep 0.5
+ask HELLO | grep -q "^card .* version 2" && ok "HELLO through the shim" || bad "HELLO through the shim"
+
+# 2. the memory manager's Read card
+r=$(ask READ)
+echo "$r" | grep -q "^read ok .*pushed=1" && ok "READ: the save to the card" || bad "READ: $r"
+ask LIST\ NES | grep -q "Test Game" && ok "LIST NES shows the game" || bad "LIST NES"
+
+# 3. Main loads the game: LAUNCH (the card's copy is the same: nothing to load), then the game saves while it runs
+kill $shim; wait $shim 2>/dev/null || true
+"$B/shimtest" "$w/vc.sock" launch _Console/NES_20260603.rbf "$w/game.mgl" > "$w/shim2.log" 2>&1 & shim=$!; pids="$pids $shim"
+for i in $(seq 100); do grep -q "launch returned" "$w/shim2.log" && break; sleep 0.1; done
+grep -q "launch returned" "$w/shim2.log" && ok "LAUNCH: Main waited for smcd, then went on" || bad "LAUNCH"
+for i in $(seq 20); do grep -A4 "launch _Console/NES" /tmp/smcd.log | grep -q "game sync done" && break; sleep 0.1; done
+grep -q "NES core: its card" /tmp/smcd.log && grep -A4 "launch _Console/NES" /tmp/smcd.log | grep -q "game sync done" && ok "LAUNCH: NES game synced before the core" || bad "LAUNCH: game sync"
+sleep 1.2
+python3 -c "import os,sys; open(sys.argv[1],'wb').write(os.urandom(8192))" "$w/saves/NES/Test Game.sav"
+for i in $(seq 60); do grep -q "to card.*Test Game" /tmp/smcd.log && [ "$(grep -c 'to card.*Test Game' /tmp/smcd.log)" -ge 2 ] && break; sleep 0.25; done
+[ "$(grep -c 'to card.*Test Game' /tmp/smcd.log)" -ge 2 ] && ok "in game: the new save to the card as soon as it settled" || bad "in game save"
+f=$(find "$w/sd/SuperMemCard/NES" -name 'save.sav' | head -1)
+cmp -s "$f" "$w/saves/NES/Test Game.sav" && ok "the card has the game's latest save" || bad "card's save differs"
+
+# 4. back in the menu: MENU (nothing changed since: nothing to do), the card's buttons are the PS1 card's again
+kill $shim; wait $shim 2>/dev/null || true
+"$B/shimtest" "$w/vc.sock" menu > "$w/shim3.log" 2>&1 & shim=$!; pids="$pids $shim"
+sleep 3
+grep -q "menu told" "$w/shim3.log" && ok "MENU told" || bad "MENU"
+grep -q "sync stopped with an error" /tmp/smcd.log && bad "sync errors in the log" || ok "no sync errors"
+
+echo "--- smcd.log"; cat /tmp/smcd.log | cut -c1-160
+[ $fail = 0 ] && echo "ALL PASSED" || { echo FAILED; exit 1; }
