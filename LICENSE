@@ -40,5 +40,7 @@ FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more de
   sd2psXtd (firmware the card runs, sim/card builds it): GPL-3.0, its authors.
   Monocypher 4.0.2 (third_party/monocypher, the card identity's signatures, in the firmware and in
   smcd): public domain (CC0) or 2-clause BSD, Loup Vaillant and its contributors.
+  stb_image 2.30 (third_party/stb, reading box art for save icons, in smcd): public domain or MIT,
+  Sean Barrett.
   MiSTer-devel cores and Main_MiSTer: their own licences, their authors.
   libretro-database game lists: fetched at run time, not included, used under their own terms.
