@@ -922,16 +922,16 @@ static int sync_game(const struct smc_bus *b, const char *sys, int card, const c
     size_t ilen;
     const uint8_t *icon = smc_system_icon(sys, &ilen);
     static uint8_t own[8 + 32 + 3 * 128];
-    bool own_icon = false;
+    bool has_own = false;
     if (!has_icon) {
         size_t l = own_icon(sys, dir, local_game, own, sizeof(own));
         if (l) {
             icon = own;
             ilen = l;
-            own_icon = true;
+            has_own = true;
         }
     }
-    if (!has_icon && (rep->pushed > pushed || own_icon) && icon) {
+    if (!has_icon && (rep->pushed > pushed || has_own) && icon) {
         if (smc_select_card(b, sys, id, card, NULL) < 0 || smc_write_file(b, ICON_BIN, icon, (uint32_t)ilen, 1) != SMC_OK)
             logf_("couldn't put the icon on the card: %s/%s", sys, local_game);
     }
