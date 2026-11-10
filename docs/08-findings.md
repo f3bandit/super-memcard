@@ -18,6 +18,13 @@ the design depends on. Newest first. Each entry says where it came from so it ca
   clock. The menu core's results are identical (phosphor-menu's simulation, before and after); the bit clock on the
   wire measured in the bus simulation: 2.0 us half-bits for PS1 frames, 0.5 us at 1 MHz, at 33, 42.95, 50, 85.9 and
   100 MHz.
+- **On the SS1 (Console Mode's SD card):** the NES core built with the driver (`NES_49a0a66`, Quartus 17.0.2 in
+  Actions, timing met, 79% of the logic) loaded under Phosphor's Main; Main found the front ports in the game core
+  (PH_ID) and read sector 0 of the Sony PS1 card in port 1 through it: 140 bytes, `MC`, checksum, `47`; port 2
+  (empty) answered nothing. The driver works in a game core on the real hardware.
+- The same core built with and without the driver, each loaded by Console Mode's own Main and played: both look and
+  play the same. (A bad picture seen first came from starting a core by hand with Phosphor's test Main on Console
+  Mode's SD card, not from the core.)
 
 ### Console Mode 2.0-RC-1's SD card: every save onto the card and back
 
