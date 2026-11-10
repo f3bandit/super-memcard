@@ -34,7 +34,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "frame_timer.h"
 #include "fpga_io.h"
 #include "phosphor.h"
-#include "supermemcard.h"
+#include "smc_shim.h"
 #include "gameport.h"
 #include "hybrid.h"
 #include "scheduler.h"
@@ -105,7 +105,7 @@ int main(int argc, char *argv[])
 	achievements_init();
 
 	physical_disc_launch_startup();
-	supermemcard_menu_start();             // Phosphor: Super MemCard phase 1 (supermemcard.cpp)
+	smc_shim_menu_start();             // Phosphor: Super MemCard phase 1 (supermemcard.cpp)
 
 #ifdef USE_SCHEDULER
 	scheduler_init();

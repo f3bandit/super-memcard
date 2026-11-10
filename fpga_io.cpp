@@ -11,7 +11,7 @@
 #include <sys/stat.h>
 #include <sys/wait.h>
 
-#include "supermemcard.h"
+#include "smc_shim.h"
 #include "fpga_io.h"
 #include "phosphor.h"
 #include "gameport.h"
@@ -446,7 +446,7 @@ int fpga_load_rbf(const char *name, const char *cfg, const char *xml)
 	OsdDisable();
 	gameport_stop();                 // Phosphor: a game port's game, a hybrid core's engine stopped before the
 	hybrid_stop();                   // fabric is reset and reprogrammed (one touching it then can wedge it)
-	if (strcasecmp(name, "menu.rbf")) supermemcard_core_start(name, xml);   // Phosphor: Super MemCard, the system about to run
+	if (strcasecmp(name, "menu.rbf")) smc_shim_core_start(name, xml);   // Phosphor: Super MemCard, the system about to run
 	static char path[1024];
 	int ret = 0;
 

@@ -71,7 +71,7 @@
 // functions, from Main's UI loop.
 // Copyright (C) 2026 f3bandit. GPL-3.0 (see LICENSE).
 #include "phosphor.h"
-#include "supermemcard.h"
+#include "smc_shim.h"
 #include "gameport.h"
 #include "hybrid.h"
 #include "lib/md5/md5.h"
@@ -1157,7 +1157,7 @@ void phosphor_poll(void)
 
 	card_poll();
 	pad_seq_poll();
-	supermemcard_poll();                // Super MemCard phase 2: a game's save to the card as soon as it saves
+	smc_shim_poll();                // Super MemCard phase 2: a game's save to the card as soon as it saves
 	map_poll();
 	phosphor_disc_poll(event_all);
 	// MiSTer's menu (a long press) or Main itself took the screen back from Phosphor's in-game menu
