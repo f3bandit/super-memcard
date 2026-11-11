@@ -7,11 +7,11 @@
  *
  *   N64          the 4-character game code in the header             NSME
  *   GBA          the 4-character game code in the header             AMTE
- *   Genesis, MegaDrive, S32X   the product number in the header      GM 00001009-00
+ *   Genesis, MegaDrive         the product number in the header      GM 00001009-00
  *   SMS          the product code in the TMR SEGA header             SMS-7069
  *   PSX, Saturn, MegaCD        the disc's product code               SLUS-00594, T-12705H
  *   SNES, GAMEBOY  the 4-character game code of later carts          SNES-AXXE, GB-AXXE
- *   everything else (NES, TurboGrafx-16, Jaguar, older carts)        CRC-1A2B3C4D
+ *   everything else (NES, TurboGrafx-16, older carts)                CRC-1A2B3C4D
  *
  * Copyright (C) 2026 f3bandit. */
 #pragma once

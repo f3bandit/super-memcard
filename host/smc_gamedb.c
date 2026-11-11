@@ -20,7 +20,6 @@ static const struct { const char *sys; const char *lr[3]; int disc; } MAP[] = {
 	{ "SNES",      { "Nintendo - Super Nintendo Entertainment System", "Nintendo - Satellaview" }, 0 },
 	{ "Genesis",   { "Sega - Mega Drive - Genesis" }, 0 },
 	{ "MegaDrive", { "Sega - Mega Drive - Genesis" }, 0 },
-	{ "S32X",      { "Sega - 32X" }, 0 },
 	{ "N64",       { "Nintendo - Nintendo 64" }, 0 },
 	{ "SMS",       { "Sega - Master System - Mark III", "Sega - Game Gear", "Sega - SG-1000" }, 0 },
 	{ "TGFX16",    { "NEC - PC Engine - TurboGrafx 16", "NEC - PC Engine SuperGrafx" }, 0 },
@@ -28,7 +27,6 @@ static const struct { const char *sys; const char *lr[3]; int disc; } MAP[] = {
 	{ "GBC",       { "Nintendo - Game Boy Color", "Nintendo - Game Boy" }, 0 },   /* Console Mode's own folder */
 	{ "GBA",       { "Nintendo - Game Boy Advance" }, 0 },
 	{ "GameGear",  { "Sega - Game Gear", "Sega - Master System - Mark III" }, 0 },   /* Console Mode's Game Gear.mgl */
-	{ "Jaguar",    { "Atari - Jaguar" }, 0 },
 };
 #define NMAP (int)(sizeof(MAP) / sizeof(MAP[0]))
 

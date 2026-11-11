@@ -34,11 +34,11 @@ the identity above.
 |---|---|---|
 | N64 | 4-character game code (header 0x3B), any byte order | `NSME` |
 | GBA | 4-character game code (0xAC) | `AMTE` |
-| Genesis, MegaDrive, S32X | product number (0x180) | `GM 00001009-00` |
+| Genesis, MegaDrive | product number (0x180) | `GM 00001009-00` |
 | SMS, GameGear | product code in the TMR SEGA header | `SMS-7069` (Game Gear: `GG-…`) |
 | SNES, GAMEBOY | 4-character game code of later carts (checked header) | `SNES-AXXE`, `GB-AXXE` |
 | PSX, Saturn, MegaCD | disc product code | `SLUS-00594` |
-| the rest (NES, TurboGrafx-16, Jaguar, older carts) | CRC32 as No-Intro counts it | `CRC-1A2B3C4D` |
+| the rest (NES, TurboGrafx-16, older carts) | CRC32 as No-Intro counts it | `CRC-1A2B3C4D` |
 | no ROM found for the save | the save's name, as before | |
 
 Neo Geo saves are already named after the game's set name, so they stay as they are. Homebrew's placeholder product

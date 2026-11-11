@@ -47,10 +47,8 @@ SYSTEMS = [
     ("Genesis",   "cart",   (36, 36, 40),    (240, 200, 60),  "GEN"),
     ("MegaDrive", "cart",   (36, 36, 40),    (70, 140, 230),  "MD"),
     ("MegaCD",    "disc",   (180, 190, 210), (70, 140, 230),  "MCD"),
-    ("S32X",      "cart",   (50, 50, 56),    (230, 70, 60),   "32X"),
     ("Saturn",    "disc",   (170, 175, 195), (90, 90, 110),   "SAT"),
     ("TGFX16",    "card",   (230, 230, 225), (220, 120, 30),  "TG16"),
-    ("Jaguar",    "cart",   (40, 40, 44),    (220, 40, 40),   "JAG"),
     ("NEOGEO",    "cart",   (40, 40, 48),    (230, 200, 60),  "NEO"),
     ("GameGear",  "wide",   (40, 40, 46),    (50, 90, 160),   "GG"),    # Console Mode's Game Gear.mgl (SMS core)
 ]
@@ -202,8 +200,17 @@ def main():
           "        }",
           "    return NULL;",
           "}", ""]
-    with open(os.path.join(ROOT, "host", "smc_icons.c"), "w") as f:
+    out = os.path.join(ROOT, "host", "smc_icons.c")
+    # the hand-written part of the file (from its marker on) is kept as it is
+    keep = ""
+    if os.path.exists(out):
+        old = open(out).read()
+        at = old.find("/* ---- written by hand")
+        if at >= 0:
+            keep = "\n" + old[at:]
+    with open(out, "w") as f:
         f.write("\n".join(c))
+        f.write(keep)
     print(f"{len(SYSTEMS)} icons, {len(b)} bytes each (icon.bin)")
 
 

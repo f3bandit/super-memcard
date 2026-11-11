@@ -17,8 +17,8 @@
 #include <unistd.h>
 
 const char *const smc_console_systems[] = {
-    "NES", "SNES", "N64", "GAMEBOY", "GBC", "GBA", "SMS", "Genesis", "MegaDrive", "MegaCD", "S32X", "Saturn",
-    "TGFX16", "Jaguar", "NEOGEO", "PSX", "GameGear", NULL,
+    "NES", "SNES", "N64", "GAMEBOY", "GBC", "GBA", "SMS", "Genesis", "MegaDrive", "MegaCD", "Saturn",
+    "TGFX16", "NEOGEO", "PSX", "GameGear", NULL,   /* not 32X or Jaguar: hardly a game of theirs saves */
 };
 
 /* a save folder's name for a screen */
@@ -26,8 +26,8 @@ const char *smc_system_title(const char *sys) {
     static const struct { const char *sys, *title; } t[] = {
         {"NES", "NES"}, {"SNES", "SNES"}, {"N64", "Nintendo 64"}, {"GAMEBOY", "Game Boy"}, {"GBC", "Game Boy Color"},
         {"GBA", "Game Boy Advance"}, {"SMS", "Master System"}, {"GameGear", "Game Gear"}, {"Genesis", "Genesis"},
-        {"MegaDrive", "Mega Drive"}, {"MegaCD", "Mega-CD"}, {"S32X", "32X"}, {"Saturn", "Saturn"},
-        {"TGFX16", "TurboGrafx-16"}, {"Jaguar", "Jaguar"}, {"NEOGEO", "Neo Geo"}, {"PSX", "PlayStation"},
+        {"MegaDrive", "Mega Drive"}, {"MegaCD", "Mega-CD"}, {"Saturn", "Saturn"},
+        {"TGFX16", "TurboGrafx-16"}, {"NEOGEO", "Neo Geo"}, {"PSX", "PlayStation"},
     };
     for (size_t i = 0; i < sizeof(t) / sizeof(t[0]); i++)
         if (!strcmp(t[i].sys, sys))
@@ -38,8 +38,8 @@ const char *smc_system_title(const char *sys) {
 /* core (the .rbf's name before its date) -> its save folder (cores/cores.tsv; Main's names, 08) */
 static const struct { const char *core, *sys; } core_systems[] = {
     {"NES", "NES"}, {"SNES", "SNES"}, {"N64", "N64"}, {"Gameboy", "GAMEBOY"}, {"GBA", "GBA"}, {"SMS", "SMS"},
-    {"Genesis", "Genesis"}, {"MegaDrive", "MegaDrive"}, {"MegaCD", "MegaCD"}, {"S32X", "S32X"},
-    {"Saturn", "Saturn"}, {"TurboGrafx16", "TGFX16"}, {"Jaguar", "Jaguar"}, {"NeoGeo", "NEOGEO"}, {"PSX", "PSX"},
+    {"Genesis", "Genesis"}, {"MegaDrive", "MegaDrive"}, {"MegaCD", "MegaCD"},
+    {"Saturn", "Saturn"}, {"TurboGrafx16", "TGFX16"}, {"NeoGeo", "NEOGEO"}, {"PSX", "PSX"},
 };
 
 const char *smc_core_system(const char *rbf) {

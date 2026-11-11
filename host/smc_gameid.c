@@ -167,7 +167,7 @@ int smc_game_header_id(const char *sys, const char *path, char id[65], char titl
         rc = n64(f, id, title);
     else if (!strcmp(sys, "GBA"))
         rc = gba(f, id, title);
-    else if (!strcmp(sys, "Genesis") || !strcmp(sys, "MegaDrive") || !strcmp(sys, "S32X"))
+    else if (!strcmp(sys, "Genesis") || !strcmp(sys, "MegaDrive"))
         rc = sega16(f, id, title);
     else if (!strcmp(sys, "SMS"))
         rc = sms(f, id, title, "SMS");
