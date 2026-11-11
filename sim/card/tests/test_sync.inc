@@ -377,6 +377,47 @@ static void t_sync_osd_pick_a_save(void) {
     CHECK_EQ(smc_core(&vbus, "SNES", false), 1);
 }
 
+/* the memory manager's card picker: a system's cards (games, in use), and switching the system to one, blank or not */
+struct cards_seen { int n, card[8], games[8], current[8]; };
+static void cards_cb(int card, int games, uint32_t newest, bool current, void *ctx) {
+    (void)newest;
+    struct cards_seen *s = ctx;
+    if (s->n < 8) {
+        s->card[s->n] = card;
+        s->games[s->n] = games;
+        s->current[s->n] = current;
+        s->n++;
+    }
+}
+static void t_sync_card_picker(void) {
+    sync_setup();
+    struct smc_sync_cfg cfg = cfg_of(0);
+    put_save(0, "SNES/Final Fantasy VI.srm", sA, sizeof(sA));
+    put_save(0, "SNES/Chrono Trigger.srm", sB, sizeof(sB));
+    CHECK_EQ(run_sync(0).pushed, 2);
+    struct cards_seen cs = {0};
+    CHECK_EQ(smc_system_cards(&vbus, &cfg, "SNES", cards_cb, &cs), 1);
+    CHECK(cs.card[0] == 1 && cs.games[0] == 2 && cs.current[0]);
+    /* a blank card: the system's saves go to card 1 first, and the games start with none */
+    struct smc_sync_report r;
+    memset(&r, 0, sizeof(r));
+    CHECK_EQ(smc_use_card(&vbus, &cfg, "SNES", "", 3, &r), 0);
+    CHECK(get_save(0, "SNES/Final Fantasy VI.srm", got, sizeof(got)) < 0 && get_save(0, "SNES/Chrono Trigger.srm", got, sizeof(got)) < 0);
+    memset(&cs, 0, sizeof(cs));
+    CHECK_EQ(smc_system_cards(&vbus, &cfg, "SNES", cards_cb, &cs), 2);
+    CHECK(cs.card[0] == 1 && cs.games[0] == 2 && !cs.current[0] && cs.card[1] == 3 && cs.games[1] == 0 && cs.current[1]);
+    /* back to card 1: both saves here again */
+    memset(&r, 0, sizeof(r));
+    CHECK_EQ(smc_use_card(&vbus, &cfg, "SNES", "", 1, &r), 0);
+    CHECK_EQ(get_save(0, "SNES/Final Fantasy VI.srm", got, sizeof(got)), sizeof(sA));
+    CHECK(!memcmp(got, sA, sizeof(sA)));
+    CHECK_EQ(get_save(0, "SNES/Chrono Trigger.srm", got, sizeof(got)), sizeof(sB));
+    /* another system isn't touched */
+    memset(&cs, 0, sizeof(cs));
+    CHECK_EQ(smc_system_cards(&vbus, &cfg, "NES", cards_cb, &cs), 1);
+    CHECK(cs.games[0] == 0 && cs.current[0] && cs.card[0] == 1);
+}
+
 /* a Saturn game's discs share one save, named as Main names it (saturn_get_save_without_disk) */
 static void t_sync_saturn_disc_save_name(void) {
     static const char *const t[][2] = {
@@ -956,6 +997,7 @@ static void t_sync_like_a_ps1(void) {
     {"sync: a save's name on a card (Rename): kept on the card only", t_sync_save_names, true, NULL}, \
     {"sync: the first switch here: the saves stay on the old card", t_sync_first_switch_keeps_saves_on_the_old_card, true, NULL}, \
     {"sync: a Saturn game's discs: one save, Main's name", t_sync_saturn_disc_save_name, true, NULL}, \
+    {"sync: the memory manager's card picker: a system's cards, a blank one", t_sync_card_picker, true, NULL}, \
     {"sync: a PSX card image's own PS1 icon on the card", t_sync_psx_own_icon, true, NULL}, \
     {"sync: saves to the card, then nothing to do, then a change", t_sync_to_card_then_unchanged, true, NULL}, \
     {"sync: a reinstall gets every save back", t_sync_reinstall_gets_everything_back, true, NULL}, \

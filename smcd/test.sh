@@ -158,6 +158,30 @@ r=$(ask "PLAY NES	1	Test Game" | head -1)
 ask SECTION | grep -q "^game	NES	.*	Main run$" && ok "SECTION shows the name too" || bad "SECTION name: $(ask SECTION)"
 [ ! -e "$w/saves/NES/label.txt" ] && ok "the name never in the saves folder" || bad "label.txt in the saves"
 
+# 4d. the memory manager's card picker: port picked, then a system's cards; a blank card, then back
+two() { python3 - "$1" "$2" <<'PY'
+import socket, sys
+s = socket.socket(socket.AF_UNIX); s.connect("/tmp/smcd.sock"); s.settimeout(120)
+s.sendall((sys.argv[1] + "\n" + sys.argv[2] + "\n").encode()); buf = b""
+while buf.count(b"END\n") < 2:
+    d = s.recv(4096)
+    if not d: break
+    buf += d
+print(buf.decode(), end="")
+PY
+}
+r=$(two "PORT 1" "CARDS NES")
+echo "$r" | grep -q "^port 1$" && echo "$r" | grep -q "^card	1	1	[0-9]*	1$" && echo "$r" | grep -q "^new	2$" \
+    && ok "PORT 1, then CARDS NES: card 1 (1 game, in use), a blank card 2" || bad "CARDS: $r"
+[ "$(ask "PORT 3")" = "port any
+END" ] && ok "PORT 3: refused, any port" || bad "PORT 3"
+r=$(two "PORT 1" "CARD NES	2")
+echo "$r" | grep -q "^card ok 2$" && [ ! -e "$w/saves/NES/Test Game.sav" ] && ok "CARD NES 2 (blank): NES games start with no save" || bad "CARD 2: $r"
+r=$(ask "CARDS NES")
+echo "$r" | grep -q "^card	1	1	[0-9]*	0$" && echo "$r" | grep -q "^card	2	0	0	1$" && ok "CARDS: card 1 kept its save, card 2 in use" || bad "CARDS after: $r"
+[ "$(ask "CARD NES	1" | head -1)" = "card ok 1" ] && cmp -s "$w/saves/NES/Test Game.sav" "$w/first.sav" && ok "CARD NES 1: its save back" || bad "CARD 1"
+[ "$(ask "CARD PSX	2" | head -1)" = "card failed" ] && [ "$(ask "CARD NES	0" | head -1)" = "card failed" ] && ok "CARD PSX or card 0: refused" || bad "CARD refusals"
+
 # 5. a long list on the OSD page (a stand-in smcd with 30 saves): it scrolls, no row cut off or past the page
 kill $(pgrep -f "$B/smcd") 2>/dev/null || true; sleep 0.5; rm -f /tmp/smcd.sock
 python3 - <<'PY' & pids="$pids $!"

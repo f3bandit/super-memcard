@@ -71,6 +71,8 @@ driver (public builds: f3bandit/super-memcard-cores), the gamedb module (cm_modu
 |---|---|
 | Read card | `READ` |
 | the other systems' saves (a section under PSX, or a tab) | `SECTION` (or `SYSTEMS` + `LIST`) |
+| the port to read (1 or 2) | `PORT` (then the commands below, same connection) |
+| a system's card: an existing one or a new blank one | `CARDS`, `CARD` |
 | Play (a save on a card) | `PLAY` |
 | Rename (Console Mode's on-screen keyboard) | `NAME` |
 | Delete | `DELETE` |
@@ -129,6 +131,7 @@ that isn't Super MemCard, the answer is `nocard`; a Super MemCard card that isn'
 
 | command | answer lines |
 |---|---|
+| `PORT <1\|2>` | `port <n>` (`port any` for anything else): the card in that front port for the commands after it on the same connection; without it, whichever port's card answers first |
 | `HELLO` | `card <id> version <n> features <hex> free_kb <n>` |
 | `READ` | Read card, everything both ways: `read ok card=<id> pushed= pulled= unchanged= conflicts= skipped= failed= deleted=` |
 | `SECTION` | the whole "other systems" section in one answer (below); `SECTION PSX` adds the PSX core's card images |
@@ -137,8 +140,18 @@ that isn't Super MemCard, the answer is `nocard`; a Super MemCard card that isn'
 | `DELETE <sys>\t<save>` | `delete <rc>`: other SuperStations delete their copy at their next sync; nothing is lost |
 | `CONFLICTS` | saves whose two copies both changed (played on two SuperStations) |
 | `KEEP <local\|card> <sys>\t<save>` | `keep <rc>`: settles one |
+| `CARDS <sys>` | `card \t <n> \t <games> \t <newest save time> \t <in use 0\|1>` per card holding that system's saves (and the one in use), then `new \t <the first blank card>`: the **card picker** (below) |
+| `CARD <sys>\t<n>` | `card ok <n>` \| `card busy` (a game of that system is running) \| `card failed`: that system plays from card n from now on |
 | `NAME <sys>\t<card>\t<save name>\t<label>` | `name ok` \| `name nosave` \| `name failed`: the **Rename** button (below) |
 | `PLAY <sys>\t<card>\t<save name>` | `play ok <card>` \| `play notfound` \| `play psx` \| `play failed`: the **Play** button (below) |
+
+**Card picker** (in a system's section, after Read card on the port the user picked): every Super MemCard keeps up
+to 99 cards per system. The picker lists that system's cards (`CARDS`, after `PORT <n>` on the same connection): how
+many games each holds and its newest save, the one in use marked, and **New blank card**. Picking one (`CARD`) makes
+it that system's card on the card in that port from then on: this SuperStation's saves of that system go to the card
+it used first, then the picked card's come in. A blank card means its games start with no save; the old card keeps
+everything. Other systems aren't touched. It's what the card's own buttons do, from the menu. PSX keeps its card
+images as today.
 
 **Rename** (on a game's entry, per virtual card): a name the user gives that card's save of the game ("Main run",
 "Speedrun"), typed on Console Mode's own on-screen keyboard, then `NAME`. smcd keeps it on the card beside the save

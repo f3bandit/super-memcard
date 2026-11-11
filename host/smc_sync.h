@@ -96,6 +96,11 @@ int smc_game_saves(const struct smc_bus *b, const struct smc_sync_cfg *cfg, cons
 /* The name the user gave a game's save on a card (the memory manager's Rename; Console Mode's on-screen keyboard), kept
  * on the card beside it (label.txt; it goes wherever the card goes). "" clears it. Up to SMC_LABEL_MAX characters the
  * OSD can show (printable ASCII). 0 named, -2 that card has no save of the game, -1 otherwise */
+/* A system's virtual cards on the card, for the memory manager's card picker: each card holding saves of that system
+ * (how many games, its newest save's time) and the one in use (current, even when empty). Returns how many, or < 0.
+ * Switching the system to one (or to a blank one) is smc_use_card() with any game. */
+int smc_system_cards(const struct smc_bus *b, const struct smc_sync_cfg *cfg, const char *sys,
+                     void (*cb)(int card, int games, uint32_t newest, bool current, void *ctx), void *ctx);
 #define SMC_LABEL_MAX 24
 int smc_set_label(const struct smc_bus *b, const struct smc_sync_cfg *cfg, const char *sys, const char *game, int card,
                   const char *label);

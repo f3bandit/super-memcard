@@ -1670,6 +1670,38 @@ int smc_game_saves(const struct smc_bus *b, const struct smc_sync_cfg *cfg, cons
     return found;
 }
 
+int smc_system_cards(const struct smc_bus *b, const struct smc_sync_cfg *cfg, const char *sys,
+                     void (*cb)(int card, int games, uint32_t newest, bool current, void *ctx), void *ctx) {
+    struct smc_sync_report rep;
+    memset(&rep, 0, sizeof(rep));
+    int ok = begin(b, cfg, &rep);
+    if (ok <= 0)
+        return ok < 0 ? ok : -1;
+    int current = local_card(sys);
+    if (!current)
+        current = smc_core(b, sys, false);
+    int found = 0;
+    for (int card = 1; card <= SMC_CARDS_MAX; card++) {
+        int games = 0;
+        uint32_t newest = 0;
+        char id[65];
+        for (int i = 0; smc_list_card(b, sys, card, i, id) == SMC_OK; i++) {
+            struct smc_game_info gi;
+            if (smc_game_info(b, sys, card, id, &gi) != SMC_OK || !gi.files)
+                continue;   /* a game whose saves were all deleted: nothing to play from */
+            games++;
+            if (gi.time > newest)
+                newest = gi.time;
+        }
+        if (games || card == current) {
+            cb(card, games, newest, card == current, ctx);
+            found++;
+        }
+    }
+    end();
+    return found;
+}
+
 int smc_set_label(const struct smc_bus *b, const struct smc_sync_cfg *cfg, const char *sys, const char *game, int card,
                   const char *label) {
     struct smc_sync_report rep;

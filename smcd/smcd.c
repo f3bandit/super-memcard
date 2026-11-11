@@ -19,6 +19,11 @@
  *                           virtual card that has it, then game \t sys \t name and new \t <the first free card>
  *   USE <card>              (Main's OSD) play the running game with its save on that card: this SuperStation's saves go
  *                           to their card first; Main then starts the game again so it loads it. use ok <card> | failed
+ *   PORT <1|2>              (the memory manager) the card in that front port for this connection's commands
+ *   CARDS <sys>             (the memory manager's card picker) that system's cards: card \t n \t games \t newest
+ *                           \t in use, then new \t <the first blank card>
+ *   CARD <sys>\t<n>         that system plays from card n from now on (a blank one: its games start with no save):
+ *                           card ok <n> | card busy (a game of it runs) | card failed
  *   NAME <sys>\t<card>\t<save>\t<name>   (the memory manager's Rename) a name for a game's save on that card, kept on the
  *                           card; "" clears it. name ok | name nosave | name failed (too long: 24, or not printable ASCII)
  *   PLAY <sys>\t<card>\t<save>   (the memory manager's Play) start the game with its save on that card: the switch as
@@ -277,7 +282,9 @@ static void icons_to_card(struct conn *c);
 static void icon_wait(void);
 static int fetch(const char *url, const char *to);
 
-/* the card: vcardd if it runs, else the first front port whose card answers Hello. 1: a card. */
+/* the card: vcardd if it runs, else the first front port whose card answers Hello (or only the port the memory manager
+ * picked: PORT). 1: a card. */
+static int want_port;   /* 0: whichever answers; 1 or 2: the memory manager's port (PORT), for its connection */
 static int card_open_bus(struct conn *c);
 
 static int card_open(struct conn *c) {
@@ -314,7 +321,7 @@ static int card_open_bus(struct conn *c) {
     hold(c, 1);
     c->bus.frame = front_frame;
     c->bus.ctx = &c->front;
-    for (int p = 1; p <= 2; p++) {
+    for (int p = want_port ? want_port : 1; p <= (want_port ? want_port : 2); p++) {
         c->front.port = p;
         int h = smc_hello(&c->bus, SMC_HOST_MAIN, 0, &c->card);
         if (h == 1 && genuine(c)) {
@@ -323,7 +330,7 @@ static int card_open_bus(struct conn *c) {
         }
         if (h == 1)
             break;   /* a Super MemCard card, not genuine: a PS1 card (Main goes on as without Super MemCard) */
-        if (h < 0 && p == 1) {
+        if (h < 0 && p == 1 && !want_port) {
             uint8_t o[2] = {0x81, 0x60}, i[2];
             if (front_raw(&c->front, o, i, 0, 0) == -1)
                 break;   /* no front-port driver in this core */
@@ -660,6 +667,17 @@ static void section(int fd, struct conn *c, const struct smc_sync_cfg *k, int wi
     say(fd, "section\t%d\t%d\n", games, systems);
 }
 
+struct cards_list {
+    int fd;
+    bool used[100];
+};
+static void cards_cb(int card, int games, uint32_t newest, bool current, void *ctx) {
+    struct cards_list *cl = ctx;
+    if (card >= 1 && card <= 99 && games)
+        cl->used[card] = true;
+    say(cl->fd, "card\t%d\t%d\t%u\t%d\n", card, games, newest, current ? 1 : 0);
+}
+
 struct saves_list {
     int fd;
     bool used[100];
@@ -740,6 +758,33 @@ static void do_command(int fd, char *l) {
                     say(fd, "new\t%d\n", free_card);
             }
         }
+    } else if (!strncmp(l, "CARDS ", 6)) {
+        /* the memory manager's card picker: this system's cards on the card in that port, and a blank one */
+        struct cards_list cl = {fd, {0}};
+        int n = smc_system_cards(&c.bus, &k, a, cards_cb, &cl);
+        if (n >= 0) {
+            int free_card = 0;
+            for (int i = 1; i <= 99 && !free_card; i++)
+                if (!cl.used[i])
+                    free_card = i;
+            if (free_card)
+                say(fd, "new\t%d\n", free_card);
+        }
+    } else if (!strncmp(l, "CARD ", 5)) {
+        /* that system plays from this card from now on (a blank one: its games start with no save) */
+        char *tab = strchr(a, '\t');
+        int card = tab ? atoi(tab + 1) : 0;
+        if (tab)
+            *tab = 0;
+        if (!tab || card < 1 || card > 99 || !strcmp(a, "PSX"))
+            say(fd, "card failed\n");
+        else if (play_sys[0] && !strcmp(play_sys, a))
+            say(fd, "card busy\n");   /* a game of that system runs: the OSD's Saves page, not this */
+        else if (smc_use_card(&c.bus, &k, a, "", card, &rep) == 0) {
+            lg("%s: card %d picked in the memory manager", a, card);
+            say(fd, "card ok %d\n", card);
+        } else
+            say(fd, "card failed\n");
     } else if (!strncmp(l, "NAME ", 5)) {
         /* the memory manager's Rename (Console Mode's on-screen keyboard): <sys> \t <card> \t <save name> \t <name> */
         char *t1 = strchr(a, '\t'), *t2 = t1 ? strchr(t1 + 1, '\t') : NULL, *t3 = t2 ? strchr(t2 + 1, '\t') : NULL;
@@ -787,7 +832,14 @@ static void do_command(int fd, char *l) {
 
 static void handle(int fd) {
     char l[1200];
+    want_port = 0;   /* a new connection: whichever port answers, until it says PORT */
     while (read_line(fd, l, sizeof(l), 2000) == 1) {
+        if (!strncmp(l, "PORT ", 5)) {
+            int p = atoi(l + 5);
+            want_port = p == 1 || p == 2 ? p : 0;
+            say(fd, want_port ? "port %d\nEND\n" : "port any\nEND\n", want_port);
+            continue;
+        }
         if (!strncmp(l, "LAUNCH ", 7)) {
             lg("launch %s", l + 7);
             do_launch(l + 7);
