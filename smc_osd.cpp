@@ -23,7 +23,6 @@ struct save_row
 };
 
 #define ROW_W  29   // a row's characters on the OSD (its last columns stay clear)
-#define HEAD_W 9    // " Card 12 ": stays put while the rest of the selected row scrolls
 
 static save_row rows[MAX_SAVES + 1];
 static int nrows, sel, top, confirm = -1;
@@ -57,16 +56,26 @@ int smc_osd_open()
 		char sys[64], name[128], label[25] = "";
 		if (sscanf(l, "save\t%d\t%d\t%ld\t%d\t%24[^\n]", &card, &files, &t, &playing, label) >= 4 && nrows < MAX_SAVES)
 		{
-			rows[nrows] = { card, files, t, playing, 0, "" };
-			snprintf(rows[nrows].label, sizeof(rows[nrows].label), "%s", label);
-			nrows++;
+			save_row &r = rows[nrows++];
+			memset(&r, 0, sizeof(r));
+			r.card = card;
+			r.files = files;
+			r.time = t;
+			r.playing = playing;
+			snprintf(r.label, sizeof(r.label), "%s", label);
 		}
 		else if (sscanf(l, "game\t%63[^\t]\t%127[^\n]", sys, name) == 2)
 			snprintf(game, sizeof(game), "%s", name);
 		else if (sscanf(l, "new\t%d", &card) == 1)
 			new_card = card;
 	}
-	if (new_card) rows[nrows++] = { new_card, 0, 0, 0, 1, "" };   // last: rows has room for it
+	if (new_card)   // last: rows has room for it
+	{
+		save_row &r = rows[nrows++];
+		memset(&r, 0, sizeof(r));
+		r.card = new_card;
+		r.is_new = 1;
+	}
 	if (!nrows) say("No saves for it on the card");
 	for (int i = 0; i < nrows; i++) if (rows[i].playing) sel = i;
 	return 1;
@@ -83,24 +92,26 @@ static void fit()
 	if (top < 0) top = 0;
 }
 
-// a row's whole text: " Card 2  Speedrun  Oct 05 20:47  now" (the selected one scrolls when it's longer than the OSD)
-static void row_text(const save_row &r, char *s, size_t n)
+// a row's whole text: " Card 2  now  Speedrun  Oct 05 2026 20:47". Its head (" Card 2  now  ") stays put; the rest,
+// the name and the date, scrolls on the selected row when it's longer than the OSD. Returns the head's length
+static int row_text(const save_row &r, char *s, size_t n)
 {
-	if (r.is_new) { snprintf(s, n, " New save (card %d)", r.card); return; }
+	if (r.is_new) { snprintf(s, n, " New save (card %d)", r.card); return 0; }
 	char when[24] = "";
 	time_t t = (time_t)r.time;
 	if (r.files && t) strftime(when, sizeof(when), "%b %d %Y %H:%M", localtime(&t));
-	snprintf(s, n, " Card %-2d  %s%s%s%s", r.card, r.label, r.label[0] ? "  " : "", r.files ? when : "empty",
-		r.playing ? "  now" : "");
+	int head = snprintf(s, n, " Card %-2d  %s", r.card, r.playing ? "now  " : "");
+	snprintf(s + head, n - head, "%s%s%s", r.label, r.label[0] ? "  " : "", r.files ? when : "empty");
+	return head;
 }
 
 void smc_osd_scroll()
 {
 	if (sel < 0 || sel >= nrows || msg[0] || confirm == sel) return;   // the hint row speaks: the row stays still
 	char s[96];
-	row_text(rows[sel], s, sizeof(s));
+	int head = row_text(rows[sel], s, sizeof(s));
 	int len = (int)strlen(s);
-	if (len > ROW_W) ScrollText(2 + sel - top, s, HEAD_W, len, ROW_W + 1, 1);
+	if (len > ROW_W) ScrollText(2 + sel - top, s, head, len, ROW_W + 1, 1);
 }
 
 void smc_osd_print()
