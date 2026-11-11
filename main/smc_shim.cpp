@@ -206,7 +206,15 @@ static void copy_file(const char *from, const char *to)
 
 void smc_shim_core_start(const char *rbf, const char *mgl)
 {
-	if ((!is_menu() && !restarting) || !rbf) return;
+	if (!is_menu() && !restarting)
+	{
+		// a core loaded from a game's OSD, not from the menu: no LAUNCH (the game before it still had the card), and the
+		// Saves page's game is that one's no longer
+		unlink(GAME_FILE);
+		unlink(GAME_COPY);
+		return;
+	}
+	if (!rbf) return;
 	restarting = 0;
 	int again = mgl && !strcmp(mgl, GAME_COPY);   // the restart's copy: the game's file stays what it was
 	if (!again) { unlink(GAME_FILE); unlink(GAME_COPY); }
@@ -234,7 +242,7 @@ bool smc_shim_saves_available()
 	return !is_menu() && (!access(GAME_FILE, R_OK) || !access(GAME_COPY, R_OK));
 }
 
-int smc_shim_ask(const char *cmd, char *out, size_t n)
+int smc_shim_ask(const char *cmd, char *out, size_t n, int timeout_ms)
 {
 	if (!out || n < 2) return -1;
 	out[0] = 0;
@@ -246,7 +254,7 @@ int smc_shim_ask(const char *cmd, char *out, size_t n)
 	send_line(fd, l);
 	size_t len = 0;
 	int done = 0;
-	for (int t = 0; t < 2000 && !done; t++)   // 20 s: smcd reads the card through our frames meanwhile
+	for (int t = 0; t < timeout_ms / 10 && !done; t++)   // smcd reads the card through our frames meanwhile
 	{
 		serve(0);
 		struct pollfd p = { fd, POLLIN, 0 };

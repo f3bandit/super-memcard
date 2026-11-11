@@ -26,8 +26,8 @@ void smc_shim_poll();
 
 // The OSD's Saves page (smc_osd.cpp): a game whose saves are on the card is running (smcd said so at its LAUNCH)
 bool smc_shim_saves_available();
-// a command to smcd and its answer (the lines before END) in out: its length, or -1 (no smcd, or no answer in 20 s).
+// a command to smcd and its answer (the lines before END) in out: its length, or -1 (no smcd, or no answer in time).
 // Passes smcd's card frames while it waits
-int smc_shim_ask(const char *cmd, char *out, size_t n);
+int smc_shim_ask(const char *cmd, char *out, size_t n, int timeout_ms = 20000);
 // starts the running game again from its MGL (or MRA), so its core loads the save smcd just put in place
 void smc_shim_restart();

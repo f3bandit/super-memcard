@@ -48,7 +48,8 @@ void OsdSetTitle(const char *s, int) { printf("title %s\n", s); }
 void OsdWrite(unsigned char n, const char *s, unsigned char inv, unsigned char, char, int, int) {
     if (n < 16) snprintf(osd[n], sizeof(osd[n]), "%s%s", inv ? ">" : " ", s);
 }
-int OsdGetSize() { return 8; }   // a small OSD: the list scrolls sooner
+int OsdGetSize() { return 8; }
+void OsdUpdate() {}   // a small OSD: the list scrolls sooner
 void Info(const char *m, int, int, int, int) { printf("info %s\n", m); }
 int xml_load(const char *x) { printf("restart %s\n", x); menu = 0; smc_shim_core_start("_Console/NES_20260603.rbf", x); printf("relaunched\n"); return 0; }
 static void show() { for (int i = 0; i < OsdGetSize(); i++) printf("osd %d|%s\n", i, osd[i]); }

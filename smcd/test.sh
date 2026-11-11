@@ -107,7 +107,7 @@ kill $shim; wait $shim 2>/dev/null || true
     && ok "LAUNCH said DONE saves: the shim kept the game's MGL (and a copy)" || bad "the shim's game file"
 "$B/shimtest" "$w/vc.sock" osd s > "$w/osd1.log" 2>&1
 grep -q "^available 1" "$w/osd1.log" && grep -q "^osd 0|  Test Game" "$w/osd1.log" && grep -q "^osd 2|> Card 1 .* now$" "$w/osd1.log" \
-    && grep -q "^osd 3|  New save (card 2)" "$w/osd1.log" && grep -q "^info The game is running with this save" "$w/osd1.log" \
+    && grep -q "^osd 3|  New save (card 2)" "$w/osd1.log" && grep -q "^osd 7|> Already running this save" "$w/osd1.log" \
     && ok "OSD: the page (the game, card 1 being played, a new save), the one playing not picked again" || bad "OSD page: $(cat "$w/osd1.log")"
 "$B/shimtest" "$w/vc.sock" osd ds > "$w/osd2.log" 2>&1
 grep -q "Again: restart" "$w/osd2.log" && ! grep -q "^restart" "$w/osd2.log" && cmp -s "$w/saves/NES/Test Game.sav" "$w/first.sav" \

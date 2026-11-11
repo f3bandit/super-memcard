@@ -7,8 +7,7 @@
 #include <string.h>
 #include <time.h>
 
-#include "menu.h"      // Info
-#include "osd.h"       // OsdWrite, OsdSetTitle, OsdGetSize
+#include "osd.h"       // OsdWrite, OsdSetTitle, OsdGetSize, OsdUpdate
 #include "smc_shim.h"
 
 #define MAX_SAVES 100
@@ -25,6 +24,9 @@ struct save_row
 static save_row rows[MAX_SAVES + 1];
 static int nrows, sel, top, confirm = -1;
 static char game[128];
+static char msg[40];   // on the page's last row (Main's Info() pop-up doesn't show over a menu page)
+
+static void say(const char *m) { snprintf(msg, sizeof(msg), " %s", m); }
 
 bool smc_osd_available()
 {
@@ -36,11 +38,12 @@ int smc_osd_open()
 	static char ans[8192];
 	nrows = sel = top = 0;
 	confirm = -1;
-	game[0] = 0;
-	if (smc_shim_ask("SAVES", ans, sizeof(ans)) < 0) { Info("The memory card didn't answer", 2000); return 0; }
-	if (!strncmp(ans, "nocard", 6)) { Info("No memory card in the front port", 2000); return 0; }
-	if (!strncmp(ans, "notgenuine", 10)) { Info("Not a Retro Remake memory card", 2000); return 0; }
-	if (!strncmp(ans, "nogame", 6)) { Info("This game's saves aren't on the card", 2000); return 0; }
+	game[0] = msg[0] = 0;
+	// what's wrong is said on the page itself (no rows then)
+	if (smc_shim_ask("SAVES", ans, sizeof(ans)) < 0) { say("The card didn't answer"); return 1; }
+	if (!strncmp(ans, "nocard", 6)) { say("No memory card in the port"); return 1; }
+	if (!strncmp(ans, "notgenuine", 10)) { say("Not a Retro Remake card"); return 1; }
+	if (!strncmp(ans, "nogame", 6)) { say("No saves for it on the card"); return 1; }
 	int new_card = 0;
 	for (char *l = strtok(ans, "\n"); l; l = strtok(NULL, "\n"))
 	{
@@ -55,7 +58,7 @@ int smc_osd_open()
 			new_card = card;
 	}
 	if (new_card) rows[nrows++] = { new_card, 0, 0, 0, 1 };   // last: rows has room for it
-	if (!nrows) { Info("This game's saves aren't on the card", 2000); return 0; }
+	if (!nrows) say("No saves for it on the card");
 	for (int i = 0; i < nrows; i++) if (rows[i].playing) sel = i;
 	return 1;
 }
@@ -94,8 +97,8 @@ void smc_osd_print()
 		}
 		OsdWrite(2 + i, s, k == sel, 0);
 	}
-	const char *hint = confirm == sel ? " Again: restart with this save" : nrows > list_rows() ? " More: up/down" : "";
-	OsdWrite(OsdGetSize() - 1, hint, confirm == sel, 0);
+	const char *hint = msg[0] ? msg : confirm == sel ? " Again: restart with this save" : nrows > list_rows() ? " More: up/down" : "";
+	OsdWrite(OsdGetSize() - 1, hint, msg[0] || confirm == sel, 0);
 }
 
 int smc_osd_key(int up, int down, int key, int select)
@@ -108,22 +111,28 @@ int smc_osd_key(int up, int down, int key, int select)
 	if (key == KEY_HOME) sel = 0;
 	if (key == KEY_END) sel = nrows - 1;
 	fit();
-	if (sel != was) { confirm = -1; return 1; }
+	if (sel != was) { confirm = -1; msg[0] = 0; return 1; }
 	if (!select || !nrows) return 0;
 
 	const save_row &r = rows[sel];
-	if (r.playing) { Info("The game is running with this save", 2000); return 0; }
-	if (confirm != sel) { confirm = sel; return 1; }   // asked first: a game restarts, its unsaved progress is lost
+	if (r.playing) { say("Already running this save"); return 1; }
+	if (confirm != sel) { confirm = sel; msg[0] = 0; return 1; }   // asked first: a game restarts, its unsaved progress is lost
 
+	// the system's saves move between cards: seconds (more with many saves). Said on the page before Main waits
 	char cmd[32], ans[256];
+	say("Switching saves...");
+	smc_osd_print();
+	OsdUpdate();
 	snprintf(cmd, sizeof(cmd), "USE %d", r.card);
-	if (smc_shim_ask(cmd, ans, sizeof(ans)) < 0 || strncmp(ans, "use ok", 6))
+	if (smc_shim_ask(cmd, ans, sizeof(ans), 600000) < 0 || strncmp(ans, "use ok", 6))
 	{
 		confirm = -1;
-		Info("The save couldn't be switched", 2000);
+		say("Couldn't switch the save");
 		return 1;
 	}
-	Info(r.is_new ? "Starting with a new save" : "Starting with this save", 1500);
+	say("Restarting the game...");
+	smc_osd_print();
+	OsdUpdate();
 	smc_shim_restart();   // Main starts again with the game
 	return 1;
 }
