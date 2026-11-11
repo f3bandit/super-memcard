@@ -49,7 +49,11 @@ void OsdWrite(unsigned char n, const char *s, unsigned char inv, unsigned char, 
     if (n < 16) snprintf(osd[n], sizeof(osd[n]), "%s%s", inv ? ">" : " ", s);
 }
 int OsdGetSize() { return 8; }
-void OsdUpdate() {}   // a small OSD: the list scrolls sooner
+void OsdUpdate() {}
+void ScrollText(char n, const char *str, int off, int len, int max_len, unsigned char, int) {
+    printf("scroll %d|%s|%d %d %d\n", n, str, off, len, max_len);
+}
+void ScrollReset(int) {}   // a small OSD: the list scrolls sooner
 void Info(const char *m, int, int, int, int) { printf("info %s\n", m); }
 int xml_load(const char *x) { printf("restart %s\n", x); menu = 0; smc_shim_core_start("_Console/NES_20260603.rbf", x); printf("relaunched\n"); return 0; }
 static void show() { for (int i = 0; i < OsdGetSize(); i++) printf("osd %d|%s\n", i, osd[i]); }
@@ -70,6 +74,7 @@ int main(int argc, char **argv) {
             for (const char *k = argv[3]; *k; k++) {
                 printf("key %c\n", *k);
                 if (smc_osd_key(*k == 'u', *k == 'd', 0, *k == 's')) { smc_osd_print(); show(); }
+                smc_osd_scroll();
             }
         }
         printf("osd done\n");

@@ -323,14 +323,15 @@ static void t_sync_virtual_card_switch(void) {
 static struct smc_sync_cfg cfg_of(int which);
 
 /* the OSD's Saves page: a game's saves on every virtual card, and switching to one (smc_game_saves, smc_use_card) */
-struct saves_seen { int n, card[8], files[8], playing[8]; };
-static void saves_cb(int card, int files, uint32_t time, bool playing, void *ctx) {
+struct saves_seen { int n, card[8], files[8], playing[8]; char label[8][32]; };
+static void saves_cb(int card, int files, uint32_t time, bool playing, const char *label, void *ctx) {
     (void)time;
     struct saves_seen *s = ctx;
     if (s->n < 8) {
         s->card[s->n] = card;
         s->files[s->n] = files;
         s->playing[s->n] = playing;
+        snprintf(s->label[s->n], sizeof(s->label[0]), "%s", label ? label : "");
         s->n++;
     }
 }
@@ -374,6 +375,42 @@ static void t_sync_osd_pick_a_save(void) {
     memset(&r, 0, sizeof(r));
     CHECK(smc_use_card(&vbus, &cfg, "SNES", "Final Fantasy VI", 0, &r) < 0);
     CHECK_EQ(smc_core(&vbus, "SNES", false), 1);
+}
+
+/* the memory manager's Rename: a name for a game's save on one card, kept on the card, never a save on a SuperStation */
+static void t_sync_save_names(void) {
+    sync_setup();
+    struct smc_sync_cfg cfg = cfg_of(0);
+    put_save(0, "SNES/Final Fantasy VI.srm", sA, sizeof(sA));
+    CHECK_EQ(run_sync(0).pushed, 1);
+    CHECK_EQ(smc_set_label(&vbus, &cfg, "SNES", "Final Fantasy VI", 1, "Main run"), 0);
+    CHECK_EQ(smc_set_label(&vbus, &cfg, "SNES", "Final Fantasy VI", 2, "Nothing here"), -2);   /* no save on card 2 */
+    CHECK_EQ(smc_set_label(&vbus, &cfg, "SNES", "Final Fantasy VI", 1, "a name far too long for the OSD"), -1);
+    CHECK_EQ(smc_set_label(&vbus, &cfg, "SNES", "Final Fantasy VI", 1, "tab\there"), -1);
+    CHECK_EQ(smc_set_label(&vbus, &cfg, "SNES", "Final Fantasy VI", 1, "caf\xc3\xa9"), -1);       /* not the OSD's font */
+    struct saves_seen sv = {0};
+    CHECK_EQ(smc_game_saves(&vbus, &cfg, "SNES", "Final Fantasy VI", saves_cb, &sv), 1);
+    CHECK(sv.n == 1 && !strcmp(sv.label[0], "Main run") && sv.files[0] == 1);   /* the name isn't counted as a save */
+    struct smc_game_info gi;
+    char id[65] = "";
+    CHECK_EQ(smc_list_card(&vbus, "SNES", 1, 0, id), SMC_OK);
+    CHECK_EQ(smc_game_info(&vbus, "SNES", 1, id, &gi), SMC_OK);
+    CHECK(!strcmp(gi.label, "Main run") && gi.files == 1);
+    /* a sync on another SuperStation, and this one: the name stays on the card, never in a saves folder */
+    sB[3] ^= 0x11;
+    put_save(0, "SNES/Final Fantasy VI.srm", sB, sizeof(sB));
+    run_sync(0);
+    run_sync(1);
+    CHECK(get_save(1, "SNES/label.txt", got, sizeof(got)) < 0 && get_save(0, "SNES/label.txt", got, sizeof(got)) < 0);
+    CHECK(get_save(1, "SNES/Final Fantasy VI.srm", got, sizeof(got)) > 0);
+    memset(&sv, 0, sizeof(sv));
+    smc_game_saves(&vbus, &cfg, "SNES", "Final Fantasy VI", saves_cb, &sv);
+    CHECK(sv.n == 1 && !strcmp(sv.label[0], "Main run"));
+    /* cleared */
+    CHECK_EQ(smc_set_label(&vbus, &cfg, "SNES", "Final Fantasy VI", 1, ""), 0);
+    memset(&sv, 0, sizeof(sv));
+    smc_game_saves(&vbus, &cfg, "SNES", "Final Fantasy VI", saves_cb, &sv);
+    CHECK(sv.n == 1 && !sv.label[0][0]);
 }
 
 /* the card's buttons pick another card while a game runs: its saves keep going to the card it started from */
@@ -878,6 +915,7 @@ static void t_sync_like_a_ps1(void) {
 #define SYNC_TESTS \
     {"sync: OSD Saves: a game's saves on each card, switching to one", t_sync_osd_pick_a_save, true, NULL}, \
     {"sync: card buttons during a game: the next game", t_sync_buttons_mid_game_wait_for_the_next, true, NULL}, \
+    {"sync: a save's name on a card (Rename): kept on the card only", t_sync_save_names, true, NULL}, \
     {"sync: a PSX card image's own PS1 icon on the card", t_sync_psx_own_icon, true, NULL}, \
     {"sync: saves to the card, then nothing to do, then a change", t_sync_to_card_then_unchanged, true, NULL}, \
     {"sync: a reinstall gets every save back", t_sync_reinstall_gets_everything_back, true, NULL}, \

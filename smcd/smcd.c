@@ -15,10 +15,12 @@
  *   SYSTEMS                 the systems with saves on the card
  *   LIST <sys> [<card>]     a system's games: name \t id \t time \t files \t bytes \t icon \t save name \t folder
  *   SECTION [PSX]           every other system's saves at once, for the memory manager's screen (section() below)
- *   SAVES                   (Main's OSD) the running game's saves: save \t card \t files \t time \t playing, one per
+ *   SAVES                   (Main's OSD) the running game's saves: save \t card \t files \t time \t playing \t label, one per
  *                           virtual card that has it, then game \t sys \t name and new \t <the first free card>
  *   USE <card>              (Main's OSD) play the running game with its save on that card: this SuperStation's saves go
  *                           to their card first; Main then starts the game again so it loads it. use ok <card> | failed
+ *   NAME <sys>\t<card>\t<save>\t<name>   (the memory manager's Rename) a name for a game's save on that card, kept on the
+ *                           card; "" clears it. name ok | name nosave | name failed (too long: 24, or not printable ASCII)
  *   PLAY <sys>\t<card>\t<save>   (the memory manager's Play) start the game with its save on that card: the switch as
  *                           USE, then Main loads the game (the MGL of its last launch here, else one made from its
  *                           ROM). play ok <card> | play notfound (no ROM, or a system started only from an MGL) |
@@ -626,9 +628,9 @@ static void section(int fd, struct conn *c, const struct smc_sync_cfg *k, int wi
             int both = 0;
             for (int j = 0; j < cs.n; j++)
                 both |= !strcmp(cs.keys[j], key);
-            int w = snprintf(line, sizeof(line), "game\t%s\t%s\t%s\t%u\t%d\t%u\t%d\t%s\t%s\t%d\n", sys,
+            int w = snprintf(line, sizeof(line), "game\t%s\t%s\t%s\t%u\t%d\t%u\t%d\t%s\t%s\t%d\t%s\n", sys,
                              gi.name[0] ? gi.name : gi.title[0] ? gi.title : gi.save_name, gi.id, gi.time, gi.files,
-                             gi.bytes, gi.has_icon ? 1 : 0, gi.save_name, id, both);
+                             gi.bytes, gi.has_icon ? 1 : 0, gi.save_name, id, both, gi.label);
             if (w <= 0 || w >= (int)sizeof(line))
                 continue;
             if (ll + (size_t)w > cap) {
@@ -660,11 +662,11 @@ struct saves_list {
     int fd;
     bool used[100];
 };
-static void saves_cb(int card, int files, uint32_t time, bool playing, void *ctx) {
+static void saves_cb(int card, int files, uint32_t time, bool playing, const char *label, void *ctx) {
     struct saves_list *sl = ctx;
     if (card >= 1 && card <= 99)
         sl->used[card] = true;
-    say(sl->fd, "save\t%d\t%d\t%u\t%d\n", card, files, time, playing ? 1 : 0);
+    say(sl->fd, "save\t%d\t%d\t%u\t%d\t%s\n", card, files, time, playing ? 1 : 0, label ? label : "");
 }
 
 /* a frontend's command; the answer ends with END */
@@ -708,8 +710,8 @@ static void do_command(int fd, char *l) {
         for (int i = 0; smc_list_card(&c.bus, sys, card, i, id) == SMC_OK; i++) {
             struct smc_game_info gi;
             if (smc_game_info(&c.bus, sys, card, id, &gi) == SMC_OK)
-                say(fd, "%s\t%s\t%u\t%d\t%u\t%d\t%s\t%s\n", gi.name[0] ? gi.name : gi.title[0] ? gi.title : gi.save_name,
-                    gi.id, gi.time, gi.files, gi.bytes, gi.has_icon ? 1 : 0, gi.save_name, id);
+                say(fd, "%s\t%s\t%u\t%d\t%u\t%d\t%s\t%s\t%s\n", gi.name[0] ? gi.name : gi.title[0] ? gi.title : gi.save_name,
+                    gi.id, gi.time, gi.files, gi.bytes, gi.has_icon ? 1 : 0, gi.save_name, id, gi.label);
         }
     } else if (!strncmp(l, "DELETE ", 7)) {
         char *tab = strchr(a, '\t');
@@ -735,6 +737,21 @@ static void do_command(int fd, char *l) {
                 if (free_card)
                     say(fd, "new\t%d\n", free_card);
             }
+        }
+    } else if (!strncmp(l, "NAME ", 5)) {
+        /* the memory manager's Rename (Console Mode's on-screen keyboard): <sys> \t <card> \t <save name> \t <name> */
+        char *t1 = strchr(a, '\t'), *t2 = t1 ? strchr(t1 + 1, '\t') : NULL, *t3 = t2 ? strchr(t2 + 1, '\t') : NULL;
+        if (!t3)
+            say(fd, "name failed\n");
+        else {
+            *t1 = *t2 = *t3 = 0;
+            char *nm = t3 + 1;
+            while (*nm == ' ')
+                nm++;
+            for (size_t e = strlen(nm); e && nm[e - 1] == ' '; e--)
+                nm[e - 1] = 0;
+            int r = smc_set_label(&c.bus, &k, a, t2 + 1, atoi(t1 + 1), nm);
+            say(fd, r == 0 ? "name ok\n" : r == -2 ? "name nosave\n" : "name failed\n");
         }
     } else if (!strncmp(l, "PLAY ", 5)) {
         play(fd, &c, &k, a, &rep);

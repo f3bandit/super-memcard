@@ -89,7 +89,14 @@ void smc_sync_hold_card(bool on);
 /* The saves a game has on the card, one per virtual card that has it, for a menu to pick from: cb(card, how many save
  * files, the newest one's time, whether it's the card this SuperStation's save is from). Returns how many, <0 error. */
 int smc_game_saves(const struct smc_bus *b, const struct smc_sync_cfg *cfg, const char *sys, const char *game,
-                   void (*cb)(int card, int files, uint32_t time, bool playing, void *ctx), void *ctx);
+                   void (*cb)(int card, int files, uint32_t time, bool playing, const char *label, void *ctx),
+                   void *ctx);
+/* The name the user gave a game's save on a card (the memory manager's Rename; Console Mode's on-screen keyboard), kept
+ * on the card beside it (label.txt; it goes wherever the card goes). "" clears it. Up to SMC_LABEL_MAX characters the
+ * OSD can show (printable ASCII). 0 named, -2 that card has no save of the game, -1 otherwise */
+#define SMC_LABEL_MAX 24
+int smc_set_label(const struct smc_bus *b, const struct smc_sync_cfg *cfg, const char *sys, const char *game, int card,
+                  const char *label);
 /* Use a game's save from virtual card `card` (the whole system moves to that card, as the buttons do): this
  * SuperStation's saves go to the card they came from first, then the chosen card's come in. 0 done, <0 not (nothing
  * changed then). The game must be started again to load it (it has the old save in memory). */
@@ -149,5 +156,6 @@ struct smc_game_info {
     int files;           /* save files */
     uint32_t bytes;
     bool has_icon;       /* icon.bin (05: PS1 save-icon layout) */
+    char label[25];      /* the name the user gave this save ("" if none; smc_set_label) */
 };
 int smc_game_info(const struct smc_bus *b, const char *sys, int card, const char *id, struct smc_game_info *gi);

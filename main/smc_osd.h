@@ -8,7 +8,7 @@
 //   on the core's main OSD page, after its options:   if (!page && smc_osd_available()) { saves_row = selentry; MenuWrite(entry++, " Saves", menusub == selentry++, 0); ... }
 //   on select of that row:                             if (smc_osd_open()) { menusub = 0; menustate = MENU_SMC_SAVES1; }
 //   MENU_SMC_SAVES1:                                   smc_osd_print(); menustate = MENU_SMC_SAVES2;
-//   MENU_SMC_SAVES2:                                   menu/back: the core's page again; else
+//   MENU_SMC_SAVES2:                                   menu/back: the core's page again; else smc_osd_scroll();
 //                                                      if (smc_osd_key(up, down, c, select)) menustate = MENU_SMC_SAVES1;
 #pragma once
 
@@ -20,6 +20,10 @@ int smc_osd_open();
 
 // draws the page (title, the game, its saves, the hint)
 void smc_osd_print();
+
+// from the page's loop (MENU_SMC_SAVES2, every pass): the selected row scrolls when it's longer than the OSD (its name
+// and date), as Main's file names do
+void smc_osd_scroll();
 
 // a key on the page (up, down, the key code for page up/down/home/end, select): 1 when it needs drawing again.
 // Select on a save asks first ("again: restart"), then restarts the game with it (Main starts again). Its messages are

@@ -93,13 +93,13 @@ cmp -s "$f" "$w/saves/NES/Test Game.sav" && ok "the card has the game's latest s
 # 3b. the OSD's Saves page while the game runs: its saves, a new one on another card, then back to the first
 cp "$w/saves/NES/Test Game.sav" "$w/first.sav"
 sv=$(ask SAVES)
-echo "$sv" | grep -q "^save	1	1	[0-9]*	1$" && echo "$sv" | grep -q "^game	NES	Test Game$" && echo "$sv" | grep -q "^new	2$" \
+echo "$sv" | grep -q "^save	1	1	[0-9]*	1	" && echo "$sv" | grep -q "^game	NES	Test Game$" && echo "$sv" | grep -q "^new	2$" \
     && ok "SAVES: card 1's save (being played), a new one on card 2" || bad "SAVES: $sv"
 [ "$(ask 'USE 2' | head -1)" = "use ok 2" ] && [ ! -e "$w/saves/NES/Test Game.sav" ] && cmp -s "$f" "$w/first.sav" \
     && ok "USE 2 (new): the game starts with no save, card 1 keeps its" || bad "USE 2"
 [ "$(ask 'USE 1' | head -1)" = "use ok 1" ] && cmp -s "$w/saves/NES/Test Game.sav" "$w/first.sav" \
     && ok "USE 1: card 1's save back on this SuperStation" || bad "USE 1"
-ask SAVES | grep -q "^save	1	1	[0-9]*	1$" && ok "  and card 1 is the one being played" || bad "SAVES after USE 1"
+ask SAVES | grep -q "^save	1	1	[0-9]*	1	" && ok "  and card 1 is the one being played" || bad "SAVES after USE 1"
 [ "$(ask 'USE 0' | head -1)" = "use failed" ] && ok "USE 0: refused" || bad "USE 0"
 
 # 3c. the same through Main's OSD Saves page (main/smc_osd.cpp): pick, asked again, the game restarts with it
@@ -107,7 +107,7 @@ kill $shim; wait $shim 2>/dev/null || true
 [ -f /tmp/smc_game ] && grep -qx "$w/game.mgl" /tmp/smc_game && cmp -s /tmp/smc_game.mgl "$w/game.mgl" \
     && ok "LAUNCH said DONE saves: the shim kept the game's MGL (and a copy)" || bad "the shim's game file"
 "$B/shimtest" "$w/vc.sock" osd s > "$w/osd1.log" 2>&1
-grep -q "^available 1" "$w/osd1.log" && grep -q "^osd 0|  Test Game" "$w/osd1.log" && grep -q "^osd 2|> Card 1 .* now$" "$w/osd1.log" \
+grep -q "^available 1" "$w/osd1.log" && grep -q "^osd 0|  Test Game" "$w/osd1.log" && grep -q "^osd 2|> Card 1   now  [A-Z]" "$w/osd1.log" \
     && grep -q "^osd 3|  New save (card 2)" "$w/osd1.log" && grep -q "^osd 7|> Already running this save" "$w/osd1.log" \
     && ok "OSD: the page (the game, card 1 being played, a new save), the one playing not picked again" || bad "OSD page: $(cat "$w/osd1.log")"
 "$B/shimtest" "$w/vc.sock" osd ds > "$w/osd2.log" 2>&1
@@ -117,7 +117,7 @@ grep -q "Again: restart" "$w/osd2.log" && ! grep -q "^restart" "$w/osd2.log" && 
 grep -q "^restart $w/game.mgl" "$w/osd3.log" && grep -q "^relaunched" "$w/osd3.log" && [ ! -e "$w/saves/NES/Test Game.sav" ] \
     && ok "OSD: New save picked, the game restarted from its MGL with no save" || bad "OSD new save: $(cat "$w/osd3.log")"
 "$B/shimtest" "$w/vc.sock" osd uss > "$w/osd4.log" 2>&1
-grep -q "^osd 3|> Card 2   empty  now" "$w/osd4.log" && grep -q "^restart" "$w/osd4.log" && cmp -s "$w/saves/NES/Test Game.sav" "$w/first.sav" \
+grep -q "^osd 3|> Card 2   now  empty" "$w/osd4.log" && grep -q "^restart" "$w/osd4.log" && cmp -s "$w/saves/NES/Test Game.sav" "$w/first.sav" \
     && ok "OSD: card 1 picked again, its save back" || bad "OSD card 1: $(cat "$w/osd4.log")"
 long=$(sed -n 's/^osd 0|//p' "$w/osd1.log" | head -1); [ ${#long} -le 29 ] && ok "OSD: rows fit the OSD" || bad "OSD row too long"
 
@@ -149,6 +149,15 @@ r=$(ask "PLAY NES	1	Test Game" | head -1)
 [ "$(ask "PLAY PSX	1	Some Game" | head -1)" = "play psx" ] && ok "PLAY PSX: refused (its own card)" || bad "PLAY PSX"
 [ "$(ask "PLAY NES	0	Test Game" | head -1)" = "play failed" ] && ok "PLAY card 0: refused" || bad "PLAY 0"
 
+# 4c. the memory manager's Rename (Console Mode's on-screen keyboard): a name for that card's save, on the card
+[ "$(ask "NAME NES	1	Test Game	  Main run " | head -1)" = "name ok" ] && ask "LIST NES 1" | grep -q "	Test Game	.*	Main run$" \
+    && ok "NAME: card 1's save named (spaces round it dropped), LIST shows it last" || bad "NAME: $(ask "LIST NES 1")"
+[ "$(ask "NAME NES	7	Test Game	Nothing" | head -1)" = "name nosave" ] && ok "NAME on a card without the save: nosave" || bad "NAME nosave"
+[ "$(ask "NAME NES	1	Test Game	a name far too long for the OSD" | head -1)" = "name failed" ] && ask "LIST NES 1" | grep -q "	Main run$" \
+    && ok "NAME too long: refused, the old name kept" || bad "NAME too long"
+ask SECTION | grep -q "^game	NES	.*	Main run$" && ok "SECTION shows the name too" || bad "SECTION name: $(ask SECTION)"
+[ ! -e "$w/saves/NES/label.txt" ] && ok "the name never in the saves folder" || bad "label.txt in the saves"
+
 # 5. a long list on the OSD page (a stand-in smcd with 30 saves): it scrolls, no row cut off or past the page
 kill $(pgrep -f "$B/smcd") 2>/dev/null || true; sleep 0.5; rm -f /tmp/smcd.sock
 python3 - <<'PY' & pids="$pids $!"
@@ -157,7 +166,7 @@ s = socket.socket(socket.AF_UNIX); s.bind("/tmp/smcd.sock"); s.listen(4)
 for _ in range(4):
     c, _a = s.accept(); f = c.makefile("rw")
     if f.readline().strip() == "SAVES":
-        for i in range(1, 31): f.write("save\t%d\t1\t%d\t%d\n" % (i, 1700000000 + i, i == 1))
+        for i in range(1, 31): f.write("save\t%d\t1\t%d\t%d\tPlaythrough number %02d\n" % (i, 1700000000 + i, i == 1, i))
         f.write("game\tNES\tA Game Whose Name Is Much Too Long For The OSD (USA, Europe) (Rev 1)\nnew\t31\nEND\n"); f.flush()
     c.close()
 PY
@@ -167,8 +176,11 @@ last=$(grep -n "^title" "$w/osd5.log" | tail -1 | cut -d: -f1)
 tail -n +$last "$w/osd5.log" | grep "^osd" > "$w/osd5.last"
 grep -q "^osd 6|> New save (card 31)" "$w/osd5.last" && grep -q "^osd 2|  Card 27" "$w/osd5.last" \
     && [ "$(grep -c '^osd [2-6]|.*Card\|New save' "$w/osd5.last")" = 5 ] && ok "OSD: 31 rows scroll, the last one shown at the bottom" || bad "OSD long list: $(cat "$w/osd5.last")"
-awk -F'|' '{ if (length($2) > 30) bad = 1 } END { exit bad }' "$w/osd5.log" && ok "OSD: no row wider than the OSD (a long game name cut)" || bad "OSD long rows"
+awk -F'|' '/^osd/ { if (length($2) > 30) bad = 1 } END { exit bad }' "$w/osd5.log" && ok "OSD: no row wider than the OSD (a long game name cut)" || bad "OSD long rows"
 grep -q "^osd 7|  More: up/down" "$w/osd5.last" && ok "OSD: the hint says there's more" || bad "OSD hint"
+grep -q "^osd 2|  Card 27  Playthrough number $" "$w/osd5.last" && ok "OSD: a save's name on its row" || bad "OSD name row"
+grep -qE "^scroll [2-6]\| Card [0-9 ]+  Playthrough number [0-9]+  [A-Z][a-z]{2} [0-9]{2} 20[0-9]{2} [0-9:]{5}\|10 " "$w/osd5.log" \
+    && ok "OSD: the selected row's name and date scroll (the card number stays)" || bad "OSD scroll: $(grep ^scroll "$w/osd5.log" | head -3)"
 
 echo "--- smcd.log"; cat /tmp/smcd.log | cut -c1-160
 [ $fail = 0 ] && echo "ALL PASSED" || { echo FAILED; exit 1; }

@@ -155,7 +155,10 @@ int smc_mgl_read(const char *path, struct smc_mgl *m) {
 #define NAME_TXT "name.txt"
 #define ICON_BIN "icon.bin" /* the game's save icon (docs/05-design.md): not a save, never copied back */
 #define GAME_INI "game.ini" /* the game: id=, title= (docs/09-game-database.md) */
-static bool not_a_save(const char *n) { return !strcmp(n, NAME_TXT) || !strcmp(n, ICON_BIN) || !strcmp(n, GAME_INI); }
+#define LABEL_TXT "label.txt" /* the name the user gave that card's save of the game (the memory manager's Rename) */
+static bool not_a_save(const char *n) {
+    return !strcmp(n, NAME_TXT) || !strcmp(n, ICON_BIN) || !strcmp(n, GAME_INI) || !strcmp(n, LABEL_TXT);
+}
 
 /* ---- small helpers ---- */
 
@@ -1584,7 +1587,8 @@ int smc_sync_game(const struct smc_bus *b, const struct smc_sync_cfg *cfg, const
 }
 
 int smc_game_saves(const struct smc_bus *b, const struct smc_sync_cfg *cfg, const char *sys, const char *game,
-                   void (*cb)(int card, int files, uint32_t time, bool playing, void *ctx), void *ctx) {
+                   void (*cb)(int card, int files, uint32_t time, bool playing, const char *label, void *ctx),
+                   void *ctx) {
     struct smc_sync_report rep;
     memset(&rep, 0, sizeof(rep));
     int ok = begin(b, cfg, &rep);
@@ -1602,21 +1606,73 @@ int smc_game_saves(const struct smc_bus *b, const struct smc_sync_cfg *cfg, cons
         int n = smc_select_card(b, sys, id, card, NULL);
         int saves = 0;
         uint32_t newest = 0;
+        char label[SMC_LABEL_MAX + 1] = "";
         for (int i = 0; i < n; i++) {
             struct smc_file f;
-            if (smc_info(b, i, &f) != SMC_OK || f.deleted || not_a_save(f.name))
+            if (smc_info(b, i, &f) != SMC_OK || f.deleted)
+                continue;
+            if (!strcmp(f.name, LABEL_TXT) && f.size && f.size <= SMC_LABEL_MAX) {
+                if (smc_read_file(b, i, f.size, (uint8_t *)label) == SMC_OK)
+                    label[f.size] = 0;
+                continue;
+            }
+            if (not_a_save(f.name))
                 continue;
             saves++;
             if (f.time > newest)
                 newest = f.time;
         }
         if (saves || card == playing) {
-            cb(card, saves, newest, card == playing, ctx);
+            cb(card, saves, newest, card == playing, label, ctx);
             found++;
         }
     }
     end();
     return found;
+}
+
+int smc_set_label(const struct smc_bus *b, const struct smc_sync_cfg *cfg, const char *sys, const char *game, int card,
+                  const char *label) {
+    struct smc_sync_report rep;
+    memset(&rep, 0, sizeof(rep));
+    size_t l = label ? strlen(label) : 0;
+    if (card < 1 || card > SMC_CARDS_MAX || l > SMC_LABEL_MAX)
+        return -1;
+    for (size_t i = 0; i < l; i++)
+        if ((unsigned char)label[i] < 0x20 || (unsigned char)label[i] > 0x7e)   /* what the OSD's font can show */
+            return -1;
+    int ok = begin(b, cfg, &rep);
+    if (ok <= 0)
+        return ok < 0 ? ok : -1;
+    char id[65] = "";
+    card_id_of_save(b, sys, card, game, id);
+    int rc = -1;
+    if (id[0]) {   /* only a card that has this game's save: a name for nothing would be lost */
+        int n = smc_select_card(b, sys, id, card, NULL);
+        int saves = 0, at = -1;
+        uint32_t gen = 0;
+        for (int i = 0; i < n; i++) {
+            struct smc_file f;
+            if (smc_info(b, i, &f) != SMC_OK)
+                continue;
+            if (!strcmp(f.name, LABEL_TXT)) {
+                at = f.deleted ? -1 : i;
+                gen = f.gen;   /* each change one generation on, so the card keeps the newest */
+            } else if (!f.deleted && !not_a_save(f.name))
+                saves++;
+        }
+        if (!saves)
+            rc = -2;
+        else if (l)
+            rc = smc_write_file(b, LABEL_TXT, (const uint8_t *)label, (uint32_t)l, gen + 1) == SMC_OK ? 0 : -1;
+        else   /* cleared: the name file deleted (nothing to delete: already none) */
+            rc = at < 0 || smc_delete(b, at, gen + 1, (uint32_t)time(NULL)) == SMC_OK ? 0 : -1;
+    } else
+        rc = -2;
+    if (rc == 0)
+        logf_("%s/%s on card %d named \"%s\"", sys, game, card, label ? label : "");
+    end();
+    return rc;
 }
 
 int smc_use_card(const struct smc_bus *b, const struct smc_sync_cfg *cfg, const char *sys, const char *game, int card,
@@ -1864,6 +1920,13 @@ int smc_game_info(const struct smc_bus *b, const char *sys, int card, const char
             return SMC_E_NO_REPLY;
         if (f.deleted)
             continue;
+        if (!strcmp(f.name, LABEL_TXT)) {
+            uint32_t l = f.size < sizeof(gi->label) ? f.size : (uint32_t)sizeof(gi->label) - 1;
+            if (l && smc_read_file(b, i, l, (uint8_t *)gi->label) != SMC_OK)
+                return SMC_E_NO_REPLY;
+            gi->label[l] = 0;
+            continue;
+        }
         bool txt = !strcmp(f.name, NAME_TXT) || !strcmp(f.name, GAME_INI);
         if (txt && f.size < sizeof(text)) {
             if (smc_read_file(b, i, f.size, (uint8_t *)text) != SMC_OK)

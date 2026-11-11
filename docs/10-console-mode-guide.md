@@ -63,7 +63,7 @@ That is all of it in Main. Sockets (text lines):
 /tmp/smcd.sock            smcd listens.  Main sends   LAUNCH <rbf>\t<mgl>   -> DONE (after the game's save; "DONE saves" when
                                                                               the game's saves are on the card: the OSD page)
                                                       MENU                 -> DONE (at once; smcd works after)
-                                     the OSD page:    SAVES                -> save\t<card>\t<files>\t<time>\t<playing> ...,
+                                     the OSD page:    SAVES                -> save\t<card>\t<files>\t<time>\t<playing>\t<label> ...,
                                                                               game\t<sys>\t<name>, new\t<card>, END
                                                       USE <card>           -> use ok <card> | use failed, END
 /tmp/smc_frontport.sock   Main listens.  smcd sends   FRAME <port> <speed> <ack ms> <hex>  -> OK <count> <hex> | ERR <code>
@@ -102,11 +102,20 @@ that isn't Super MemCard, the answer is `nocard`; a Super MemCard card that isn'
 | `READ` | Read card, everything both ways: `read ok card=<id> pushed= pulled= unchanged= conflicts= skipped= failed= deleted=` |
 | `SECTION` | the whole "other systems" section in one answer (below); `SECTION PSX` adds the PSX core's card images |
 | `SYSTEMS` | `<system>\t<its current virtual card>` per system on the card |
-| `LIST <sys> [<card>]` | per game: `name \t id \t time \t files \t bytes \t icon \t save name \t folder` |
+| `LIST <sys> [<card>]` | per game: `name \t id \t time \t files \t bytes \t icon \t save name \t folder \t label` |
 | `DELETE <sys>\t<save>` | `delete <rc>`: other SuperStations delete their copy at their next sync; nothing is lost |
 | `CONFLICTS` | saves whose two copies both changed (played on two SuperStations) |
 | `KEEP <local\|card> <sys>\t<save>` | `keep <rc>`: settles one |
+| `NAME <sys>\t<card>\t<save name>\t<label>` | `name ok` \| `name nosave` \| `name failed`: the **Rename** button (below) |
 | `PLAY <sys>\t<card>\t<save name>` | `play ok <card>` \| `play notfound` \| `play psx` \| `play failed`: the **Play** button (below) |
+
+**Rename** (on a game's entry, per virtual card): a name the user gives that card's save of the game ("Main run",
+"Speedrun"), typed on Console Mode's own on-screen keyboard, then `NAME`. smcd keeps it on the card beside the save
+(`label.txt`), so it goes wherever the card goes; it's never a save on a SuperStation. Up to 24 characters, printable
+ASCII (what the OSD's font shows); spaces round it are dropped; an empty name clears it. `name nosave`: that card has no
+save of the game. `label` is LIST's and SECTION's last column ("" when none) and SAVES' last; the OSD's Saves page shows
+it on the save's row: `Card 2  now  Speedrun  Oct 05 2026 20:47` ("now" by the card number stays put; the name and the
+date scroll on the selected row when they don't fit, as Main's file names do).
 
 **Play** (on a game's entry, per virtual card): starts the game with the save on that card. smcd switches the system to
 that card the way the OSD's Saves page does (this SuperStation's saves to their card first, the picked card's in), then
@@ -128,7 +137,7 @@ save moved to card 2 and the blank to card 1, card 2's save loaded and the OSD's
 
 ```
 system  \t <folder> \t <title> \t <its current virtual card> \t <games>        then that system's games:
-game    \t <folder> \t <name> \t <id> \t <time> \t <files> \t <bytes> \t <icon> \t <save name> \t <card folder> \t <both changed 0|1>
+game    \t <folder> \t <name> \t <id> \t <time> \t <files> \t <bytes> \t <icon> \t <save name> \t <card folder> \t <both changed 0|1> \t <label>
 section \t <games> \t <systems>                                             last, the totals
 END
 ```
@@ -188,7 +197,7 @@ In `MiSTer_ConsoleMode`: copy `main/smc_osd.cpp/.h` as well, and in `menu.cpp` (
 | the core's main OSD page, after its options (`page == 0`) | `if (smc_osd_available()) { smc_submenu = selentry; MenuWrite(entry, " Saves", menusub == selentry, 0); menumask = (menumask << 1) \| 1; entry++; selentry++; }` |
 | that page's select | `if (smc_submenu == menusub && select && smc_osd_open()) { smc_ret_sub = menusub; menusub = 0; menustate = MENU_SMC_SAVES1; }` |
 | `MENU_SMC_SAVES1` | `smc_osd_print(); menustate = MENU_SMC_SAVES2;` |
-| `MENU_SMC_SAVES2` | `if (menu \|\| back) { menustate = MENU_GENERIC_MAIN1; menusub = smc_ret_sub; } else if (smc_osd_key(up, down, c, select)) menustate = MENU_SMC_SAVES1;` |
+| `MENU_SMC_SAVES2` | `if (menu \|\| back) { menustate = MENU_GENERIC_MAIN1; menusub = smc_ret_sub; break; } smc_osd_scroll(); if (smc_osd_key(up, down, c, select)) menustate = MENU_SMC_SAVES1;` |
 
 Checked on a PC (`smcd/test.sh`: the page, asked first, a new save, back to the first, 31 rows scrolling) and on an SS1
 (Nov 10 2026, `smcd/ss1test.sh c`: an MGL launch kept for the page, SAVES, USE of a new save and back, with the card's
