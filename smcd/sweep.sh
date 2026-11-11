@@ -70,12 +70,14 @@ one() {   # <sys> <game> [<mgl text>]
     fi
     r=$(ask "PLAY $sys	2	$game"); sleep 15; c2=$(core)
     left=$(files "$sys" "$game" | wc -l)
-    say "  Play card 2: $r, core $c2, its save files here now: $left"
+    # none of its save here now (Main makes blank ones for some cores as the game loads: N64's), or not the same
+    if [ "$left" = 0 ] || ! (cd "$S/$sys" && md5sum -c $before >/dev/null 2>&1); then gone=yes; else gone=no; fi
+    say "  Play card 2: $r, core $c2, its save gone: $gone ($left blank file(s) the core made)"
     menu
     r1=$(ask "PLAY $sys	1	$game"); sleep 15; c1=$(core)
     if (cd "$S/$sys" && md5sum -c $before >/dev/null 2>&1); then same=yes; else same=no; fi
     say "  Play card 1: $r1, core $c1, its save back byte for byte: $same"
-    if [ "$r" = "play ok 2" ] && [ "$r1" = "play ok 1" ] && [ "$left" = 0 ] && [ "$same" = yes ] && [ -n "$c1" ] && [ "$c1" != MENU ]; then
+    if [ "$r" = "play ok 2" ] && [ "$r1" = "play ok 1" ] && [ "$gone" = yes ] && [ "$same" = yes ] && [ -n "$c1" ] && [ "$c1" != MENU ]; then
         say "  OK"; pass=$((pass+1))
     else
         say "  FAIL"; fail=$((fail+1))
