@@ -304,19 +304,20 @@ of them, every save on the SS1 as it was before.
 | N64 | Majora's Mask | `.fla` (flash) |
 | TurboGrafx-CD (TurboGrafx16 core, started from its MGL) | Dracula X (Rondo) | `.sav` (2 KB BRAM) |
 | Neo Geo (started from its MGL) | Kabuki Klash | `.sav` |
+| Mega-CD (started from its MGL) | Sonic CD | `.sav` (8 KB backup RAM; Popful Mail's, as a Mega-CD save is the whole RAM) |
 
 On the way: Console Mode has no Genesis core (Genesis games are the MegaDrive core's: saves/MegaDrive), so smcd looks for
 a system's ROMs in its other folders too (games/Genesis, games/TGFX16-CD; a CD folder by its `.cue`/`.chd`); Main makes
 blank N64 saves as an N64 game loads with none; a Saturn game's discs share one save (Main's
-`saturn_get_save_without_disk`, ported). Not yet on an SS1, for want of a game here: Master System, Game Gear, Mega-CD
-and Saturn (the saves are standard `<game>.sav`; Saturn's naming is in the card tests).
+`saturn_get_save_without_disk`, ported). Not yet on an SS1, for want of a game here: Master System, Game Gear and
+Saturn (the saves are standard `<game>.sav`; Saturn's naming is in the card tests).
 
 ## 8. Open points
 
 - The shipping card's firmware: sd2psXtd-based? Its source (GPL-3.0) to apply `firmware/` to.
 - Raw frames in Console Mode's menu core: the same `SMC_RAW` or its own command; its timing.
 - Where the shim's three calls go in `MiSTer_ConsoleMode`, and starting `smcd` at boot (a start script still to come).
-- On an SS1, one game each of Master System, Game Gear, Mega-CD and Saturn (7b).
+- On an SS1, one game each of Master System, Game Gear and Saturn (7b).
 - Retro Remake's own signing key in `smcd` and the firmware (12); the test key until then.
 - The SuperStation check (features only on a genuine SS1): how Console Mode recognizes one.
 - The real card's speed limit, and a power pull mid-save on the real card (works in the simulation).
