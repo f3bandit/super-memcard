@@ -6199,6 +6199,7 @@ void HandleUI(void)
 			menusub = smc_ret_sub;
 			break;
 		}
+		smc_osd_scroll();
 		if (smc_osd_key(up, down, c, select)) menustate = MENU_SMC_SAVES1;
 		break;
 
