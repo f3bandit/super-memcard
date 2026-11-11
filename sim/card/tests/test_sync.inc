@@ -377,6 +377,25 @@ static void t_sync_osd_pick_a_save(void) {
     CHECK_EQ(smc_core(&vbus, "SNES", false), 1);
 }
 
+/* a Saturn game's discs share one save, named as Main names it (saturn_get_save_without_disk) */
+static void t_sync_saturn_disc_save_name(void) {
+    static const char *const t[][2] = {
+        {"Chou Jikuu Yousai Macross - Ai Oboete Imasu ka (Japan) (Disc 1)", "Chou Jikuu Yousai Macross - Ai Oboete Imasu ka (Japan)"},
+        {"Panzer Dragoon Saga (USA) (Disc 4)", "Panzer Dragoon Saga (USA)"},
+        {"Lunar Silver Star Story (disc 2)", "Lunar Silver Star Story"},
+        {"Grandia (Japan) (Disc A)", "Grandia (Japan)"},
+        {"Daytona USA (USA)", "Daytona USA (USA)"},
+        {"Discworld (USA)", "Discworld (USA)"},
+    };
+    for (size_t i = 0; i < sizeof(t) / sizeof(t[0]); i++) {
+        char b[128];
+        snprintf(b, sizeof(b), "%s", t[i][0]);
+        smc_saturn_save_name(b);
+        if (strcmp(b, t[i][1])) printf("    saturn name: \"%s\" -> \"%s\", Main: \"%s\"\n", t[i][0], b, t[i][1]);
+        CHECK(!strcmp(b, t[i][1]));
+    }
+}
+
 /* the first switch ever on this SuperStation (nothing synced here yet): its saves go to the card in use before, not to
  * the one picked (found on an SS1: a fresh card, Play on card 2) */
 static void t_sync_first_switch_keeps_saves_on_the_old_card(void) {
@@ -936,6 +955,7 @@ static void t_sync_like_a_ps1(void) {
     {"sync: card buttons during a game: the next game", t_sync_buttons_mid_game_wait_for_the_next, true, NULL}, \
     {"sync: a save's name on a card (Rename): kept on the card only", t_sync_save_names, true, NULL}, \
     {"sync: the first switch here: the saves stay on the old card", t_sync_first_switch_keeps_saves_on_the_old_card, true, NULL}, \
+    {"sync: a Saturn game's discs: one save, Main's name", t_sync_saturn_disc_save_name, true, NULL}, \
     {"sync: a PSX card image's own PS1 icon on the card", t_sync_psx_own_icon, true, NULL}, \
     {"sync: saves to the card, then nothing to do, then a change", t_sync_to_card_then_unchanged, true, NULL}, \
     {"sync: a reinstall gets every save back", t_sync_reinstall_gets_everything_back, true, NULL}, \

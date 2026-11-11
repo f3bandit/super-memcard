@@ -65,6 +65,30 @@ const char *smc_launch_system(const char *rbf, const char *setname, bool same_di
     return NULL; /* Mega Duck, Atari 2600 ...: not a system the card keeps */
 }
 
+/* Main's saturn_get_save_without_disk() (support/saturn/saturn.cpp), the same steps on the game's name: a Saturn game's
+ * discs share one save, "<game> (Disc 1)" saves as "<game>" */
+void smc_saturn_save_name(char *buf) {
+    char *p1, *p2;
+
+    if ((p1 = strstr(buf, "disc")) != 0 || (p1 = strstr(buf, "Disc")) != 0 || (p1 = strstr(buf, "DISC")) != 0) {
+        p2 = p1 + 4;
+
+        if (p1 > buf && *(--p1) == '(')
+            p1--;
+        if (p1 > buf && *(--p1) == ' ')
+            p1--;
+        if (*p2 == ' ')
+            p2++;
+        if ((*p2 >= '0' && *p2 <= '9') || (*p2 >= 'a' && *p2 <= 'f') || (*p2 >= 'A' && *p2 <= 'F')) {
+            p2++;
+            if (*p2 == ')')
+                p2++;
+            p1++;
+            memmove(p1, p2, strlen(p2) + 1);
+        }
+    }
+}
+
 /* the text of <tag ...>text</tag>, and the tag's attributes in attr */
 static int xml_tag(const char *x, const char *tag, char *out, size_t on, char *attr, size_t an) {
     char open[40];

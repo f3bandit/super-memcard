@@ -511,8 +511,10 @@ static void do_launch(char *args) {
         return;
     snprintf(play_sys, sizeof(play_sys), "%s", sys);
     snprintf(play_game, sizeof(play_game), "%s", m.game);
-    if (m.game[0] && strchr(m.game, '/') == NULL && m.game[0] != '.')
-        keep_launch(sys, m.game, mgl);   /* for the memory manager's Play */
+    if (!strcmp(sys, "Saturn"))
+        smc_saturn_save_name(play_game);   /* Main's name for its save: every disc of the game shares it */
+    if (play_game[0] && strchr(play_game, '/') == NULL && play_game[0] != '.')
+        keep_launch(sys, play_game, mgl);   /* for the memory manager's Play: by the save's name */
     no_card = 0;
     struct conn c;
     if (!card_open(&c)) {

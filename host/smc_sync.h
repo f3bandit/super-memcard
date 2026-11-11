@@ -63,6 +63,8 @@ struct smc_mgl {
     bool same_dir;
 };
 int smc_mgl_read(const char *path, struct smc_mgl *m);
+/* A Saturn game's save name from its disc's name, as Main makes it: "<game> (Disc 1)" -> "<game>" (in place) */
+void smc_saturn_save_name(char *name);
 /* An MGL that starts a game (its save's name in sys) the way Console Mode's own MGLs do, made from its ROM in the games
  * folders: 0, or -1 when the ROM isn't found or the system's MGL isn't known (CD systems, arcade: an earlier launch's MGL
  * only) */
