@@ -19,6 +19,10 @@
  *                           virtual card that has it, then game \t sys \t name and new \t <the first free card>
  *   USE <card>              (Main's OSD) play the running game with its save on that card: this SuperStation's saves go
  *                           to their card first; Main then starts the game again so it loads it. use ok <card> | failed
+ *   PLAY <sys>\t<card>\t<save>   (the memory manager's Play) start the game with its save on that card: the switch as
+ *                           USE, then Main loads the game (the MGL of its last launch here, else one made from its
+ *                           ROM). play ok <card> | play notfound (no ROM, or a system started only from an MGL) |
+ *                           play psx | play failed
  *   DELETE <sys>\t<save>    delete a save (others delete theirs at their next sync)
  *   CONFLICTS               saves whose two copies both changed
  *   KEEP <local|card> <sys>\t<save>
@@ -373,6 +377,120 @@ static time_t game_saves_time(const char *sys, const char *game) {
     return newest;
 }
 
+/* ---- a game's MGL, kept from its launch for the memory manager's Play: <state>/launch/<sys>/<save name>.mgl ---- */
+static void launch_path(const char *sys, const char *game, char *out, size_t n) {
+    snprintf(out, n, "%s/launch/%s/%s.mgl", state, sys, game);
+}
+
+static int copy_file(const char *from, const char *to) {
+    FILE *a = fopen(from, "rb");
+    if (!a)
+        return -1;
+    char tmp[1200];
+    snprintf(tmp, sizeof(tmp), "%s.new", to);
+    FILE *b = fopen(tmp, "wb");
+    if (!b) {
+        fclose(a);
+        return -1;
+    }
+    char t[4096];
+    size_t r;
+    while ((r = fread(t, 1, sizeof(t), a)) > 0)
+        fwrite(t, 1, r, b);
+    fclose(a);
+    int bad = fclose(b);
+    return bad || rename(tmp, to) ? -1 : 0;
+}
+
+static void keep_launch(const char *sys, const char *game, const char *mgl) {
+    char p[1100], d[1100];
+    snprintf(d, sizeof(d), "%s/launch", state);
+    mkdir(d, 0755);
+    snprintf(d, sizeof(d), "%s/launch/%s", state, sys);
+    mkdir(d, 0755);
+    launch_path(sys, game, p, sizeof(p));
+    if (strcmp(p, mgl))
+        copy_file(mgl, p);
+}
+
+/* the game file an MGL loads still there (an MGL kept from long ago may point at a ROM since moved) */
+static bool mgl_file_there(const char *mgl) {
+    FILE *f = fopen(mgl, "r");
+    if (!f)
+        return false;
+    char buf[8192];
+    size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+    fclose(f);
+    buf[n] = 0;
+    char *p = strstr(buf, "path=\"");
+    if (!p)
+        return false;
+    p += 6;
+    char *e = strchr(p, '"');
+    if (!e)
+        return false;
+    *e = 0;
+    for (char *a; (a = strstr(p, "&amp;"));)   /* the one entity a ROM's name has */
+        memmove(a + 1, a + 5, strlen(a + 5) + 1);
+    if (p[0] != '/')
+        return true;   /* relative to the core's games folder: Main finds it */
+    return access(p, R_OK) == 0;
+}
+
+/* Main's command pipe (load_core <file>): the memory manager's Play starts a game the way Console Mode does */
+static const char *mister_cmd(void) {
+    const char *e = getenv("SMC_MISTER_CMD");
+    return e && *e ? e : "/dev/MiSTer_cmd";
+}
+
+static void play(int fd, struct conn *c, const struct smc_sync_cfg *k, char *a, struct smc_sync_report *rep) {
+    char *t1 = strchr(a, '\t'), *t2 = t1 ? strchr(t1 + 1, '\t') : NULL;
+    if (!t1 || !t2) {
+        say(fd, "play failed\n");
+        return;
+    }
+    *t1 = *t2 = 0;
+    const char *sys = a, *game = t2 + 1;
+    int card = atoi(t1 + 1);
+    if (!strcmp(sys, "PSX")) {   /* the PSX core has its card in the port itself */
+        say(fd, "play psx\n");
+        return;
+    }
+    if (card < 1 || card > 99 || !game[0]) {
+        say(fd, "play failed\n");
+        return;
+    }
+    char mgl[1100];
+    launch_path(sys, game, mgl, sizeof(mgl));
+    if (!mgl_file_there(mgl)) {
+        static char made[4096];
+        snprintf(mgl, sizeof(mgl), "/tmp/smc_play.mgl");
+        FILE *f = NULL;
+        if (smc_game_mgl(k, sys, game, made, sizeof(made)) || !(f = fopen(mgl, "w"))) {
+            lg("%s: %s can't be started from here (no ROM found, or the system needs its MGL)", sys, game);
+            say(fd, "play notfound\n");
+            return;
+        }
+        fputs(made, f);
+        fclose(f);
+    }
+    if (smc_use_card(&c->bus, k, sys, game, card, rep) != 0) {
+        say(fd, "play failed\n");
+        return;
+    }
+    FILE *m = fopen(mister_cmd(), "w");
+    if (!m || fprintf(m, "load_core %s\n", mgl) < 0) {
+        if (m)
+            fclose(m);
+        lg("%s: card %d picked, but Main didn't take the game (%s)", sys, card, mister_cmd());
+        say(fd, "play failed\n");
+        return;
+    }
+    fclose(m);
+    lg("%s: playing %s with the save on card %d (%s)", sys, game, card, mgl);
+    say(fd, "play ok %d\n", card);
+}
+
 /* ---- the jobs ---- */
 static void do_launch(char *args) {
     smc_sync_hold_card(false);   /* before the core loads: the card picked now is the one it starts with */
@@ -391,6 +509,8 @@ static void do_launch(char *args) {
         return;
     snprintf(play_sys, sizeof(play_sys), "%s", sys);
     snprintf(play_game, sizeof(play_game), "%s", m.game);
+    if (m.game[0] && strchr(m.game, '/') == NULL && m.game[0] != '.')
+        keep_launch(sys, m.game, mgl);   /* for the memory manager's Play */
     no_card = 0;
     struct conn c;
     if (!card_open(&c)) {
@@ -616,6 +736,8 @@ static void do_command(int fd, char *l) {
                     say(fd, "new\t%d\n", free_card);
             }
         }
+    } else if (!strncmp(l, "PLAY ", 5)) {
+        play(fd, &c, &k, a, &rep);
     } else if (!strncmp(l, "USE ", 4)) {
         /* a save picked in the OSD: this SuperStation's saves to their card, the picked card's in. Main then starts the
          * game again, so it loads that save */

@@ -24,6 +24,7 @@ EOF
 }
 
 mkdir -p "$w/sd" "$w/saves/NES" "$w/games/NES" "$w/state"
+export SMC_MISTER_CMD="$w/mister_cmd"   # Main's command pipe, for PLAY: a file here
 # a NES game (iNES header + 16 KB) and its save
 python3 -c "import os,sys; open(sys.argv[1],'wb').write(b'NES\x1a\x01\x00'+bytes(10)+os.urandom(16384))" "$w/games/NES/Test Game.nes"
 python3 -c "import os,sys; open(sys.argv[1],'wb').write(os.urandom(8192))" "$w/saves/NES/Test Game.sav"
@@ -126,6 +127,27 @@ kill $shim 2>/dev/null || true; wait $shim 2>/dev/null || true
 sleep 3
 grep -q "menu told" "$w/shim3.log" && ok "MENU told" || bad "MENU"
 grep -q "sync stopped with an error" /tmp/smcd.log && bad "sync errors in the log" || ok "no sync errors"
+
+# 4b. the memory manager's Play: the save on a card, then Main told to load the game (its MGL from the launch here, else
+#     one made from its ROM). Main's pipe is a file here: what smcd wrote to it is checked
+cmp -s "$w/state/launch/NES/Test Game.mgl" "$w/game.mgl" && ok "PLAY: the game's MGL kept from its launch" || bad "the kept MGL"
+: > "$w/mister_cmd"
+r=$(ask "PLAY NES	2	Test Game" | head -1)
+[ "$r" = "play ok 2" ] && grep -qx "load_core $w/state/launch/NES/Test Game.mgl" "$w/mister_cmd" && [ ! -e "$w/saves/NES/Test Game.sav" ] \
+    && ok "PLAY on card 2 (no save there): Main told to load the game's MGL, no save" || bad "PLAY 2: $r / $(cat "$w/mister_cmd")"
+: > "$w/mister_cmd"
+r=$(ask "PLAY NES	1	Test Game" | head -1)
+[ "$r" = "play ok 1" ] && cmp -s "$w/saves/NES/Test Game.sav" "$w/first.sav" && grep -q "^load_core " "$w/mister_cmd" \
+    && ok "PLAY on card 1: its save back, the game loaded" || bad "PLAY 1: $r"
+rm -f "$w/state/launch/NES/Test Game.mgl"; : > "$w/mister_cmd"
+r=$(ask "PLAY NES	1	Test Game" | head -1)
+[ "$r" = "play ok 1" ] && grep -qx "load_core /tmp/smc_play.mgl" "$w/mister_cmd" && grep -q "<rbf>_Console/NES</rbf>" /tmp/smc_play.mgl \
+    && grep -q "type=\"f\" index=\"1\" path=\"$w/games/NES/Test Game.nes\"" /tmp/smc_play.mgl \
+    && ok "PLAY with no MGL kept: one made from the ROM, as Console Mode's own NES MGLs" || bad "PLAY made MGL: $r / $(cat /tmp/smc_play.mgl 2>&1)"
+: > "$w/mister_cmd"
+[ "$(ask "PLAY NES	1	No Such Game" | head -1)" = "play notfound" ] && [ ! -s "$w/mister_cmd" ] && ok "PLAY: no ROM: notfound, Main not told" || bad "PLAY notfound"
+[ "$(ask "PLAY PSX	1	Some Game" | head -1)" = "play psx" ] && ok "PLAY PSX: refused (its own card)" || bad "PLAY PSX"
+[ "$(ask "PLAY NES	0	Test Game" | head -1)" = "play failed" ] && ok "PLAY card 0: refused" || bad "PLAY 0"
 
 # 5. a long list on the OSD page (a stand-in smcd with 30 saves): it scrolls, no row cut off or past the page
 kill $(pgrep -f "$B/smcd") 2>/dev/null || true; sleep 0.5; rm -f /tmp/smcd.sock

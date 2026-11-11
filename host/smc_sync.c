@@ -547,6 +547,67 @@ static struct rom *rom_for(const char *sys, const char *game) {
     return NULL;
 }
 
+/* ---- starting a game from the memory manager (smcd PLAY) ---- */
+
+/* how Console Mode's own MGLs load each system's game (its _@Homebrew MGLs): the core, the save folder when it isn't
+ * the core's (<setname>), the file slot. Systems not here (CDs, arcade, and the ones without an MGL seen) start only
+ * from the MGL of an earlier launch */
+static const struct { const char *sys, *core, *setname; int index, delay; } mgl_slots[] = {
+    {"NES", "NES", NULL, 1, 2},          {"SNES", "SNES", NULL, 0, 2},       {"GAMEBOY", "Gameboy", NULL, 1, 2},
+    {"GBC", "Gameboy", "GBC", 1, 2},     {"GBA", "GBA", NULL, 1, 2},          {"MegaDrive", "MegaDrive", NULL, 1, 1},
+    {"N64", "N64", NULL, 1, 1},          {"SMS", "SMS", NULL, 1, 1},          {"TGFX16", "TurboGrafx16", NULL, 0, 1},
+};
+
+static void xml_escape(const char *in, char *out, size_t n) {
+    size_t o = 0;
+    for (; *in && o + 7 < n; in++) {
+        const char *e = *in == '&' ? "&amp;" : *in == '<' ? "&lt;" : *in == '>' ? "&gt;" : *in == '"' ? "&quot;" : NULL;
+        if (e)
+            o += (size_t)snprintf(out + o, n - o, "%s", e);
+        else
+            out[o++] = *in;
+    }
+    out[o] = 0;
+}
+
+int smc_game_mgl(const struct smc_sync_cfg *cfg, const char *sys, const char *game, char *out, size_t n) {
+    C = cfg;
+    if (!out || !n)
+        return -1;
+    out[0] = 0;
+    for (size_t i = 0; i < sizeof(mgl_slots) / sizeof(mgl_slots[0]); i++) {
+        if (strcmp(mgl_slots[i].sys, sys))
+            continue;
+        struct rom *r = rom_for(sys, game);
+        if (!r) {
+            /* not in the index made earlier: the folders read again (a game copied in since) */
+            int w = 0;
+            for (int j = 0; j < nroms; j++)
+                if (strcmp(roms[j].sys, sys))
+                    roms[w++] = roms[j];
+            nroms = w;
+            w = 0;
+            for (int j = 0; j < nindexed; j++)
+                if (strcmp(indexed[j], sys))
+                    memmove(indexed[w++], indexed[j], sizeof(indexed[j]));
+            nindexed = w;
+            r = rom_for(sys, game);
+        }
+        if (!r)
+            return -1;
+        char path[2100], set[96] = "";
+        xml_escape(r->path, path, sizeof(path));
+        if (mgl_slots[i].setname)
+            snprintf(set, sizeof(set), "\t<setname>%s</setname>\n", mgl_slots[i].setname);
+        int k = snprintf(out, n,
+                         "<mistergamedescription>\n\t<rbf>_Console/%s</rbf>\n%s\t<file delay=\"%d\" type=\"f\" "
+                         "index=\"%d\" path=\"%s\"/>\n</mistergamedescription>\n",
+                         mgl_slots[i].core, set, mgl_slots[i].delay, mgl_slots[i].index, path);
+        return k > 0 && (size_t)k < n ? 0 : -1;
+    }
+    return -1;
+}
+
 static int id_of(struct rom *r) {
     if (!r->known)
         r->known = smc_game_id_of(r->sys, r->path, r->id, r->title) == 0 ? 1 : -1;

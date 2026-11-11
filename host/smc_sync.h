@@ -63,6 +63,10 @@ struct smc_mgl {
     bool same_dir;
 };
 int smc_mgl_read(const char *path, struct smc_mgl *m);
+/* An MGL that starts a game (its save's name in sys) the way Console Mode's own MGLs do, made from its ROM in the games
+ * folders: 0, or -1 when the ROM isn't found or the system's MGL isn't known (CD systems, arcade: an earlier launch's MGL
+ * only) */
+int smc_game_mgl(const struct smc_sync_cfg *cfg, const char *sys, const char *game, char *out, size_t n);
 
 /* The default save icon of a system as icon.bin bytes (smc_icons.c, made by tools/icons/make_icons.py), or NULL.
  * The sync puts it beside a game's saves on the card the first time the game goes there. */
