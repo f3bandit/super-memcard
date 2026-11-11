@@ -284,11 +284,37 @@ written like Console Mode's (N64, and Game Boy Color through `GameboyColor.mgl` 
 found are fixed: MGL `<setname>` names the save folder (`smc_launch_system()`), and two saves of one game on one
 SuperStation each get their own set. Details in 08.
 
+## 7b. One game a system on an SS1 (Nov 10 2026, `smcd/sweep.sh`)
+
+With the test Main, the simulated card and the real saves folder (backed up first): Play on card 2 (the game started
+with no save; the right core), then Play on card 1 (every one of the game's save files back, byte for byte). After all
+of them, every save on the SS1 as it was before.
+
+| system (core) | game | its save |
+|---|---|---|
+| NES | The Legend of Zelda | `.sav` (battery RAM) |
+| SNES | Tactics Ogre | `.sav` |
+| Game Boy | Final Fantasy Legend II | `.sav` |
+| Game Boy Color (Gameboy core, GBC saves) | Link's Awakening DX | `.sav`, 32 KB |
+| GBA | The Minish Cap | `.sav` (EEPROM) |
+| Mega Drive / Genesis (MegaDrive core; ROM in games/Genesis) | Phantasy Star IV | `.sav`, 64 KB |
+| N64 | Ogre Battle 64 | `.sra` and four Controller Paks `_1`..`_4.cpk` |
+| N64 | Majora's Mask | `.fla` (flash) |
+| TurboGrafx-CD (TurboGrafx16 core, started from its MGL) | Dracula X (Rondo) | `.sav` (2 KB BRAM) |
+| Neo Geo (started from its MGL) | Kabuki Klash | `.sav` |
+
+On the way: Console Mode has no Genesis core (Genesis games are the MegaDrive core's: saves/MegaDrive), so smcd looks for
+a system's ROMs in its other folders too (games/Genesis, games/TGFX16-CD; a CD folder by its `.cue`/`.chd`); Main makes
+blank N64 saves as an N64 game loads with none; a Saturn game's discs share one save (Main's
+`saturn_get_save_without_disk`, ported). Not yet on an SS1, for want of a game here: Master System, Game Gear, Mega-CD,
+32X, Saturn and Jaguar (the saves are standard `<game>.sav`; Saturn's naming is in the card tests).
+
 ## 8. Open points
 
 - The shipping card's firmware: sd2psXtd-based? Its source (GPL-3.0) to apply `firmware/` to.
 - Raw frames in Console Mode's menu core: the same `SMC_RAW` or its own command; its timing.
-- Where the shim's three calls go in `MiSTer_ConsoleMode`, and starting `smcd` at boot.
+- Where the shim's three calls go in `MiSTer_ConsoleMode`, and starting `smcd` at boot (a start script still to come).
+- On an SS1, one game each of Master System, Game Gear, Mega-CD, 32X, Saturn and Jaguar (7b).
 - Retro Remake's own signing key in `smcd` and the firmware (12); the test key until then.
 - The SuperStation check (features only on a genuine SS1): how Console Mode recognizes one.
 - The real card's speed limit, and a power pull mid-save on the real card (works in the simulation).
