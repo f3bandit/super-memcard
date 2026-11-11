@@ -656,6 +656,39 @@ static void icon_wait(void) {
     }
 }
 
+/* the game lists the listed games need (their official names: libretro's covers are filed by them), from cm_modules'
+ * gamedb module, which keeps them in Console Mode's gamedb folder; without it (or offline) icons come from the other
+ * places */
+#define GAMEDB_MODULE "/media/fat/ConsoleMode/tools/modules/gamedb/gamedb.sh"
+static void lists_for_icons(const struct smc_sync_cfg *k) {
+    char names[16][96];
+    int n = smc_icon_lists_needed(k, names, 16);
+    if (n <= 0 || access(GAMEDB_MODULE, X_OK))
+        return;
+    pid_t p = fork();
+    if (p == 0) {
+        int nul = open("/dev/null", O_RDWR);
+        if (nul >= 0) {
+            dup2(nul, 0);
+            dup2(nul, 1);
+            dup2(nul, 2);
+        }
+        char *argv[20];
+        int a = 0;
+        argv[a++] = (char *)"bash";
+        argv[a++] = (char *)GAMEDB_MODULE;
+        argv[a++] = (char *)"update";
+        for (int i = 0; i < n; i++)
+            argv[a++] = names[i];
+        argv[a] = NULL;
+        setenv("GAMEDB_DIR", k->gamedb_dir, 1);
+        execvp("bash", argv);
+        _exit(127);
+    }
+    if (p > 0)
+        waitpid(p, NULL, 0);
+}
+
 /* from the main loop: collect a finished download run; start one when games are listed */
 static void icon_poll(void) {
     if (icon_child > 0) {
@@ -668,6 +701,7 @@ static void icon_poll(void) {
     pid_t p = fork();
     if (p == 0) {
         struct smc_sync_cfg k = cfg();
+        lists_for_icons(&k);
         int made = smc_fetch_icons(&k, fetch);
         if (made)
             lg("icons: %d made from pictures (on the card the next time it's opened)", made);
@@ -703,8 +737,9 @@ int main(int argc, char **argv) {
         }
     }
     if (!saves) snprintf(sv, sizeof(sv), "%s/saves", root), saves = sv;
-    if (!state) snprintf(st, sizeof(st), "%s/supermemcard", root), state = st;
-    if (!lists) snprintf(ls, sizeof(ls), "%s/supermemcard/gamelists", root), lists = ls;
+    /* Console Mode's folders: Super MemCard's own, and the game lists of cm_modules' gamedb module */
+    if (!state) snprintf(st, sizeof(st), "%s/ConsoleMode/supermemcard", root), state = st;
+    if (!lists) snprintf(ls, sizeof(ls), "%s/ConsoleMode/gamedb", root), lists = ls;
     if (!ngames) {
         snprintf(g[0], sizeof(g[0]), "%s/games", root);
         games[ngames++] = g[0];

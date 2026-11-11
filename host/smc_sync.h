@@ -79,6 +79,9 @@ int smc_fetch_icons(const struct smc_sync_cfg *cfg, int (*fetch)(const char *url
 int smc_apply_icons(const struct smc_bus *b, const struct smc_sync_cfg *cfg);
 /* A manual card read: games with no picture found are asked for again (else once in 30 days). */
 void smc_icons_retry(bool on);
+/* The game lists (libretro's, "<name>" as in <gamedb_dir>/<name>.dat) the games waiting for an icon need and that
+ * aren't there: for whoever downloads lists (cm_modules' gamedb module). Returns how many (names filled). */
+int smc_icon_lists_needed(const struct smc_sync_cfg *cfg, char names[][96], int max);
 
 /* When to sync (docs/05 §3): like a PS1, the card is only read or written when a save is loaded or saved, and the card
  * is only reachable from the menu core, so around a game:

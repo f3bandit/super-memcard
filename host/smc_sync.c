@@ -959,7 +959,23 @@ int smc_fetch_icons(const struct smc_sync_cfg *cfg, int (*fetch)(const char *url
     char q[1100], work[1100];
     snprintf(q, sizeof(q), "%s/icons/queue.txt", C->state_dir);
     snprintf(work, sizeof(work), "%s/icons/queue.work", C->state_dir);
-    if (rename(q, work))
+    bool have = rename(q, work) == 0;
+    /* games set aside because their game list wasn't here yet: tried again with this run */
+    char later[1100];
+    snprintf(later, sizeof(later), "%s/icons/queue.later", C->state_dir);
+    FILE *lf = fopen(later, "r");
+    if (lf) {
+        FILE *wf = fopen(work, "a");
+        char buf[2600];
+        while (wf && fgets(buf, sizeof(buf), lf))
+            fputs(buf, wf);
+        if (wf)
+            fclose(wf);
+        fclose(lf);
+        unlink(later);
+        have = true;
+    }
+    if (!have)
         return 0;
     FILE *f = fopen(work, "r");
     char line[2600];
@@ -1009,7 +1025,30 @@ int smc_fetch_icons(const struct smc_sync_cfg *cfg, int (*fetch)(const char *url
         url_name(el, sizeof(el), sys);
         snprintf(url, sizeof(url), "%s/%s/%s.png", SMC_ICON_REPO, el, en);
         l = fetch_icon(fetch, url, tmp, icon, sizeof(icon));
-        /* 2. libretro's cover, by official name, in each of the system's lists */
+        /* 2. libretro's cover, by official name, in each of the system's lists (looked up again here: the lists
+         * may have come since the game was listed) */
+        char fresh_name[400] = "";
+        bool lists_missing = false;
+        if (!*name && C->gamedb_dir) {
+            const char *crc = NULL, *dash = strrchr(base, '-');
+            if (!strncmp(base, "CRC-", 4))
+                crc = base + 4;
+            else if (dash && strlen(dash + 1) == 8 && strspn(dash + 1, "0123456789ABCDEF") == 8)
+                crc = dash + 1;
+            const char *nm = smc_gamedb_name(C->gamedb_dir, sys, crc, crc ? NULL : base);
+            if (nm)
+                snprintf(fresh_name, sizeof(fresh_name), "%s", nm);
+            const char *lists[3];
+            int disc, nl = smc_gamedb_lists(sys, lists, &disc), have = 0;
+            for (int li = 0; li < nl; li++) {
+                char lp[1300];
+                snprintf(lp, sizeof(lp), "%s/%s.dat", C->gamedb_dir, lists[li]);
+                have += access(lp, R_OK) == 0;
+            }
+            lists_missing = nl > 0 && have == 0;   /* none of the system's lists here yet */
+            if (*fresh_name)
+                name = fresh_name;
+        }
         if (!l && *name) {
             const char *lists[3];
             int disc, nl = smc_gamedb_lists(sys, lists, &disc);
@@ -1047,6 +1086,10 @@ int smc_fetch_icons(const struct smc_sync_cfg *cfg, int (*fetch)(const char *url
             unlink(none);
             icons_line("ready.txt", ready);
             made++;
+        } else if (lists_missing && !*name) {
+            char again[2600];   /* its game list isn't here yet (offline, or no gamedb module): ask again later */
+            snprintf(again, sizeof(again), "%s\t%s\t%s\t%s\t\t%s\n", sys, card, id, base, rom);
+            icons_line("queue.later", again);
         } else {
             put_small(none, "", 0); /* no picture anywhere */
         }
@@ -1055,6 +1098,41 @@ int smc_fetch_icons(const struct smc_sync_cfg *cfg, int (*fetch)(const char *url
         fclose(f);
     unlink(work);
     return made;
+}
+
+int smc_icon_lists_needed(const struct smc_sync_cfg *cfg, char names[][96], int max) {
+    C = cfg;
+    if (!C->gamedb_dir)
+        return 0;
+    int n = 0;
+    const char *files[] = {"queue.txt", "queue.later"};
+    for (int fi = 0; fi < 2; fi++) {
+        char q[1100], line[2600];
+        snprintf(q, sizeof(q), "%s/icons/%s", C->state_dir, files[fi]);
+        FILE *f = fopen(q, "r");
+        while (f && fgets(line, sizeof(line), f)) {
+            char *tab = strchr(line, '\t');
+            if (!tab)
+                continue;
+            *tab = 0;
+            const char *lists[3];
+            int disc, nl = smc_gamedb_lists(line, lists, &disc);
+            for (int li = 0; li < nl; li++) {
+                char lp[1300];
+                snprintf(lp, sizeof(lp), "%s/%s.dat", C->gamedb_dir, lists[li]);
+                if (!access(lp, R_OK))
+                    continue;
+                bool have = false;
+                for (int k = 0; k < n; k++)
+                    have |= !strcmp(names[k], lists[li]);
+                if (!have && n < max)
+                    snprintf(names[n++], 96, "%s", lists[li]);
+            }
+        }
+        if (f)
+            fclose(f);
+    }
+    return n;
 }
 
 int smc_apply_icons(const struct smc_bus *b, const struct smc_sync_cfg *cfg) {
