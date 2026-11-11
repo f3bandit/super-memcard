@@ -58,6 +58,16 @@ for i in $(seq 50); do [ -S /tmp/smcd.sock ] && break; sleep 0.1; done
 sleep 0.5
 ask HELLO | grep -q "^card .* version 2" && ok "HELLO through the shim" || bad "HELLO through the shim"
 
+# the card bus is someone else's (the memory manager reading the PS1 card): smcd waits, then leaves it alone
+sleep 30 & holder=$!; pids="$pids $holder"
+rm -f /tmp/super_memcard.busy; ln -s "$holder Console Mode memory manager" /tmp/super_memcard.busy
+t0=$(date +%s); r=$(ask HELLO); t1=$(date +%s)
+[ "$(echo "$r" | head -1)" = nocard ] && [ $((t1 - t0)) -ge 9 ] && grep -q "the card is in use (Console Mode memory manager)" /tmp/smcd.log \
+    && ok "card in use by another: smcd waited, then left it alone" || bad "card in use: $r ($((t1 - t0)) s)"
+kill $holder; wait $holder 2>/dev/null || true
+ask HELLO | grep -q "^card " && ok "  and used it as soon as it was free (the owner gone)" || bad "  after the owner went"
+[ ! -e /tmp/super_memcard.busy ] && ok "  smcd gave the card back after its command" || bad "  lock left: $(readlink /tmp/super_memcard.busy)"
+
 # 2. the memory manager's Read card
 r=$(ask READ)
 echo "$r" | grep -q "^read ok .*pushed=1" && ok "READ: the save to the card" || bad "READ: $r"

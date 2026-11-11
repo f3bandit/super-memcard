@@ -136,8 +136,14 @@ Nothing runs off the screen or over another row. System headings scroll with the
 
 ### Shared bus
 
-One user of the card at a time: Memory Cards' own PS1 card reads, SS1 Tool's and `smcd` take a lock file (like
-`/tmp/ss1_bt.busy` for Bluetooth) while they run.
+One user of the card at a time: `/tmp/super_memcard.busy`, in cm_modules (`cmmod.h`: `cmod_mc_lock()` /
+`cmod_mc_unlock()`; `mc_lock` / `mc_unlock` in the modules' `lib/common.sh`). A symbolic link to `"<pid> <who>"`, made in
+one step, so two can't both get it, and free again as soon as its owner is gone, even after a crash.
+
+- `smcd` holds it while it has the card open (waits up to 10 s for it, then leaves the card alone until next time).
+- cmjobd's card and controller-tester jobs hold it.
+- Memory Cards' own reads and writes of the PS1 card (`@memcard`): hold it around them. Not while waiting for
+  `smcd` (READ and the other commands): `smcd` takes it itself.
 
 ### During the game (phase 2)
 

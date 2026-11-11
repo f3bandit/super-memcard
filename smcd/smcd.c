@@ -17,6 +17,8 @@
  *   DELETE <sys>\t<save>    delete a save (others delete theirs at their next sync)
  *   CONFLICTS               saves whose two copies both changed
  *   KEEP <local|card> <sys>\t<save>
+ * The card bus is one user's at a time (/tmp/super_memcard.busy, as cm_modules' cmod_mc_lock): smcd holds it while it has
+ * the card open; when someone else does, it waits up to 10 s, then leaves the card alone until the next time.
  * While a game runs, its save goes to the card as soon as the game saves (its save files changed and settled). */
 #define _GNU_SOURCE
 #include "smc.h"
@@ -213,15 +215,79 @@ static int genuine(struct conn *c) {
     return 0;
 }
 
+/* ---- the front ports' card bus: one user at a time (cm_modules' cmmod.h CMOD_MC_BUSY, the same lock): a symbolic
+ * link /tmp/super_memcard.busy -> "<pid> <who>", made in one step, free again when its owner is gone ---- */
+#define MC_BUSY "/tmp/super_memcard.busy"
+
+static int mc_busy(char *holder, size_t n) {
+    char t[160];
+    ssize_t l = readlink(MC_BUSY, t, sizeof(t) - 1);
+    if (holder && n)
+        holder[0] = 0;
+    if (l <= 0)
+        return 0;
+    t[l] = 0;
+    long pid = atol(t);
+    if (pid <= 0 || (kill((pid_t)pid, 0) && errno == ESRCH)) {
+        unlink(MC_BUSY);
+        return 0;
+    }
+    const char *who = strchr(t, ' ');
+    if (holder && n)
+        snprintf(holder, n, "%s", who ? who + 1 : t);
+    return 1;
+}
+
+static int mc_lock(int wait_ms, char *holder, size_t n) {
+    char t[64];
+    snprintf(t, sizeof(t), "%ld Super MemCard (smcd)", (long)getpid());
+    for (int waited = 0;; waited += 100) {
+        if (!symlink(t, MC_BUSY))
+            return 0;
+        if (!mc_busy(holder, n))
+            continue;
+        if (waited >= wait_ms)
+            return 1;
+        usleep(100000);
+    }
+}
+
+static void mc_unlock(void) {
+    char t[160];
+    ssize_t l = readlink(MC_BUSY, t, sizeof(t) - 1);
+    if (l > 0) {
+        t[l] = 0;
+        if (atol(t) == (long)getpid())
+            unlink(MC_BUSY);
+    }
+}
+
 static void icons_to_card(struct conn *c);
 static void icon_wait(void);
 static int fetch(const char *url, const char *to);
 
 /* the card: vcardd if it runs, else the first front port whose card answers Hello. 1: a card. */
+static int card_open_bus(struct conn *c);
+
 static int card_open(struct conn *c) {
-    struct stat st;
+    char who[120];
     memset(c, 0, sizeof(*c));
     c->front.fd = -1;
+    if (mc_lock(10000, who, sizeof(who))) {
+        static char said[120];
+        if (strcmp(said, who))
+            lg("the card is in use (%s): not now", who);
+        snprintf(said, sizeof(said), "%s", who);
+        return 0;
+    }
+    if (card_open_bus(c))
+        return 1;
+    mc_unlock();
+    return 0;
+}
+
+static int card_open_bus(struct conn *c) {
+    struct stat st;
     if (stat(vcard_path, &st) == 0 && smc_vcard_open(vcard_path, &c->bus) == 0) {
         c->vcard = 1;
         if (smc_hello(&c->bus, SMC_HOST_MAIN, 0, &c->card) == 1 && genuine(c)) {
@@ -265,6 +331,7 @@ static void card_close(struct conn *c) {
         hold(c, 0);
         close(c->front.fd);
     }
+    mc_unlock();
 }
 
 /* ---- the sync's setup ---- */
