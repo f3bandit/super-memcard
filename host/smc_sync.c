@@ -454,7 +454,8 @@ static bool not_a_game(const char *n) {
     return false;
 }
 
-static void index_dir(const char *sys, const char *dir, int depth) {
+/* cd_only: a CD folder (its games are .cue or .chd, which Main names the save after; its tracks aren't games) */
+static void index_dir(const char *sys, const char *dir, int depth, bool cd_only) {
     DIR *d = opendir(dir);
     if (!d)
         return;
@@ -469,11 +470,16 @@ static void index_dir(const char *sys, const char *dir, int depth) {
             continue;
         if (S_ISDIR(st.st_mode)) {
             if (depth < 3)
-                index_dir(sys, p, depth + 1);
+                index_dir(sys, p, depth + 1, cd_only);
             continue;
         }
         if (not_a_game(de->d_name))
             continue;
+        if (cd_only) {
+            const char *x = strrchr(de->d_name, '.');
+            if (strcasecmp(x, ".cue") && strcasecmp(x, ".chd"))
+                continue;
+        }
         if (nroms == maxroms) {
             int m = maxroms ? maxroms * 2 : 256;
             struct rom *r = realloc(roms, (size_t)m * sizeof(*r));
@@ -500,10 +506,19 @@ static void index_system(const char *sys) {
             return;
     if (nindexed < 64)
         snprintf(indexed[nindexed++], SMC_SYS_MAX + 1, "%s", sys);
+    /* a save folder's games may be in other folders too: the MegaDrive core plays games/Genesis as well (Console Mode
+     * has no Genesis core: its saves are MegaDrive's), the TurboGrafx16 core the CDs in games/TGFX16-CD */
+    static const struct { const char *sys, *folder; bool cd; } more[] = {{"MegaDrive", "Genesis", false},
+                                                                       {"TGFX16", "TGFX16-CD", true}};
     for (const char *const *g = C->games_dirs; g && *g; g++) {
         char dir[1024];
         snprintf(dir, sizeof(dir), "%s/%s", *g, sys);
-        index_dir(sys, dir, 0);
+        index_dir(sys, dir, 0, !strcmp(sys, "Saturn") || !strcmp(sys, "MegaCD"));   /* CD systems: .cue/.chd */
+        for (size_t i = 0; i < sizeof(more) / sizeof(more[0]); i++)
+            if (!strcmp(more[i].sys, sys)) {
+                snprintf(dir, sizeof(dir), "%s/%s", *g, more[i].folder);
+                index_dir(sys, dir, 0, more[i].cd);
+            }
     }
     load_ids(); /* the IDs worked out before, for files that haven't changed */
 }
