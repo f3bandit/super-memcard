@@ -73,6 +73,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "profiling.h"
 #include "str_util.h"
 #include "autofire.h"
+#include "smc_osd.h"     // Super MemCard: the OSD Saves page
 
 /*menu states*/
 enum MENU
@@ -147,6 +148,9 @@ enum MENU
 
 	MENU_CHEATS1,
 	MENU_CHEATS2,
+
+	MENU_SMC_SAVES1,   // Super MemCard: the running game's saves (smc_osd.cpp)
+	MENU_SMC_SAVES2,
 
 	MENU_RA_ACHIEVEMENTS1,
 	MENU_RA_ACHIEVEMENTS2,
@@ -1254,6 +1258,8 @@ void HandleUI(void)
 	static uint32_t ra_submenu;              // generic-menu row of the "Achievements" entry (-1 when absent)
 	static int ra_list_ret = MENU_NONE1;     // menustate to return to when the achievement list/detail closes
 	static uint32_t ra_list_ret_sub = 0;     // menusub to restore on that return
+	static uint32_t smc_submenu;             // Super MemCard: generic-menu row of the "Saves" entry (-1 when absent)
+	static uint32_t smc_ret_sub = 0;
 	static int need_reset = 0;
 	static int flat = 0;
 	static int menusub_parent = 0;
@@ -2149,6 +2155,7 @@ void HandleUI(void)
 			dip_submenu = -1;
 			manual_submenu = -1;
 			ra_submenu = -1;
+			smc_submenu = -1;
 
 			int last_space = 0;
 
@@ -2445,6 +2452,16 @@ void HandleUI(void)
 				selentry++;
 			}
 
+			// Super MemCard: the game's saves on the card (main page only, after the core's own options)
+			if (!page && smc_osd_available())
+			{
+				smc_submenu = selentry;
+				MenuWrite(entry, " Saves", menusub == selentry, 0);
+				menumask = (menumask << 1) | 1;
+				entry++;
+				selentry++;
+			}
+
 			if (!entry) break;
 
 			for (; entry < OsdGetSize() - 1; entry++) MenuWrite(entry, "", 0, 0);
@@ -2580,7 +2597,17 @@ void HandleUI(void)
 				select = 1;
 			}
 
-			if (ra_submenu == menusub && select)
+			if (smc_submenu == menusub && select)
+			{
+				// "Saves": the game's saves on the card
+				if (smc_osd_open())
+				{
+					smc_ret_sub = menusub;
+					menusub = 0;
+					menustate = MENU_SMC_SAVES1;
+				}
+			}
+			else if (ra_submenu == menusub && select)
 			{
 				// "Achievements" menu entry: open the list view.
 				int ach_count = achievements_list_open();
@@ -6152,6 +6179,27 @@ void HandleUI(void)
 			}
 			menustate = MENU_CHEATS1;
 		}
+		break;
+
+		/******************************************************************/
+		/* Super MemCard: the running game's saves on the card             */
+		/******************************************************************/
+	case MENU_SMC_SAVES1:
+		helptext_idx = 0;
+		smc_osd_print();
+		menustate = MENU_SMC_SAVES2;
+		parentstate = menustate;
+		break;
+
+	case MENU_SMC_SAVES2:
+		menumask = 0;
+		if (menu || back)
+		{
+			menustate = MENU_GENERIC_MAIN1;
+			menusub = smc_ret_sub;
+			break;
+		}
+		if (smc_osd_key(up, down, c, select)) menustate = MENU_SMC_SAVES1;
 		break;
 
 		/******************************************************************/

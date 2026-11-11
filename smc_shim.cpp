@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
@@ -17,6 +18,14 @@
 
 #define SMCD_SOCK  "/tmp/smcd.sock"
 #define FRONT_SOCK "/tmp/smc_frontport.sock"
+// the game running with its saves on the card, for the OSD's Saves page: its MGL's (or MRA's) path, and a copy of an
+// MGL (the restart's, should the first one be gone). In /tmp: Main starts again after each core, and these outlive it
+#define GAME_FILE  "/tmp/smc_game"
+#define GAME_COPY  "/tmp/smc_game.mgl"
+
+int xml_load(const char *xml);   // Main's MGL/MRA loader (support/arcade/mra_loader.cpp)
+
+static int restarting;           // the OSD's Saves page restarts the game: LAUNCH again, from the game's core
 
 static int listen_fd = -1, peer_fd = -1;
 static char peer_buf[1024];
@@ -152,9 +161,10 @@ void smc_shim_poll()
 	serve(0);
 }
 
-// tell smcd; with wait, wait for its DONE (passing frames meanwhile)
-static void tell(const char *line, int wait)
+// tell smcd; with wait, wait for its DONE (passing frames meanwhile) and give its answer in reply
+static void tell(const char *line, int wait, char *reply = NULL, size_t rn = 0)
 {
+	if (reply && rn) reply[0] = 0;
 	listen_front();   // before smcd hears of it: it connects to pass its frames straight away
 	int fd = unix_connect(SMCD_SOCK);
 	if (fd < 0) return;   // no smcd: Super MemCard isn't installed or running
@@ -172,22 +182,99 @@ static void tell(const char *line, int wait)
 			if (r <= 0) break;
 			len += (size_t)r;
 			buf[len] = 0;
-			if (strstr(buf, "DONE")) break;
+			if (strstr(buf, "DONE")) { if (reply) snprintf(reply, rn, "%s", buf); break; }
 			if (len >= sizeof(buf) - 1) len = 0;
 		}
 	}
 	close(fd);
 }
 
+static void copy_file(const char *from, const char *to)
+{
+	FILE *a = fopen(from, "rb");
+	if (!a) return;
+	FILE *b = fopen(to, "wb");
+	if (b)
+	{
+		char t[4096];
+		size_t n;
+		while ((n = fread(t, 1, sizeof(t), a)) > 0) fwrite(t, 1, n, b);
+		fclose(b);
+	}
+	fclose(a);
+}
+
 void smc_shim_core_start(const char *rbf, const char *mgl)
 {
-	if (!is_menu() || !rbf) return;
-	char l[1200];
+	if ((!is_menu() && !restarting) || !rbf) return;
+	restarting = 0;
+	int again = mgl && !strcmp(mgl, GAME_COPY);   // the restart's copy: the game's file stays what it was
+	if (!again) { unlink(GAME_FILE); unlink(GAME_COPY); }
+	char l[1200], reply[64];
 	snprintf(l, sizeof(l), "LAUNCH %s\t%s\n", rbf, mgl ? mgl : "");
-	tell(l, 1);
+	tell(l, 1, reply, sizeof(reply));
+	if (!strstr(reply, "DONE saves") || !mgl || !mgl[0]) { unlink(GAME_FILE); unlink(GAME_COPY); return; }
+	if (again) return;
+	FILE *f = fopen(GAME_FILE, "w");
+	if (f) { fprintf(f, "%s\n", mgl); fclose(f); }
+	size_t n = strlen(mgl);
+	if (n > 4 && !strcasecmp(mgl + n - 4, ".mgl")) copy_file(mgl, GAME_COPY);
 }
 
 void smc_shim_menu_start()
 {
-	if (is_menu()) tell("MENU\n", 0);
+	if (!is_menu()) return;   // Main starts again after every core: only the menu's start is the game's end
+	unlink(GAME_FILE);
+	unlink(GAME_COPY);
+	tell("MENU\n", 0);
+}
+
+bool smc_shim_saves_available()
+{
+	return !is_menu() && (!access(GAME_FILE, R_OK) || !access(GAME_COPY, R_OK));
+}
+
+int smc_shim_ask(const char *cmd, char *out, size_t n)
+{
+	if (!out || n < 2) return -1;
+	out[0] = 0;
+	listen_front();
+	int fd = unix_connect(SMCD_SOCK);
+	if (fd < 0) return -1;
+	char l[300];
+	snprintf(l, sizeof(l), "%s\n", cmd);
+	send_line(fd, l);
+	size_t len = 0;
+	int done = 0;
+	for (int t = 0; t < 2000 && !done; t++)   // 20 s: smcd reads the card through our frames meanwhile
+	{
+		serve(0);
+		struct pollfd p = { fd, POLLIN, 0 };
+		if (poll(&p, 1, 10) <= 0) continue;
+		ssize_t r = recv(fd, out + len, n - 1 - len, 0);
+		if (r <= 0) break;
+		len += (size_t)r;
+		out[len] = 0;
+		char *e = strstr(out, "END\n");
+		if (e && (e == out || e[-1] == '\n')) { *e = 0; len = (size_t)(e - out); done = 1; }
+		if (len >= n - 1) break;   // too long for out: what fitted
+	}
+	close(fd);
+	return done ? (int)len : -1;
+}
+
+void smc_shim_restart()
+{
+	char path[1024] = "";
+	FILE *f = fopen(GAME_FILE, "r");
+	if (f)
+	{
+		if (!fgets(path, sizeof(path), f)) path[0] = 0;
+		fclose(f);
+		path[strcspn(path, "\n")] = 0;
+	}
+	if (!path[0] || access(path, R_OK)) snprintf(path, sizeof(path), "%s", GAME_COPY);
+	if (access(path, R_OK)) return;
+	restarting = 1;   // LAUNCH again: smcd's card for the game from now on
+	xml_load(path);
 }
