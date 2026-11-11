@@ -106,6 +106,23 @@ that isn't Super MemCard, the answer is `nocard`; a Super MemCard card that isn'
 | `DELETE <sys>\t<save>` | `delete <rc>`: other SuperStations delete their copy at their next sync; nothing is lost |
 | `CONFLICTS` | saves whose two copies both changed (played on two SuperStations) |
 | `KEEP <local\|card> <sys>\t<save>` | `keep <rc>`: settles one |
+| `PLAY <sys>\t<card>\t<save name>` | `play ok <card>` \| `play notfound` \| `play psx` \| `play failed`: the **Play** button (below) |
+
+**Play** (on a game's entry, per virtual card): starts the game with the save on that card. smcd switches the system to
+that card the way the OSD's Saves page does (this SuperStation's saves to their card first, the picked card's in), then
+tells Main to load the game (`load_core <mgl>` on `/dev/MiSTer_cmd`), the way Console Mode starts a game; the game's
+LAUNCH then finds its save in place. `save name` is LIST's (or SECTION's) save name column, `card` its card. The game:
+
+- played on this SuperStation before: the MGL of its last launch, which smcd keeps (`<state>/launch/<sys>/<save>.mgl`);
+- otherwise its ROM, found by the save's name in the system's games folders, in an MGL made as Console Mode's own
+  (`_@Homebrew`) ones are: NES, SNES, Game Boy, Game Boy Color, GBA, Mega Drive, N64, Master System, TurboGrafx-16.
+  Other systems (CDs, arcade) start only from an earlier launch's MGL;
+- `play notfound`: neither (the ROM isn't on this SuperStation): say so, nothing changes; `play psx`: the PSX core's
+  saves are its card images in the port, not these.
+
+Send it from Console Mode's menu (where the memory manager is). Checked on a PC (`smcd/test.sh`) and on an SS1 (Nov 10
+2026): Final Fantasy VI started on card 1 from an MGL made from its ROM, then on card 2 (a blank), then with the real
+save moved to card 2 and the blank to card 1, card 2's save loaded and the OSD's Saves page showed card 2 as "now".
 
 `SECTION`, every system's saves at once, any number of them, in a fixed system order:
 
