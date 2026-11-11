@@ -2,13 +2,14 @@
 # Super MemCard on an SS1: one game a system, Play on card 2 (no save), then Play on card 1 (its save back, byte for
 # byte), the core checked each time. Needs the test Main in the menu, vcardd (the simulated card, with an identity) and
 # smcd on the real saves folder (ss1test.sh start, then smcd -S /media/fat/saves). Backs the saves up first.
-#   sh sweep.sh            log: /media/fat/phosphor/tmp-test/sweep.log
+#   sh sweep.sh [<system>...]   all, or only these (NES MegaCD ...); log: /media/fat/phosphor/tmp-test/sweep.log
 # Copyright (C) 2026 f3bandit. All rights reserved.
 T=/media/fat/phosphor/tmp-test
 DL=$T/dl
 S=/media/fat/saves
 BK=$T/saves_backup_sweep
 LOG=$T/sweep.log
+ONLY="$*"
 : > $LOG
 say() { echo "$*" | tee -a $LOG; }
 ask() { python3 - "$1" <<'EOF'
@@ -30,8 +31,8 @@ files() { (cd "$S/$1" 2>/dev/null && for f in "$2".* "$2"_[1-4].*; do [ -f "$f" 
 
 # 1. the saves, backed up (the folders this touches)
 rm -rf $BK; mkdir -p $BK
-for d in NES SNES GAMEBOY GBC GBA MegaDrive N64 TGFX16 NEOGEO; do [ -d $S/$d ] && cp -a $S/$d $BK/; done
-(cd $S && find NES SNES GAMEBOY GBC GBA MegaDrive N64 TGFX16 NEOGEO -type f 2>/dev/null | while read f; do md5sum "$f"; done) > $BK/md5.txt
+for d in NES SNES GAMEBOY GBC GBA MegaDrive MegaCD N64 TGFX16 NEOGEO; do [ -d $S/$d ] && cp -a $S/$d $BK/; done
+(cd $S && find NES SNES GAMEBOY GBC GBA MegaDrive MegaCD N64 TGFX16 NEOGEO -type f 2>/dev/null | while read f; do md5sum "$f"; done) > $BK/md5.txt
 say "backed up: $(wc -l < $BK/md5.txt) save files in $BK"
 
 # 2. the downloaded saves where a game has none (never over a save that's there)
@@ -46,15 +47,20 @@ put MegaDrive "Phantasy Star IV.sav" $DL/md_ps4.sav
 put N64 "Legend of Zelda, The - Ocarina of Time.sra" $DL/n64_oot.sra
 put N64 "Legend of Zelda, The - Majora's Mask.fla" $DL/n64_mm.fla
 put TGFX16 "Akumajou Dracula X - Chi no Rondo (Japan).sav" $DL/pce_rondo.sav
+# a Mega-CD save is the console's backup RAM: Popful Mail's, as Sonic CD's (the game here)
+put MegaCD "Sonic CD (USA).sav" /media/fat/saves_test/mcd_popful_mail.sav
 sync
 
 # 3. the games: system, save name, the core it should be, and an MGL for the ones started only from one
 G=/media/usb0/games
 mgl_cd() { printf '<mistergamedescription><rbf>_Console/TurboGrafx16</rbf><file delay="1" type="s" index="0" path="%s"/></mistergamedescription>' "$1"; }
+mgl_mcd() { printf '<mistergamedescription><rbf>_Console/MegaCD</rbf><file delay="1" type="s" index="0" path="%s"/></mistergamedescription>' "$1"; }
 mgl_neo() { printf '<mistergamedescription><rbf>_Console/NeoGeo</rbf><file delay="1" type="f" index="1" path="%s"/></mistergamedescription>' "$1"; }
 pass=0; fail=0
+want() { [ -z "$ONLY" ] || echo " $ONLY " | grep -q " $1 "; }
 one() {   # <sys> <game> [<mgl text>]
     sys=$1; game=$2
+    want "$sys" || return 0
     say ""
     say "== $sys: $game"
     before=$T/sweep_before.md5
@@ -94,6 +100,7 @@ one N64 "Ogre Battle 64 - Person of Lordly Caliber"
 one N64 "Legend of Zelda, The - Majora's Mask"
 one TGFX16 "Akumajou Dracula X - Chi no Rondo (Japan)" "$(mgl_cd "$G/TGFX16-CD/Akumajou Dracula X - Chi No Rondo (English v1.03)/Akumajou Dracula X - Chi no Rondo (Japan).cue")"
 one NEOGEO "kabukikl" "$(mgl_neo "$G/NEOGEO/kabukikl")"
+one MegaCD "Sonic CD (USA)" "$(mgl_mcd "$G/MegaCD/Sonic CD (USA)/Sonic CD (USA).cue")"
 
 say ""
 say "== done: $pass OK, $fail failed"
