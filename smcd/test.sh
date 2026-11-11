@@ -178,7 +178,8 @@ END" ] && ok "PORT 3: refused, any port" || bad "PORT 3"
 r=$(two "PORT 1" "CARD NES	2")
 echo "$r" | grep -q "^card ok 2$" && [ ! -e "$w/saves/NES/Test Game.sav" ] && ok "CARD NES 2 (blank): NES games start with no save" || bad "CARD 2: $r"
 r=$(ask "CARDS NES")
-echo "$r" | grep -q "^card	1	1	[0-9]*	0$" && echo "$r" | grep -q "^card	2	0	0	1$" && ok "CARDS: card 1 kept its save, card 2 in use" || bad "CARDS after: $r"
+echo "$r" | grep -q "^card	1	1	[0-9]*	0$" && echo "$r" | grep -q "^card	2	0	0	1$" && echo "$r" | grep -q "^new	3$" \
+    && ok "CARDS: card 1 kept its save, card 2 in use, the blank one offered is 3 (never the one in use)" || bad "CARDS after: $r"
 [ "$(ask "CARD NES	1" | head -1)" = "card ok 1" ] && cmp -s "$w/saves/NES/Test Game.sav" "$w/first.sav" && ok "CARD NES 1: its save back" || bad "CARD 1"
 [ "$(ask "CARD PSX	2" | head -1)" = "card failed" ] && [ "$(ask "CARD NES	0" | head -1)" = "card failed" ] && ok "CARD PSX or card 0: refused" || bad "CARD refusals"
 

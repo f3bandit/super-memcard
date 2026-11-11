@@ -673,7 +673,7 @@ struct cards_list {
 };
 static void cards_cb(int card, int games, uint32_t newest, bool current, void *ctx) {
     struct cards_list *cl = ctx;
-    if (card >= 1 && card <= 99 && games)
+    if (card >= 1 && card <= 99 && (games || current))   /* the blank card offered is never the one in use */
         cl->used[card] = true;
     say(cl->fd, "card\t%d\t%d\t%u\t%d\n", card, games, newest, current ? 1 : 0);
 }
