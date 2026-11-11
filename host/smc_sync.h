@@ -79,6 +79,18 @@ int smc_fetch_icons(const struct smc_sync_cfg *cfg, int (*fetch)(const char *url
 int smc_apply_icons(const struct smc_bus *b, const struct smc_sync_cfg *cfg);
 /* A manual card read: games with no picture found are asked for again (else once in 30 days). */
 void smc_icons_retry(bool on);
+/* While a game runs (on): a virtual card picked with the card's buttons meanwhile is used from the next game; the running
+ * game's saves keep going to the card it started with (it has that save in memory). */
+void smc_sync_hold_card(bool on);
+/* The saves a game has on the card, one per virtual card that has it, for a menu to pick from: cb(card, how many save
+ * files, the newest one's time, whether it's the card this SuperStation's save is from). Returns how many, <0 error. */
+int smc_game_saves(const struct smc_bus *b, const struct smc_sync_cfg *cfg, const char *sys, const char *game,
+                   void (*cb)(int card, int files, uint32_t time, bool playing, void *ctx), void *ctx);
+/* Use a game's save from virtual card `card` (the whole system moves to that card, as the buttons do): this
+ * SuperStation's saves go to the card they came from first, then the chosen card's come in. 0 done, <0 not (nothing
+ * changed then). The game must be started again to load it (it has the old save in memory). */
+int smc_use_card(const struct smc_bus *b, const struct smc_sync_cfg *cfg, const char *sys, const char *game, int card,
+                 struct smc_sync_report *rep);
 /* The game lists (libretro's, "<name>" as in <gamedb_dir>/<name>.dat) the games waiting for an icon need and that
  * aren't there: for whoever downloads lists (cm_modules' gamedb module). Returns how many (names filled). */
 int smc_icon_lists_needed(const struct smc_sync_cfg *cfg, char names[][96], int max);

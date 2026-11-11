@@ -14,6 +14,10 @@
  *   SYSTEMS                 the systems with saves on the card
  *   LIST <sys> [<card>]     a system's games: name \t id \t time \t files \t bytes \t icon \t save name \t folder
  *   SECTION [PSX]           every other system's saves at once, for the memory manager's screen (section() below)
+ *   SAVES                   (Main's OSD) the running game's saves: save \t card \t files \t time \t playing, one per
+ *                           virtual card that has it, then game \t sys \t name and new \t <the first free card>
+ *   USE <card>              (Main's OSD) play the running game with its save on that card: this SuperStation's saves go
+ *                           to their card first; Main then starts the game again so it loads it. use ok <card> | failed
  *   DELETE <sys>\t<save>    delete a save (others delete theirs at their next sync)
  *   CONFLICTS               saves whose two copies both changed
  *   KEEP <local|card> <sys>\t<save>
@@ -370,6 +374,7 @@ static time_t game_saves_time(const char *sys, const char *game) {
 
 /* ---- the jobs ---- */
 static void do_launch(char *args) {
+    smc_sync_hold_card(false);   /* before the core loads: the card picked now is the one it starts with */
     char *tab = strchr(args, '\t');
     const char *mgl = "";
     if (tab) {
@@ -401,9 +406,11 @@ static void do_launch(char *args) {
     }
     card_close(&c);
     seen = synced = play_game[0] ? game_saves_time(play_sys, play_game) : 0;
+    smc_sync_hold_card(true);    /* the game has this card's save in memory from now on */
 }
 
 static void do_menu(void) {
+    smc_sync_hold_card(false);   /* the game is over: a card picked meanwhile is used from now on */
     char sys[65], game[256];
     snprintf(sys, sizeof(sys), "%s", play_sys);
     snprintf(game, sizeof(game), "%s", play_game);
@@ -528,6 +535,17 @@ static void section(int fd, struct conn *c, const struct smc_sync_cfg *k, int wi
     say(fd, "section\t%d\t%d\n", games, systems);
 }
 
+struct saves_list {
+    int fd;
+    bool used[100];
+};
+static void saves_cb(int card, int files, uint32_t time, bool playing, void *ctx) {
+    struct saves_list *sl = ctx;
+    if (card >= 1 && card <= 99)
+        sl->used[card] = true;
+    say(sl->fd, "save\t%d\t%d\t%u\t%d\n", card, files, time, playing ? 1 : 0);
+}
+
 /* a frontend's command; the answer ends with END */
 static void do_command(int fd, char *l) {
     struct conn c;
@@ -580,6 +598,35 @@ static void do_command(int fd, char *l) {
         }
     } else if (!strcmp(l, "SECTION") || !strcmp(l, "SECTION PSX")) {
         section(fd, &c, &k, l[7] != 0);
+    } else if (!strcmp(l, "SAVES")) {
+        /* the OSD's Saves page: the running game's saves, one per virtual card, and a new one on the first free card */
+        if (!play_sys[0] || !play_game[0]) {
+            say(fd, "nogame\n");
+        } else {
+            struct saves_list sl = {fd, {0}};
+            int n = smc_game_saves(&c.bus, &k, play_sys, play_game, saves_cb, &sl);
+            if (n >= 0) {
+                int free_card = 0;
+                for (int i = 1; i <= 99 && !free_card; i++)
+                    if (!sl.used[i])
+                        free_card = i;
+                say(fd, "game\t%s\t%s\n", play_sys, play_game);
+                if (free_card)
+                    say(fd, "new\t%d\n", free_card);
+            }
+        }
+    } else if (!strncmp(l, "USE ", 4)) {
+        /* a save picked in the OSD: this SuperStation's saves to their card, the picked card's in. Main then starts the
+         * game again, so it loads that save */
+        int card = atoi(a);
+        if (!play_sys[0] || !play_game[0])
+            say(fd, "nogame\n");
+        else if (smc_use_card(&c.bus, &k, play_sys, play_game, card, &rep) == 0) {
+            lg("%s: the save on card %d picked (%s)", play_sys, card, play_game);
+            say(fd, "use ok %d\n", card);
+            seen = synced = game_saves_time(play_sys, play_game);
+        } else
+            say(fd, "use failed\n");
     } else if (!strcmp(l, "CONFLICTS")) {
         smc_conflicts(&k, c.card.id, conflict_cb, &fd);
     } else if (!strncmp(l, "KEEP ", 5)) {

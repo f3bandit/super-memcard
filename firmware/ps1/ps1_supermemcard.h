@@ -24,7 +24,8 @@ enum {
     SMC_INFO   = 0x68, /* file                                 -> status name[16] size[4] gen[4] time[4] (29) */
     SMC_CORE   = 0x69, /* syslen sys flags                     -> status card (2): the system's current card;
                         * flags bit 0: this system's core is running (system mode: screen, buttons); sys "."
-                        * with bit 0: no system (back to the PS1 card) */
+                        * with bit 0: no system (back to the PS1 card). Bit 1: one more request byte, the
+                        * system's card to use from now on (a save picked on the SuperStation) */
     SMC_DELETE = 0x6A, /* file gen[4] time[4]                  -> end (1): the save is deleted at generation gen; the
                         * card keeps a tombstone (Info answers 44 'D') so other SS1s delete their copy too, and
                         * the file itself in <game>/.deleted/ */
@@ -49,6 +50,7 @@ enum { SMC_HOST_MAIN = 1, SMC_HOST_CONSOLE_MODE = 2, SMC_HOST_CORE = 3, SMC_HOST
 #define SMC_MAX_FILE    (1024 * 1024)
 #define SMC_MAX_CARDS   99    /* virtual cards per system */
 #define SMC_CORE_RUNNING 0x01
+#define SMC_CORE_SET_CARD 0x02   /* Core: a byte follows, the system's card to use from now on (1..99) */
 #define SMC_MAX_REQ     (4 + 128 + 4 + SMC_SYS_LEN + SMC_ID_LEN)
 #define SMC_MAX_ANS     130
 

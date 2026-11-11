@@ -69,10 +69,12 @@ int ps1_supermemcard_req_len(uint8_t cmd, const uint8_t *r, int have) {
     case SMC_CERT:
     case SMC_AUTH:
     case SMC_AUTHSIG: return ps1_supermemcard_id_req_len(cmd);
-    case SMC_CORE:
+    case SMC_CORE: {
         if (have < 1) return 1;
         if (r[0] == 0 || r[0] > SMC_SYS_LEN) return -1;
-        return 1 + r[0] + 1;
+        int base = 1 + r[0] + 1;   /* with SMC_CORE_SET_CARD in its flags, the card's number follows */
+        return have >= base && (r[base - 1] & SMC_CORE_SET_CARD) ? base + 1 : base;
+    }
     default: return -1;
     }
 }
@@ -284,16 +286,20 @@ static int read_current_card(const char *sys) {
     return 1;
 }
 
-static void save_mode_card(void) {
+static void write_card_ini(const char *sys, int card) {
     char p[96], buf[32];
+    snprintf(p, sizeof(p), ROOT "/%s", sys);
+    mkdirs(p);
+    snprintf(p, sizeof(p), ROOT "/%s/card.ini", sys);
+    snprintf(buf, sizeof(buf), "card=%d\n", card);
+    write_text(p, buf);
+}
+
+static void save_mode_card(void) {
     if (!mode_dirty)
         return;
     mode_dirty = false;
-    snprintf(p, sizeof(p), ROOT "/%s", mode_sys);
-    mkdirs(p);
-    snprintf(p, sizeof(p), ROOT "/%s/card.ini", mode_sys);
-    snprintf(buf, sizeof(buf), "card=%d\n", mode_card);
-    write_text(p, buf);
+    write_card_ini(mode_sys, mode_card);
 }
 
 /* a system's current card: the running system's may not be saved yet */
@@ -519,6 +525,18 @@ static int do_command(uint8_t cmd, const uint8_t *r, int len, uint8_t *a) {
         if (flags & SMC_CORE_RUNNING) {
             set_mode(none ? "" : sys);
             __atomic_store_n(&ps1_used, false, __ATOMIC_RELEASE); /* only PS1 use from now on ends it */
+        }
+        if ((flags & SMC_CORE_SET_CARD) && !none) {
+            /* the host picks the system's card (a save chosen on the SuperStation): as the buttons do, saved at once */
+            int card = r[2 + sl];
+            if (card < 1 || card > SMC_MAX_CARDS)
+                return 2;
+            if (mode_sys[0] && !strcmp(mode_sys, sys)) {
+                mode_card = card;
+                mode_seq++;
+                mode_dirty = false;
+            }
+            write_card_ini(sys, card);
         }
         a[0] = SMC_GOOD;
         a[1] = none ? 0 : (uint8_t)current_card(sys);

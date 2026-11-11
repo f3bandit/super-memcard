@@ -1450,6 +1450,9 @@ static int end(void) {
 /* A system on the virtual card the card has in use for it. When the card's buttons picked another one, the local saves
  * go to the old card first; only then are they replaced by the new card's (the whole system: a switch is rare).
  * game: one game only (NULL: every game). Returns the card in use, 0 if the system couldn't be synced. */
+static bool hold_card; /* a game is running: a card picked meanwhile is for the next game (smc_sync_hold_card) */
+void smc_sync_hold_card(bool on) { hold_card = on; }
+
 static int sync_system_now(const struct smc_bus *b, const char *sys, const char *game, struct smc_sync_report *rep) {
     int now = smc_core(b, sys, false);
     if (now < 1) {
@@ -1458,6 +1461,17 @@ static int sync_system_now(const struct smc_bus *b, const char *sys, const char 
         return 0;
     }
     int was = local_card(sys);
+    if (hold_card && was && was != now) {
+        /* the buttons picked another card while the game runs: the game has its save from card `was` in memory, so its
+         * saves keep going there; the switch happens when the game ends (or a save is picked: smc_use_card) */
+        static char said[80];
+        char k[80];
+        snprintf(k, sizeof(k), "%s %d %d", sys, was, now);
+        if (strcmp(said, k))
+            logf_("%s: card %d picked during the game: from the next game on (this one stays on card %d)", sys, now, was);
+        snprintf(said, sizeof(said), "%s", k);
+        now = was;
+    }
     if (was && was != now) {
         int failed = rep->failed, conflicts = rep->conflicts;
         sync_system(b, sys, was, rep);
@@ -1506,6 +1520,61 @@ int smc_sync_game(const struct smc_bus *b, const struct smc_sync_cfg *cfg, const
     sync_system_now(b, sys, game, rep);
     done_log("game sync", rep);
     return end();
+}
+
+int smc_game_saves(const struct smc_bus *b, const struct smc_sync_cfg *cfg, const char *sys, const char *game,
+                   void (*cb)(int card, int files, uint32_t time, bool playing, void *ctx), void *ctx) {
+    struct smc_sync_report rep;
+    memset(&rep, 0, sizeof(rep));
+    int ok = begin(b, cfg, &rep);
+    if (ok <= 0)
+        return ok;
+    int playing = local_card(sys);
+    if (!playing)
+        playing = smc_core(b, sys, false);
+    int found = 0;
+    for (int card = 1; card <= SMC_CARDS_MAX; card++) {
+        char id[65] = "";
+        card_id_of_save(b, sys, card, game, id);
+        if (!id[0])
+            smc_game_id(game, id);
+        int n = smc_select_card(b, sys, id, card, NULL);
+        int saves = 0;
+        uint32_t newest = 0;
+        for (int i = 0; i < n; i++) {
+            struct smc_file f;
+            if (smc_info(b, i, &f) != SMC_OK || f.deleted || not_a_save(f.name))
+                continue;
+            saves++;
+            if (f.time > newest)
+                newest = f.time;
+        }
+        if (saves || card == playing) {
+            cb(card, saves, newest, card == playing, ctx);
+            found++;
+        }
+    }
+    end();
+    return found;
+}
+
+int smc_use_card(const struct smc_bus *b, const struct smc_sync_cfg *cfg, const char *sys, const char *game, int card,
+                 struct smc_sync_report *rep) {
+    int ok = begin(b, cfg, rep);
+    if (ok <= 0)
+        return ok;
+    int now = -1;
+    /* the card first says this system uses `card`; the switch then puts this SuperStation's saves on the old card and
+     * brings the new card's in, as when the buttons pick a card (sync_system_now), however a game is running */
+    bool held = hold_card;
+    hold_card = false;
+    if (smc_core_set_card(b, sys, card) == card)
+        now = sync_system_now(b, sys, NULL, rep);
+    hold_card = held;
+    (void)game;
+    done_log("save picked", rep);
+    int e = end();
+    return now == card ? e : (e < 0 ? e : -1);
 }
 
 int smc_sync_changed(const struct smc_bus *b, const struct smc_sync_cfg *cfg, const char *sys,

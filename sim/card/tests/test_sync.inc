@@ -320,6 +320,82 @@ static void t_sync_virtual_card_switch(void) {
     CHECK_EQ(r.switched + r.pushed + r.pulled + r.failed, 0);
 }
 
+static struct smc_sync_cfg cfg_of(int which);
+
+/* the OSD's Saves page: a game's saves on every virtual card, and switching to one (smc_game_saves, smc_use_card) */
+struct saves_seen { int n, card[8], files[8], playing[8]; };
+static void saves_cb(int card, int files, uint32_t time, bool playing, void *ctx) {
+    (void)time;
+    struct saves_seen *s = ctx;
+    if (s->n < 8) {
+        s->card[s->n] = card;
+        s->files[s->n] = files;
+        s->playing[s->n] = playing;
+        s->n++;
+    }
+}
+
+static void t_sync_osd_pick_a_save(void) {
+    sync_setup();
+    struct smc_sync_cfg cfg = cfg_of(0);
+    /* Final Fantasy VI on card 1, and another playthrough on card 2 */
+    put_save(0, "SNES/Final Fantasy VI.srm", sA, sizeof(sA));
+    CHECK_EQ(run_sync(0).pushed, 1);
+    pick_card("SNES", 2);
+    put_save(0, "SNES/Final Fantasy VI.srm", sA, sizeof(sA));   /* (the switch moves card 1's aside) */
+    run_sync(0);
+    put_save(0, "SNES/Final Fantasy VI.srm", sB, sizeof(sB));
+    CHECK_EQ(run_sync(0).pushed, 1);
+    CHECK_EQ(read_file_at("SuperMemCard/SNES/Card2/Final Fantasy VI/save.srm", 0, got, sizeof(sB)), 0);
+    CHECK(memcmp(got, sB, sizeof(sB)) == 0);
+
+    /* the list: both cards, card 2 is the one being played */
+    struct saves_seen sv = {0};
+    CHECK_EQ(smc_game_saves(&vbus, &cfg, "SNES", "Final Fantasy VI", saves_cb, &sv), 2);
+    CHECK(sv.n == 2 && sv.card[0] == 1 && sv.card[1] == 2 && sv.files[0] == 1 && !sv.playing[0] && sv.playing[1]);
+
+    /* while it's played on card 2, the game saves again; then card 1's save is picked */
+    sB[10] ^= 0x5A;
+    put_save(0, "SNES/Final Fantasy VI.srm", sB, sizeof(sB));
+    struct smc_sync_report r;
+    memset(&r, 0, sizeof(r));
+    CHECK_EQ(smc_use_card(&vbus, &cfg, "SNES", "Final Fantasy VI", 1, &r), 0);
+    CHECK_EQ(r.switched, 1);
+    /* card 2 kept the latest progress, and this SuperStation now has card 1's save */
+    CHECK_EQ(read_file_at("SuperMemCard/SNES/Card2/Final Fantasy VI/save.srm", 0, got, sizeof(sB)), 0);
+    CHECK(memcmp(got, sB, sizeof(sB)) == 0);
+    CHECK_EQ(get_save(0, "SNES/Final Fantasy VI.srm", got, sizeof(got)), sizeof(sA));
+    CHECK(memcmp(got, sA, sizeof(sA)) == 0);
+    CHECK_EQ(smc_core(&vbus, "SNES", false), 1);
+    memset(&sv, 0, sizeof(sv));
+    CHECK_EQ(smc_game_saves(&vbus, &cfg, "SNES", "Final Fantasy VI", saves_cb, &sv), 2);
+    CHECK(sv.playing[0] && !sv.playing[1]);
+    /* a card with nothing on it: refused, nothing changes */
+    memset(&r, 0, sizeof(r));
+    CHECK(smc_use_card(&vbus, &cfg, "SNES", "Final Fantasy VI", 0, &r) < 0);
+    CHECK_EQ(smc_core(&vbus, "SNES", false), 1);
+}
+
+/* the card's buttons pick another card while a game runs: its saves keep going to the card it started from */
+static void t_sync_buttons_mid_game_wait_for_the_next(void) {
+    sync_setup();
+    put_save(0, "SNES/Super Metroid (USA).sav", sA, sizeof(sA));
+    CHECK_EQ(run_sync(0).pushed, 1);
+    smc_sync_hold_card(true);    /* the game starts */
+    pick_card("SNES", 3);
+    put_save(0, "SNES/Super Metroid (USA).sav", sB, sizeof(sB));
+    struct smc_sync_report r = run_sync(0);
+    CHECK_EQ(r.switched, 0);
+    CHECK_EQ(r.pushed, 1);
+    CHECK_EQ(read_file_at("SuperMemCard/SNES/Card1/Super Metroid (USA)/save.sav", 0, got, sizeof(sB)), 0);
+    CHECK(memcmp(got, sB, sizeof(sB)) == 0);
+    CHECK_EQ(file_size("SuperMemCard/SNES/Card3/Super Metroid (USA)/save.sav"), -1);
+    smc_sync_hold_card(false);   /* the game ends: now the switch to card 3 */
+    r = run_sync(0);
+    CHECK_EQ(r.switched, 1);
+    CHECK_EQ(get_save(0, "SNES/Super Metroid (USA).sav", got, sizeof(got)), -1);   /* card 3 has none: aside */
+}
+
 static void t_sync_switch_waits_when_old_card_fails(void) {
     /* a switch only happens once the old card has every save: with a conflict there, it waits */
     sync_setup();
@@ -800,6 +876,8 @@ static void t_sync_like_a_ps1(void) {
 }
 
 #define SYNC_TESTS \
+    {"sync: OSD Saves: a game's saves on each card, switching to one", t_sync_osd_pick_a_save, true, NULL}, \
+    {"sync: card buttons during a game: the next game", t_sync_buttons_mid_game_wait_for_the_next, true, NULL}, \
     {"sync: a PSX card image's own PS1 icon on the card", t_sync_psx_own_icon, true, NULL}, \
     {"sync: saves to the card, then nothing to do, then a change", t_sync_to_card_then_unchanged, true, NULL}, \
     {"sync: a reinstall gets every save back", t_sync_reinstall_gets_everything_back, true, NULL}, \

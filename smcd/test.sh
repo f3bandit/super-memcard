@@ -89,6 +89,18 @@ for i in $(seq 60); do grep -q "to card.*Test Game" /tmp/smcd.log && [ "$(grep -
 f=$(find "$w/sd/SuperMemCard/NES" -name 'save.sav' | head -1)
 cmp -s "$f" "$w/saves/NES/Test Game.sav" && ok "the card has the game's latest save" || bad "card's save differs"
 
+# 3b. the OSD's Saves page while the game runs: its saves, a new one on another card, then back to the first
+cp "$w/saves/NES/Test Game.sav" "$w/first.sav"
+sv=$(ask SAVES)
+echo "$sv" | grep -q "^save	1	1	[0-9]*	1$" && echo "$sv" | grep -q "^game	NES	Test Game$" && echo "$sv" | grep -q "^new	2$" \
+    && ok "SAVES: card 1's save (being played), a new one on card 2" || bad "SAVES: $sv"
+[ "$(ask 'USE 2' | head -1)" = "use ok 2" ] && [ ! -e "$w/saves/NES/Test Game.sav" ] && cmp -s "$f" "$w/first.sav" \
+    && ok "USE 2 (new): the game starts with no save, card 1 keeps its" || bad "USE 2"
+[ "$(ask 'USE 1' | head -1)" = "use ok 1" ] && cmp -s "$w/saves/NES/Test Game.sav" "$w/first.sav" \
+    && ok "USE 1: card 1's save back on this SuperStation" || bad "USE 1"
+ask SAVES | grep -q "^save	1	1	[0-9]*	1$" && ok "  and card 1 is the one being played" || bad "SAVES after USE 1"
+[ "$(ask 'USE 0' | head -1)" = "use failed" ] && ok "USE 0: refused" || bad "USE 0"
+
 # 4. back in the menu: MENU (nothing changed since: nothing to do), the card's buttons are the PS1 card's again
 kill $shim; wait $shim 2>/dev/null || true
 "$B/shimtest" "$w/vc.sock" menu > "$w/shim3.log" 2>&1 & shim=$!; pids="$pids $shim"

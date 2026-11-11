@@ -307,3 +307,23 @@ int smc_authsig(const struct smc_bus *b, uint8_t sig[64]) {
     memcpy(sig, a + 1, 64);
     return 1;
 }
+
+int smc_core_set_card(const struct smc_bus *b, const char *sys, int card) {
+    uint8_t req[3 + SMC_SYS_MAX], a[2];
+    if (!sys || card < 1 || card > SMC_CARDS_MAX)
+        return SMC_E_BAD;
+    int n = put_name(req, sys, SMC_SYS_MAX);
+    if (n < 0)
+        return SMC_E_BAD;
+    req[n] = 0x02; /* SMC_CORE_SET_CARD: the card's number follows */
+    req[n + 1] = (uint8_t)card;
+    int rc = SMC_E_NO_REPLY;
+    for (int i = 0; i < 2 && rc == SMC_E_NO_REPLY; i++) {
+        if (i)
+            usleep(60 * 1000);
+        rc = smc_frame(b, C_CORE, req, n + 2, a, 2);
+    }
+    if (rc)
+        return rc;
+    return a[0] == GOOD && a[1] == card ? card : SMC_E_BAD;
+}

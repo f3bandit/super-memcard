@@ -61,6 +61,8 @@ int smc_select_card(const struct smc_bus *b, const char *sys, const char *game, 
  * so the card shows it and its buttons pick this system's card; sys NULL with running: none is (the
  * buttons are the PS1 card's again). running false only asks. */
 int smc_core(const struct smc_bus *b, const char *sys, bool running);
+/* Core, setting the system's virtual card to use from now on (a save picked on the SuperStation). The card, or <0. */
+int smc_core_set_card(const struct smc_bus *b, const char *sys, int card);
 /* File `idx` (0..n-1) of the selected game (deleted ones too: f->deleted). */
 int smc_info(const struct smc_bus *b, int idx, struct smc_file *f);
 /* Delete file `idx` of the selected game at generation `gen` (its generation + 1): the card keeps a tombstone so
