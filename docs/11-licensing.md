@@ -13,6 +13,19 @@
 GPL in [LICENSE](../LICENSE): the sync, game IDs and names, icons, virtual cards, the memory-manager
 commands, the documentation, the guide and the tools.
 
+And, on the same terms, f3bandit's own code in his other SuperStation projects (each repository's
+LICENSE.md lists what is f3bandit's and what isn't):
+
+- **cm_modules** (and ss1_cm_modules): Console Mode's modules: the memory card manager, the controller
+  tester, the drive repair, cmjobd, the app link (cmremote), the modules and CM Link.
+- **phosphor_os** and **phosphor-modules**: Phosphor's TV interface, phosphord, apps, tools and modules,
+  including the dock IR remote upgrade and the safe shutdown.
+
+Not included: the GPL forks (phosphor-main, phosphor-menu, the cores), which stay GPL like Super
+MemCard's own GPL parts; and SS1 Tool, f3bandit's support tool for users, which keeps its own licence
+and its existing permission for Retro Remake (anything Retro Remake needs from it is added when it
+comes up).
+
 ## Terms
 
 | | |
