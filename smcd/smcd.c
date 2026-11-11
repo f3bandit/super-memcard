@@ -207,7 +207,9 @@ static void hold(struct conn *c, int on) {
 static char not_genuine_id[17], not_genuine_why[96];
 
 /* Super MemCard only with a genuine Retro Remake card (docs/12-card-identity.md); any other card is a PS1 card here.
- * 1: genuine. */
+ * 1: genuine. -G (test builds only: the test key) uses a card without its identity, to test a new card before it has
+ * one; a build with Retro Remake's key ignores it. */
+static int allow_no_identity;
 static int genuine(struct conn *c) {
     char why[96];
     int g = smc_genuine(&c->bus, &c->card, why, sizeof(why));
@@ -218,6 +220,13 @@ static int genuine(struct conn *c) {
     if (g < 0) {
         lg("card %s: the identity check didn't finish (%s): not used this time", c->card.id, why[0] ? why : "no answer");
         return 0;
+    }
+    if (allow_no_identity && smc_genuine_test_key()) {
+        static char said[17];
+        if (strcmp(said, c->card.id))
+            lg("TEST (-G): card %s used without its identity (%s)", c->card.id, why);
+        snprintf(said, sizeof(said), "%s", c->card.id);
+        return 1;
     }
     static char logged[17 + 96];   /* said once per card and reason */
     char key[sizeof(logged)];
@@ -966,7 +975,7 @@ static void icons_to_card(struct conn *c) {
 int main(int argc, char **argv) {
     static char sv[1024], st[1024], ls[1024], g[8][1024];
     int opt;
-    while ((opt = getopt(argc, argv, "f:S:T:g:d:l:v:")) != -1) {
+    while ((opt = getopt(argc, argv, "f:S:T:g:d:l:v:G")) != -1) {
         switch (opt) {
         case 'f': root = optarg; break;
         case 'S': saves = optarg; break;
@@ -974,8 +983,9 @@ int main(int argc, char **argv) {
         case 'd': lists = optarg; break;
         case 'l': sock_path = optarg; break;
         case 'v': vcard_path = optarg; break;
+        case 'G': allow_no_identity = 1; break;
         case 'g': if (ngames < 15) games[ngames++] = optarg; break;
-        default: fprintf(stderr, "usage: smcd [-f root] [-S saves] [-T state] [-g games]... [-d lists] [-l socket] [-v vcard]\n"); return 2;
+        default: fprintf(stderr, "usage: smcd [-f root] [-S saves] [-T state] [-g games]... [-d lists] [-l socket] [-v vcard] [-G (test builds: cards without their identity)]\n"); return 2;
         }
     }
     if (!saves) snprintf(sv, sizeof(sv), "%s/saves", root), saves = sv;
@@ -1008,6 +1018,8 @@ int main(int argc, char **argv) {
     lg("smcd started");
     if (smc_genuine_test_key())
         lg("built with the TEST Retro Remake key (tools/smccert/test-rr.key): not for a release");
+    if (allow_no_identity)
+        lg(smc_genuine_test_key() ? "TEST (-G): cards without their identity are used" : "-G ignored: not a test build");
     for (;;) {
         struct pollfd p = {lfd, POLLIN, 0};
         if (poll(&p, 1, 1000) > 0) {

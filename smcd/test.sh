@@ -41,6 +41,18 @@ ask HELLO | grep -q "^notgenuine .*no identity" && ok "card without an identity:
 ask READ | grep -q "^notgenuine" && [ ! -d "$w/sd/SuperMemCard/NES" ] && ok "  and READ leaves it alone" || bad "  READ on a card that isn't genuine"
 grep -q "isn't a genuine Retro Remake card" /tmp/smcd.log && ok "  said once in the log" || bad "  the log"
 [ "$(grep -c "isn't a genuine" /tmp/smcd.log)" = 1 ] || bad "  said more than once"
+# -G (test builds only): the same card without its identity used, for testing a new card before it has one
+"$B/smcd" -G -S "$w/saves" -T "$w/stateG" -g "$w/games" -d "$w/lists" -v "$w/vc.sock" -l /tmp/smcd_g.sock > /dev/null 2>&1 & gpid=$!
+for i in $(seq 50); do [ -S /tmp/smcd_g.sock ] && break; sleep 0.1; done
+r=$(python3 -c "
+import socket; s=socket.socket(socket.AF_UNIX); s.connect('/tmp/smcd_g.sock'); s.settimeout(30); s.sendall(b'HELLO\n'); b=b''
+while not b.endswith(b'END\n'):
+    d=s.recv(4096)
+    if not d: break
+    b+=d
+print(b.decode().split(chr(10))[0])")
+kill $gpid 2>/dev/null || true; wait $gpid 2>/dev/null || true; rm -f /tmp/smcd_g.sock
+echo "$r" | grep -q "^card .* version 2" && ok "-G (test build): a card without its identity used" || bad "-G: $r"
 kill $sm; wait $sm 2>/dev/null || true; rm -f /tmp/smcd.sock
 # Retro Remake gives the card its identity (the test key), as at the factory
 chip=$("$B/smccli" -s "$w/vc.sock" chip | sed -n 's/^chip //p')
