@@ -34,7 +34,7 @@ start)
     grep -v '^main=ConsoleMode/MiSTer_ConsoleMode' /media/fat/MiSTer.ini > /tmp/MiSTer_smctest.ini
     mountpoint -q /media/fat/MiSTer.ini || mount --bind /tmp/MiSTer_smctest.ini /media/fat/MiSTer.ini
     rm -rf /tmp/smc_saves /tmp/smc_state /tmp/smc_lists /tmp/smc_sd; mkdir -p /tmp/smc_saves /tmp/smc_state /tmp/smc_sd
-    cp -r /media/fat/saves/NES /media/fat/saves/SNES /tmp/smc_saves/
+    cp -a /media/fat/saves/NES /media/fat/saves/SNES /tmp/smc_saves/   # -a: the saves keep their dates (the page shows them)
     setsid $T/vcardd /tmp/smc_sd /tmp/smc_vc.sock </dev/null >/tmp/vcardd.log 2>&1 &
     sleep 0.5
     smcd_start /tmp/smc_vc.sock
