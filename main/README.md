@@ -18,5 +18,8 @@ Where they're called in Main:
 With no `smcd` running, nothing happens and Main works as without Super MemCard. docs/10-console-mode-guide.md has the
 whole picture.
 
+A Main with all of it wired in: this repository's private `test-main` branch (the test bench used on the SS1). The
+checklist of every change is docs/10's section 3.
+
 `supermemcard.cpp/.h` is the earlier version, with Super MemCard's logic inside Main; it is replaced by `smcd` and the
 shim, and kept only for reference.

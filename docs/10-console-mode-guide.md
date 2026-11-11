@@ -47,6 +47,37 @@ Controller reads pause while a frame runs (they share the bus), as `smc_port.sv`
 
 ## 3. smcd and the shim
 
+### Checklist: everything Console Mode adds
+
+A working example of all of Main's part: the private `test-main` branch of this repository (a Main_MiSTer fork with
+the shim, the Saves page and their hooks; `git diff` it against its stock base to see each change). Tested with it on an
+SS1 (Nov 10 2026).
+
+**In `MiSTer_ConsoleMode` (GPL, copied from `main/`):**
+
+1. Copy `smc_shim.cpp/.h`, `smc_frontport.cpp/.h`, `smc_osd.cpp/.h` into the source (built by the Makefile's `*.cpp`).
+2. `fpga_load_rbf()`: `smc_shim_core_start(name, xml)` for every core that isn't `menu.rbf`, before it loads.
+3. `main()`, after `user_io_init()`: `smc_shim_menu_start()` (it does nothing unless Main started with the menu core).
+4. Main's loop: `smc_shim_poll()`.
+5. `menu.cpp`, the OSD's Saves page (the table in "The OSD's Saves page" below): two menu states, the " Saves" row on
+   the core's first page, its select, and the two states' code (with `smc_osd_scroll()`).
+
+**On the SuperStation:** `smcd` started at boot (it needs nothing else; with no card it waits), the cores with the card
+driver (public builds: f3bandit/super-memcard-cores), the gamedb module (cm_modules) for game names and icons.
+
+**In the frontend's memory manager (the commands below, on `/tmp/smcd.sock`):**
+
+| button / screen | command |
+|---|---|
+| Read card | `READ` |
+| the other systems' saves (a section under PSX, or a tab) | `SECTION` (or `SYSTEMS` + `LIST`) |
+| Play (a save on a card) | `PLAY` |
+| Rename (Console Mode's on-screen keyboard) | `NAME` |
+| Delete | `DELETE` |
+| both changed: keep which | `CONFLICTS`, `KEEP` |
+| the card bus: wait while someone has it | `/tmp/super_memcard.busy` (Shared bus, below) |
+
+
 ### In `MiSTer_ConsoleMode` (the shim)
 
 Copy `main/smc_shim.cpp/.h` and `main/smc_frontport.cpp/.h` into its source (GPL, as Main) and add three calls:
