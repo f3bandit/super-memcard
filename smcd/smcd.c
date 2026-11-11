@@ -5,7 +5,8 @@
  *
  *   smcd [-f <root>] [-S <saves>] [-T <state>] [-g <games dir>]... [-d <game lists>] [-l <socket>] [-v <vcard socket>]
  *
- * Its socket (/tmp/smcd.sock), one command a line; the answer's lines end with END (LAUNCH and MENU: DONE). No card
+ * Its socket (/tmp/smcd.sock), one command a line; the answer's lines end with END (LAUNCH and MENU: DONE; LAUNCH's is
+ * "DONE saves" when the game's saves are on the card, for Main's OSD Saves page). No card
  * (or not a Super MemCard card): nocard; a Super MemCard card that isn't genuine (docs/12): notgenuine <card> <why>.
  *   LAUNCH <rbf>\t<mgl>     (Main) a game core is about to load: Core, and its save from the card if the card's is newer
  *   MENU                    (Main) the menu is back: the game just played goes to the card
@@ -649,7 +650,8 @@ static void handle(int fd) {
         if (!strncmp(l, "LAUNCH ", 7)) {
             lg("launch %s", l + 7);
             do_launch(l + 7);
-            say(fd, "DONE\n");
+            /* "saves": a game whose saves are on the card, for Main's OSD Saves page (PSX keeps its own card) */
+            say(fd, play_game[0] && strcmp(play_sys, "PSX") ? "DONE saves\n" : "DONE\n");
             return;
         }
         if (!strcmp(l, "MENU")) {

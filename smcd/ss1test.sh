@@ -3,6 +3,8 @@
 # Super MemCard on the SS1 (copy to /media/fat/phosphor/tmp-test with smcd, vcardd and a test-bench Main with the shim): the test-bench Main with the shim (main/smc_shim.cpp) and smcd.
 #   sh ss1test.sh start   stop Console Mode's Main, start vcardd, smcd (simulated card) and the test Main
 #   sh ss1test.sh b       B: smcd with the simulated card: READ, then a NES game launched by Main (LAUNCH), then menu (MENU)
+#   sh ss1test.sh c       C: the OSD Saves page's side: a game launched by MGL, the shim keeps it, SAVES, USE a new
+#                         save, USE the first again (the OSD's keys themselves: the PC test)
 #   sh ss1test.sh a       A: the shim's frames to the real front port (NES core with the card driver)
 #   sh ss1test.sh stop    everything off, Console Mode's Main back as it ran
 # Copies of the saves in /tmp: the real ones aren't touched.
@@ -59,6 +61,28 @@ b)
     echo "main now $(main_pid)"
     ok=; for d in $(find /tmp/smc_sd/SuperMemCard/NES -name save.sav); do cmp -s "$d" "/tmp/smc_saves/NES/Final Fantasy.sav" && ok=$d; done
     [ -n "$ok" ] && echo "OK the card has the game's latest save ($ok)" || echo "FAIL the card hasn't the game's latest save"
+    echo "== smcd.log"; cat /tmp/smcd.log
+    ;;
+c)
+    printf '<mistergamedescription><rbf>_Console/NES</rbf><file delay="1" type="f" index="0" path="/media/usb0/games/NES/Final Fantasy.nes"/></mistergamedescription>' > /tmp/smc_ff.mgl
+    echo "== launch Final Fantasy (MGL)"
+    cmd "load_core /tmp/smc_ff.mgl"
+    sleep 8
+    echo "core now: $(cat /tmp/CORENAME 2>/dev/null)"
+    f="/tmp/smc_saves/NES/Final Fantasy.sav"
+    [ -f "$f" ] || dd if=/dev/urandom of="$f" bs=8192 count=1 2>/dev/null
+    sleep 5
+    cp "$f" /tmp/smc_first.sav
+    [ "$(cat /tmp/smc_game 2>/dev/null)" = /tmp/smc_ff.mgl ] && cmp -s /tmp/smc_game.mgl /tmp/smc_ff.mgl \
+        && echo "OK the shim kept the game for the OSD (LAUNCH: DONE saves)" || echo "FAIL the shim's game file: $(cat /tmp/smc_game 2>&1)"
+    echo "== SAVES"; ask SAVES
+    echo "== USE the new one"; n=$(ask SAVES | sed -n 's/^new\t//p'); r=$(ask "USE $n" | head -1); echo "$r"
+    [ "$r" = "use ok $n" ] && [ ! -e "$f" ] && echo "OK card $n: the game has no save now" || echo "FAIL USE $n"
+    one=$(ask SAVES | awk -F'\t' '$1=="save" && $3>0 {print $2; exit}')
+    r=$(ask "USE $one" | head -1); echo "$r"
+    [ "$r" = "use ok $one" ] && cmp -s "$f" /tmp/smc_first.sav && echo "OK card $one: its save back" || echo "FAIL USE $one"
+    cmd "load_core /media/fat/menu.rbf"; sleep 6
+    [ ! -e /tmp/smc_game ] && echo "OK back in the menu: the game file gone" || echo "FAIL the game file stayed"
     echo "== smcd.log"; cat /tmp/smcd.log
     ;;
 a)

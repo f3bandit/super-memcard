@@ -8,6 +8,7 @@ starts and when the menu is back. Copy into the Main's source (GPL-3.0, as Main)
 |---|---|
 | `smc_shim.cpp/.h` | the three calls, and the socket `smcd` sends its frames on |
 | `smc_frontport.cpp/.h` | the front ports through the driver in the loaded core (`core/sys/smc_port.sv`): raw frames, holding the ports |
+| `smc_osd.cpp/.h` | the OSD's Saves page: another save for the running game (its hooks in `menu.cpp`: docs/10, and `smc_osd.h`) |
 
 Where they're called in Main:
 - `smc_shim_core_start(name, xml)`: in `fpga_load_rbf()`, before a core that isn't the menu is loaded.

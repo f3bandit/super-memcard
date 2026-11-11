@@ -101,12 +101,52 @@ echo "$sv" | grep -q "^save	1	1	[0-9]*	1$" && echo "$sv" | grep -q "^game	NES	Te
 ask SAVES | grep -q "^save	1	1	[0-9]*	1$" && ok "  and card 1 is the one being played" || bad "SAVES after USE 1"
 [ "$(ask 'USE 0' | head -1)" = "use failed" ] && ok "USE 0: refused" || bad "USE 0"
 
-# 4. back in the menu: MENU (nothing changed since: nothing to do), the card's buttons are the PS1 card's again
+# 3c. the same through Main's OSD Saves page (main/smc_osd.cpp): pick, asked again, the game restarts with it
 kill $shim; wait $shim 2>/dev/null || true
+[ -f /tmp/smc_game ] && grep -qx "$w/game.mgl" /tmp/smc_game && cmp -s /tmp/smc_game.mgl "$w/game.mgl" \
+    && ok "LAUNCH said DONE saves: the shim kept the game's MGL (and a copy)" || bad "the shim's game file"
+"$B/shimtest" "$w/vc.sock" osd s > "$w/osd1.log" 2>&1
+grep -q "^available 1" "$w/osd1.log" && grep -q "^osd 0|  Test Game" "$w/osd1.log" && grep -q "^osd 2|> Card 1 .* now$" "$w/osd1.log" \
+    && grep -q "^osd 3|  New save (card 2)" "$w/osd1.log" && grep -q "^info The game is running with this save" "$w/osd1.log" \
+    && ok "OSD: the page (the game, card 1 being played, a new save), the one playing not picked again" || bad "OSD page: $(cat "$w/osd1.log")"
+"$B/shimtest" "$w/vc.sock" osd ds > "$w/osd2.log" 2>&1
+grep -q "Again: restart" "$w/osd2.log" && ! grep -q "^restart" "$w/osd2.log" && cmp -s "$w/saves/NES/Test Game.sav" "$w/first.sav" \
+    && ok "OSD: one select only asks (nothing changed)" || bad "OSD ask first: $(cat "$w/osd2.log")"
+"$B/shimtest" "$w/vc.sock" osd dss > "$w/osd3.log" 2>&1
+grep -q "^restart $w/game.mgl" "$w/osd3.log" && grep -q "^relaunched" "$w/osd3.log" && [ ! -e "$w/saves/NES/Test Game.sav" ] \
+    && ok "OSD: New save picked, the game restarted from its MGL with no save" || bad "OSD new save: $(cat "$w/osd3.log")"
+"$B/shimtest" "$w/vc.sock" osd uss > "$w/osd4.log" 2>&1
+grep -q "^osd 3|> Card 2   empty  now" "$w/osd4.log" && grep -q "^restart" "$w/osd4.log" && cmp -s "$w/saves/NES/Test Game.sav" "$w/first.sav" \
+    && ok "OSD: card 1 picked again, its save back" || bad "OSD card 1: $(cat "$w/osd4.log")"
+long=$(sed -n 's/^osd 0|//p' "$w/osd1.log" | head -1); [ ${#long} -le 29 ] && ok "OSD: rows fit the OSD" || bad "OSD row too long"
+
+# 4. back in the menu: MENU (nothing changed since: nothing to do), the card's buttons are the PS1 card's again
+kill $shim 2>/dev/null || true; wait $shim 2>/dev/null || true
 "$B/shimtest" "$w/vc.sock" menu > "$w/shim3.log" 2>&1 & shim=$!; pids="$pids $shim"
 sleep 3
 grep -q "menu told" "$w/shim3.log" && ok "MENU told" || bad "MENU"
 grep -q "sync stopped with an error" /tmp/smcd.log && bad "sync errors in the log" || ok "no sync errors"
+
+# 5. a long list on the OSD page (a stand-in smcd with 30 saves): it scrolls, no row cut off or past the page
+kill $(pgrep -f "$B/smcd") 2>/dev/null || true; sleep 0.5; rm -f /tmp/smcd.sock
+python3 - <<'PY' & pids="$pids $!"
+import socket, os
+s = socket.socket(socket.AF_UNIX); s.bind("/tmp/smcd.sock"); s.listen(4)
+for _ in range(4):
+    c, _a = s.accept(); f = c.makefile("rw")
+    if f.readline().strip() == "SAVES":
+        for i in range(1, 31): f.write("save\t%d\t1\t%d\t%d\n" % (i, 1700000000 + i, i == 1))
+        f.write("game\tNES\tA Game Whose Name Is Much Too Long For The OSD (USA, Europe) (Rev 1)\nnew\t31\nEND\n"); f.flush()
+    c.close()
+PY
+sleep 0.5
+"$B/shimtest" "$w/vc.sock" osd $(printf 'd%.0s' $(seq 33)) > "$w/osd5.log" 2>&1
+last=$(grep -n "^title" "$w/osd5.log" | tail -1 | cut -d: -f1)
+tail -n +$last "$w/osd5.log" | grep "^osd" > "$w/osd5.last"
+grep -q "^osd 6|> New save (card 31)" "$w/osd5.last" && grep -q "^osd 2|  Card 27" "$w/osd5.last" \
+    && [ "$(grep -c '^osd [2-6]|.*Card\|New save' "$w/osd5.last")" = 5 ] && ok "OSD: 31 rows scroll, the last one shown at the bottom" || bad "OSD long list: $(cat "$w/osd5.last")"
+awk -F'|' '{ if (length($2) > 30) bad = 1 } END { exit bad }' "$w/osd5.log" && ok "OSD: no row wider than the OSD (a long game name cut)" || bad "OSD long rows"
+grep -q "^osd 7|  More: up/down" "$w/osd5.last" && ok "OSD: the hint says there's more" || bad "OSD hint"
 
 echo "--- smcd.log"; cat /tmp/smcd.log | cut -c1-160
 [ $fail = 0 ] && echo "ALL PASSED" || { echo FAILED; exit 1; }

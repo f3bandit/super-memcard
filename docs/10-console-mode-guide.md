@@ -60,8 +60,12 @@ Copy `main/smc_shim.cpp/.h` and `main/smc_frontport.cpp/.h` into its source (GPL
 That is all of it in Main. Sockets (text lines):
 
 ```
-/tmp/smcd.sock            smcd listens.  Main sends   LAUNCH <rbf>\t<mgl>   -> DONE (after the game's save)
+/tmp/smcd.sock            smcd listens.  Main sends   LAUNCH <rbf>\t<mgl>   -> DONE (after the game's save; "DONE saves" when
+                                                                              the game's saves are on the card: the OSD page)
                                                       MENU                 -> DONE (at once; smcd works after)
+                                     the OSD page:    SAVES                -> save\t<card>\t<files>\t<time>\t<playing> ...,
+                                                                              game\t<sys>\t<name>, new\t<card>, END
+                                                      USE <card>           -> use ok <card> | use failed, END
 /tmp/smc_frontport.sock   Main listens.  smcd sends   FRAME <port> <speed> <ack ms> <hex>  -> OK <count> <hex> | ERR <code>
                                                       HOLD <0|1>                           -> OK
 ```
@@ -144,6 +148,34 @@ one step, so two can't both get it, and free again as soon as its owner is gone,
 - cmjobd's card and controller-tester jobs hold it.
 - Memory Cards' own reads and writes of the PS1 card (`@memcard`): hold it around them. Not while waiting for
   `smcd` (READ and the other commands): `smcd` takes it itself.
+
+### The OSD's Saves page: another save for the running game
+
+While a game whose saves are on the card runs, the core's OSD page gets **Saves** (after the core's own options, page
+one only). It lists the game's saves, one per virtual card that has it (the card and the time; "now" on the one it's
+running with, "empty" on a card picked with no save yet), and **New save** on the first free card. Pick one, pick it
+again ("Again: restart with this save"), and the game restarts with it: smcd takes this SuperStation's save to its card
+first, puts the picked one in place and sets the system's card (`card.ini`); then Main loads the game's MGL again. Long
+lists scroll (up/down, page up/down, home/end); every row fits the OSD. The card's buttons pressed during a game pick
+the card for the next game, not this one (a game holds its save in memory: switching under it would mix two).
+
+Games started from an MGL (or MRA) only: smcd names the game from it, and the restart loads it again. The shim keeps
+its path in `/tmp/smc_game`, and a copy of the MGL in `/tmp/smc_game.mgl` in case the first goes; both go when the
+menu is back. Not the PSX core (its own card in the port).
+
+In `MiSTer_ConsoleMode`: copy `main/smc_osd.cpp/.h` as well, and in `menu.cpp` (the same as its Cheats page):
+
+| where | what |
+|---|---|
+| the menu states | `MENU_SMC_SAVES1, MENU_SMC_SAVES2,` |
+| the core's main OSD page, after its options (`page == 0`) | `if (smc_osd_available()) { smc_submenu = selentry; MenuWrite(entry, " Saves", menusub == selentry, 0); menumask = (menumask << 1) \| 1; entry++; selentry++; }` |
+| that page's select | `if (smc_submenu == menusub && select && smc_osd_open()) { smc_ret_sub = menusub; menusub = 0; menustate = MENU_SMC_SAVES1; }` |
+| `MENU_SMC_SAVES1` | `smc_osd_print(); menustate = MENU_SMC_SAVES2;` |
+| `MENU_SMC_SAVES2` | `if (menu \|\| back) { menustate = MENU_GENERIC_MAIN1; menusub = smc_ret_sub; } else if (smc_osd_key(up, down, c, select)) menustate = MENU_SMC_SAVES1;` |
+
+Checked on a PC (`smcd/test.sh`: the page, asked first, a new save, back to the first, 31 rows scrolling) and on an SS1
+(Nov 10 2026, `smcd/ss1test.sh c`: an MGL launch kept for the page, SAVES, USE of a new save and back, with the card's
+switch).
 
 ### During the game (phase 2)
 

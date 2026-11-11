@@ -30,7 +30,7 @@ the card has the answer (an SD access, so up to tens of milliseconds late: Super
 | `65` **Commit** | `file gen[4] time[4]`: time = when the save was made (Unix, UTC: the save file's time on the SuperStation; the card has no clock) | `end`: `<name>.new` replaces `<name>`, generation saved |
 | `66` **Status** | | `pending[2]` (0: every write is already on the SD card) |
 | `67` **List** | `syslen sys card idx[2]` | `status id[64]`: the idx-th game the card has for that system on that virtual card (0: current); sys `.`: the idx-th system |
-| `69` **Core** | `syslen sys flags` | `status card`: the system's current virtual card. Flags bit 0: this system's core is running now (the card shows it, its buttons pick this system's card); sys `.` with bit 0: none is. Without bit 0 it only asks |
+| `69` **Core** | `syslen sys flags [card]` | `status card`: the system's current virtual card. Flags bit 0: this system's core is running now (the card shows it, its buttons pick this system's card); sys `.` with bit 0: none is. Without bit 0 it only asks. Flags bit 1 (`0x02`) and one more byte, `card` (1–99): the system's card set to that one, kept in `card.ini` (the OSD's Saves page: smcd's `USE`) |
 | `6A` **Delete** | `file gen[4] time[4]` | `end`: the save is deleted at generation gen; the card keeps a tombstone (meta.ini `<file>=-<gen>`) and the file itself in `<game>/.deleted/` |
 
 Status bytes: `47` good, `44` deleted, `4F` not found, `53` no game selected, `FF` failed. Before a Hello, `61`-`6A` aren't

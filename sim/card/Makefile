@@ -107,7 +107,7 @@ $(B)/smcd: $(B)/smcd.o $(B)/smc_vcard.o $(B)/smc_host.o $(B)/smc_genuine.o $(B)/
 
 # test only: main/smc_shim.cpp as Main runs it, with vcardd for the front ports
 CXX ?= g++
-$(B)/shimtest: ../../smcd/shimtest.cpp ../../main/smc_shim.cpp $(B)/smc_vcard.o $(B)/smc_host.o
+$(B)/shimtest: ../../smcd/shimtest.cpp ../../main/smc_shim.cpp ../../main/smc_osd.cpp $(B)/smc_vcard.o $(B)/smc_host.o
 	$(CXX) -O1 -g -no-pie -I../../smcd/teststub -I../../main -I../../host $^ -o $@
 
 $(B)/tests/test_card.o: tests/test_smc.inc tests/test_sync.inc
