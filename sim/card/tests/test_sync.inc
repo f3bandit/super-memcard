@@ -377,6 +377,25 @@ static void t_sync_osd_pick_a_save(void) {
     CHECK_EQ(smc_core(&vbus, "SNES", false), 1);
 }
 
+/* the first switch ever on this SuperStation (nothing synced here yet): its saves go to the card in use before, not to
+ * the one picked (found on an SS1: a fresh card, Play on card 2) */
+static void t_sync_first_switch_keeps_saves_on_the_old_card(void) {
+    sync_setup();
+    struct smc_sync_cfg cfg = cfg_of(0);
+    put_save(0, "SNES/Final Fantasy VI.srm", sA, sizeof(sA));
+    struct smc_sync_report r;
+    memset(&r, 0, sizeof(r));
+    CHECK_EQ(smc_use_card(&vbus, &cfg, "SNES", "Final Fantasy VI", 2, &r), 0);
+    CHECK_EQ(read_file_at("SuperMemCard/SNES/Card1/Final Fantasy VI/save.srm", 0, got, sizeof(sA)), 0);
+    CHECK(memcmp(got, sA, sizeof(sA)) == 0);
+    CHECK(read_file_at("SuperMemCard/SNES/Card2/Final Fantasy VI/save.srm", 0, got, sizeof(sA)) != 0);
+    CHECK(get_save(0, "SNES/Final Fantasy VI.srm", got, sizeof(got)) < 0);   /* card 2 has none: the game starts new */
+    memset(&r, 0, sizeof(r));
+    CHECK_EQ(smc_use_card(&vbus, &cfg, "SNES", "Final Fantasy VI", 1, &r), 0);
+    CHECK_EQ(get_save(0, "SNES/Final Fantasy VI.srm", got, sizeof(got)), sizeof(sA));
+    CHECK(memcmp(got, sA, sizeof(sA)) == 0);
+}
+
 /* the memory manager's Rename: a name for a game's save on one card, kept on the card, never a save on a SuperStation */
 static void t_sync_save_names(void) {
     sync_setup();
@@ -916,6 +935,7 @@ static void t_sync_like_a_ps1(void) {
     {"sync: OSD Saves: a game's saves on each card, switching to one", t_sync_osd_pick_a_save, true, NULL}, \
     {"sync: card buttons during a game: the next game", t_sync_buttons_mid_game_wait_for_the_next, true, NULL}, \
     {"sync: a save's name on a card (Rename): kept on the card only", t_sync_save_names, true, NULL}, \
+    {"sync: the first switch here: the saves stay on the old card", t_sync_first_switch_keeps_saves_on_the_old_card, true, NULL}, \
     {"sync: a PSX card image's own PS1 icon on the card", t_sync_psx_own_icon, true, NULL}, \
     {"sync: saves to the card, then nothing to do, then a change", t_sync_to_card_then_unchanged, true, NULL}, \
     {"sync: a reinstall gets every save back", t_sync_reinstall_gets_everything_back, true, NULL}, \

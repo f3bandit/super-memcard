@@ -1685,6 +1685,13 @@ int smc_use_card(const struct smc_bus *b, const struct smc_sync_cfg *cfg, const 
      * brings the new card's in, as when the buttons pick a card (sync_system_now), however a game is running */
     bool held = hold_card;
     hold_card = false;
+    /* never synced here: this SuperStation's saves belong to the card in use before the switch (a fresh card's 1), not
+     * to the one picked (they'd be put on it, and the old card would have none) */
+    if (!local_card(sys)) {
+        int before = smc_core(b, sys, false);
+        if (before >= 1 && before != card)
+            set_local_card(sys, before);
+    }
     if (smc_core_set_card(b, sys, card) == card)
         now = sync_system_now(b, sys, NULL, rep);
     hold_card = held;
