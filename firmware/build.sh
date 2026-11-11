@@ -19,6 +19,8 @@ git -C "$src" fetch --quiet origin "$REV" 2>/dev/null || true
 git -C "$src" checkout --quiet "$REV"
 git -C "$src" submodule update --quiet --init --recursive
 sh "$here/apply.sh" "$src"
+# (the PS2 game list's github.com/.../raw/ address is refused from some build machines: the same file, by raw.githubusercontent.com)
+sed -i 's#https://github.com/israpps/HDL-Batch-installer/raw/main/#https://raw.githubusercontent.com/israpps/HDL-Batch-installer/main/#' "$src/database/CMakeLists.txt"
 cmake -S "$src" -B "$here/build/$variant" -DCMAKE_BUILD_TYPE=Release -DVARIANT="$variant" -G "Unix Makefiles" >/dev/null
 cmake --build "$here/build/$variant" -j"$(nproc)"
 ls "$here/build/$variant"/*.uf2
