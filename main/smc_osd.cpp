@@ -56,16 +56,26 @@ int smc_osd_open()
 		char sys[64], name[128], label[25] = "";
 		if (sscanf(l, "save\t%d\t%d\t%ld\t%d\t%24[^\n]", &card, &files, &t, &playing, label) >= 4 && nrows < MAX_SAVES)
 		{
-			rows[nrows] = { card, files, t, playing, 0, "" };
-			snprintf(rows[nrows].label, sizeof(rows[nrows].label), "%s", label);
-			nrows++;
+			save_row &r = rows[nrows++];
+			memset(&r, 0, sizeof(r));
+			r.card = card;
+			r.files = files;
+			r.time = t;
+			r.playing = playing;
+			snprintf(r.label, sizeof(r.label), "%s", label);
 		}
 		else if (sscanf(l, "game\t%63[^\t]\t%127[^\n]", sys, name) == 2)
 			snprintf(game, sizeof(game), "%s", name);
 		else if (sscanf(l, "new\t%d", &card) == 1)
 			new_card = card;
 	}
-	if (new_card) rows[nrows++] = { new_card, 0, 0, 0, 1, "" };   // last: rows has room for it
+	if (new_card)   // last: rows has room for it
+	{
+		save_row &r = rows[nrows++];
+		memset(&r, 0, sizeof(r));
+		r.card = new_card;
+		r.is_new = 1;
+	}
 	if (!nrows) say("No saves for it on the card");
 	for (int i = 0; i < nrows; i++) if (rows[i].playing) sel = i;
 	return 1;
