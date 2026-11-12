@@ -105,7 +105,7 @@ int main(int argc, char *argv[])
 	achievements_init();
 
 	physical_disc_launch_startup();
-	smc_shim_menu_start();             // Phosphor: Super MemCard phase 1 (supermemcard.cpp)
+	smc_shim_main_start((argc > 1) ? argv[1] : "", (argc > 2) ? argv[2] : NULL);   // Super MemCard: the menu, or a core started from outside
 
 #ifdef USE_SCHEDULER
 	scheduler_init();

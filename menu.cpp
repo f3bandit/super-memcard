@@ -74,6 +74,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "str_util.h"
 #include "autofire.h"
 #include "smc_osd.h"     // Super MemCard: the OSD Saves page
+#include "smc_shim.h"    // Super MemCard: smc_shim_rom_load
 
 /*menu states*/
 enum MENU
@@ -3029,6 +3030,10 @@ void HandleUI(void)
 				FileSaveConfig(str, selPath, sizeof(selPath));
 			}
 
+			// Super MemCard: a game picked in the OSD: the old game's save to the card and the new one's in place first (a
+			// core without the card driver goes through the menu core and back, and this Main doesn't go on)
+			if (selPath[0] && mgl->done && !store_name && !smc_shim_rom_load(selPath, 'f', ioctl_index)) break;
+
 			if (selPath[0])
 			{
 
@@ -3167,6 +3172,10 @@ void HandleUI(void)
 			printf("Image selected: %s\n", selPath);
 			memcpy(Selected_S[(int)ioctl_index], selPath, sizeof(Selected_S[(int)ioctl_index]));
 			if (mgl->done) recent_update(SelectedDir, Selected_S[(int)ioctl_index], SelectedLabel, ioctl_index + 500);
+
+			// Super MemCard: a CD game picked in the OSD (its disc, not a save image), as a file above
+			if (selPath[0] && mgl->done && !store_name && ((is_megacd() && !ioctl_index) || is_pce() || (is_saturn() && !ioctl_index))
+				&& !smc_shim_rom_load(selPath, 's', ioctl_index)) break;
 
 			char idx = user_io_ext_idx(selPath, fs_pFileExt) << 6 | ioctl_index;
 			if (addon[0] == 'f' && addon[1] != '1') process_addon(addon, idx);
