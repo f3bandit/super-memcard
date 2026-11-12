@@ -542,6 +542,14 @@ Found on the way: the OSD's paths are relative to Main's root (`../usb0/games/..
 load: made whole. `load_core /media/fat/menu.rbf` (the menu by its full path) went to smcd as a launch: ignored now. The
 test saves made (Chrono Trigger, Phantasy Star IV) went to backups and card 1 was cleared again (`CLEAR`).
 
+### Our cores under their own name (Nov 12 2026)
+
+`SNES_SMC_20261112.rbf` (super-memcard-cores `b1d42ce`, built locally with Quartus 17.0.2 in the MiSTer image, as the
+workflow does: GitHub Actions is stopped by the account's billing): seed 1 missed timing (-0.554 ns on the SNES clock),
+seed 2 met it (+0.022 ns), 84 % of the ALMs. On the SS1 in `/media/fat/_SuperMemCard/`: started by an MGL
+(`<rbf>_SuperMemCard/SNES_SMC</rbf>`), `smcd` took it as SNES (card 1, `saves/SNES/`), the OSD ends with "Super MemCard
+by f3bandit" above Saves and exit, and a ROM picked in its OSD went through the running core (no bounce).
+
 ### Open
 
 - (Closed: the flaky PC test was the first write after a card switch, see above.)
