@@ -324,6 +324,12 @@ public: f3bandit/super-memcard-cores) reach the card while the game runs, throug
 which uses the front ports itself, nor Saturn, which has no room left in the FPGA: those two, and any core without
 the driver, get their saves to the card when the menu is back.
 
+**Push only while the game runs.** In game, `smcd` only sends the game's new saves to the card (`smc_push_game`):
+nothing from the card is written into the saves folder, since Main has the game's save file open and the game its
+save in memory. A newer copy on the card (another SuperStation played the game on it meanwhile) waits for the sync at
+the menu, as does a delete made elsewhere. Logged as `in game: <sys>/<game> <file>: the card's newer copy waits for
+the menu`.
+
 What the driver answers in a game core: `SMC_ID` (`80`, `0x534D` 'SM'), `SMC_MODE`, `SMC_RAW`, `SMC_RAW_STATUS` only
 (no controller reads or sector commands). The shim turns the ports on only for the frames.
 
