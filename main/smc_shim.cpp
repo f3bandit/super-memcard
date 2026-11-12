@@ -14,6 +14,7 @@
 #include <unistd.h>
 
 #include "smc_frontport.h"
+#include "file_io.h"   // getRootDir
 #include "user_io.h"   // user_io_get_core_name, is_menu
 
 #define SMCD_SOCK  "/tmp/smcd.sock"
@@ -22,8 +23,14 @@
 // MGL (the restart's, should the first one be gone). In /tmp: Main starts again after each core, and these outlive it
 #define GAME_FILE  "/tmp/smc_game"
 #define GAME_COPY  "/tmp/smc_game.mgl"
+// the core smcd last heard of ("<rbf>\n<mgl>\n"), and a game waiting for the menu core to reach the card first (the
+// bounce: a core without the card driver, a game or core picked in its OSD): "<rbf>\n<mgl>\n", with its MGL
+#define CORE_FILE   "/tmp/smc_core"
+#define BOUNCE_FILE "/tmp/smc_bounce"
+#define BOUNCE_MGL  "/tmp/smc_bounce.mgl"
 
 int xml_load(const char *xml);   // Main's MGL/MRA loader (support/arcade/mra_loader.cpp)
+int fpga_load_rbf(const char *name, const char *cfg, const char *xml);   // Main's core loader (fpga_io.cpp)
 
 static int restarting;           // the OSD's Saves page restarts the game: LAUNCH again, from the game's core
 
@@ -150,6 +157,27 @@ static void serve(int wait_ms)
 	if (peer_len >= sizeof(peer_buf) - 1) peer_len = 0;   // a line too long: dropped
 }
 
+static int read_two(const char *file, char *a, size_t an, char *b, size_t bn)
+{
+	a[0] = b[0] = 0;
+	FILE *f = fopen(file, "r");
+	if (!f) return 0;
+	if (fgets(a, (int)an, f)) a[strcspn(a, "\n")] = 0;
+	if (fgets(b, (int)bn, f)) b[strcspn(b, "\n")] = 0;
+	fclose(f);
+	return a[0] != 0;
+}
+
+static void write_two(const char *file, const char *a, const char *b)
+{
+	FILE *f = fopen(file, "w");
+	if (!f) return;
+	fprintf(f, "%s\n%s\n", a ? a : "", b ? b : "");
+	fclose(f);
+}
+
+static void bounce_go();
+
 void smc_shim_poll()
 {
 	static char core[64];
@@ -158,6 +186,7 @@ void smc_shim_poll()
 		snprintf(core, sizeof(core), "%s", user_io_get_core_name());
 		smc_frontport_reset();   // another core: ask its driver again
 	}
+	if (is_menu() && !access(BOUNCE_FILE, R_OK)) bounce_go();   // back in the menu core for a bounce: the game now
 	serve(0);
 }
 
@@ -204,17 +233,50 @@ static void copy_file(const char *from, const char *to)
 	fclose(a);
 }
 
+static int smcd_up()
+{
+	int fd = unix_connect(SMCD_SOCK);
+	if (fd < 0) return 0;
+	close(fd);
+	return 1;
+}
+
+// the running core has the card driver (core/sys/smc_port.sv): the card can be reached while it runs
+static int core_has_driver()
+{
+	return smc_frontport_raw(1, NULL, NULL, 0, 1, 0) != -1;
+}
+
+// a core without the card driver: through the menu core (it reaches the card) and back, smcd seeing the change
+static void bounce(const char *rbf, const char *mgl)
+{
+	write_two(BOUNCE_FILE, rbf, mgl);
+	printf("Super MemCard: through the menu core to reach the card, then %s %s\n", rbf, mgl ? mgl : "");
+	fpga_load_rbf("menu.rbf", NULL, NULL);   // Main starts again with the menu core: smc_shim_poll() goes on
+}
+
+static void bounce_go()
+{
+	char rbf[1024], mgl[1024];
+	int ok = read_two(BOUNCE_FILE, rbf, sizeof(rbf), mgl, sizeof(mgl));
+	unlink(BOUNCE_FILE);   // once only, whatever happens next
+	if (!ok) return;
+	fpga_load_rbf(rbf, NULL, mgl[0] ? mgl : NULL);   // from the menu: LAUNCH, as any game
+}
+
 void smc_shim_core_start(const char *rbf, const char *mgl)
 {
 	if (!is_menu() && !restarting)
 	{
-		// a core loaded from a game's OSD, not from the menu: no LAUNCH (the game before it still had the card), and the
-		// Saves page's game is that one's no longer
+		// a core loaded from a game's OSD, not from the menu: the Saves page's game is that one's no longer
 		unlink(GAME_FILE);
 		unlink(GAME_COPY);
-		return;
+		if (!rbf || !smcd_up()) return;
+		if (!core_has_driver()) { bounce(rbf, mgl); return; }   // the old game's save can't reach the card from here
+		// the running core reaches the card: LAUNCH from here (smcd puts the old game's save on the card first)
 	}
 	if (!rbf) return;
+	write_two(CORE_FILE, rbf, mgl);
 	restarting = 0;
 	int again = mgl && !strcmp(mgl, GAME_COPY);   // the restart's copy: the game's file stays what it was
 	if (!again) { unlink(GAME_FILE); unlink(GAME_COPY); }
@@ -234,7 +296,97 @@ void smc_shim_menu_start()
 	if (!is_menu()) return;   // Main starts again after every core: only the menu's start is the game's end
 	unlink(GAME_FILE);
 	unlink(GAME_COPY);
+	unlink(CORE_FILE);
+	if (!access(BOUNCE_FILE, R_OK)) return;   // a bounce: the next game's LAUNCH (smc_shim_poll) does it all
 	tell("MENU\n", 0);
+}
+
+static const char *base_name(const char *p)
+{
+	const char *b = strrchr(p, '/');
+	return b ? b + 1 : p;
+}
+
+void smc_shim_main_start(const char *rbf, const char *mgl)
+{
+	if (is_menu()) { smc_shim_menu_start(); return; }
+	// Main started straight into a core: smcd heard of it if this Main's last fpga_load_rbf() said so (it restarts Main
+	// after every core); else (a core started by something else) LAUNCH now, late: the core is already in
+	char was[1024], wmgl[1024];
+	read_two(CORE_FILE, was, sizeof(was), wmgl, sizeof(wmgl));
+	if (!rbf || !rbf[0] || (was[0] && !strcasecmp(base_name(was), base_name(rbf)))) return;
+	if (!smcd_up()) return;
+	write_two(CORE_FILE, rbf, mgl);
+	char l[2200], reply[64];
+	snprintf(l, sizeof(l), "LAUNCH %s\t%s\n", rbf, mgl ? mgl : "");
+	tell(l, 1, reply, sizeof(reply));
+}
+
+// an MGL starting the running core with this file: the running game's own setname kept (Game Boy Color on the Game Boy
+// core, ...)
+static int write_rom_mgl(const char *rbf, const char *path, char type, int index)
+{
+	char setname[512] = "";
+	FILE *g = fopen(GAME_COPY, "r");
+	if (g)
+	{
+		static char t[16384];
+		size_t n = fread(t, 1, sizeof(t) - 1, g);
+		t[n] = 0;
+		fclose(g);
+		char *a = strstr(t, "<setname"), *e = a ? strstr(a, "</setname>") : NULL;
+		if (a && e && e - a + 10 < (long)sizeof(setname)) snprintf(setname, sizeof(setname), "%.*s", (int)(e - a + 10), a);
+	}
+	char r[1024];
+	const char *root = getRootDir();
+	size_t rl = strlen(root);
+	snprintf(r, sizeof(r), "%s", !strncmp(rbf, root, rl) && rbf[rl] == '/' ? rbf + rl + 1 : rbf);
+	size_t n = strlen(r);
+	if (n > 4 && !strcasecmp(r + n - 4, ".rbf")) r[n - 4] = 0;
+	FILE *f = fopen(BOUNCE_MGL, "w");
+	if (!f) return 0;
+	fprintf(f, "<mistergamedescription>\n\t<rbf>%s</rbf>\n", r);
+	if (setname[0]) fprintf(f, "\t%s\n", setname);
+	fprintf(f, "\t<file delay=\"1\" type=\"%c\" index=\"%d\" path=\"", type, index);
+	for (const char *c = path; *c; c++)   // XML-escaped
+	{
+		if (*c == '&') fputs("&amp;", f);
+		else if (*c == '"') fputs("&quot;", f);
+		else if (*c == '<') fputs("&lt;", f);
+		else if (*c == '>') fputs("&gt;", f);
+		else fputc(*c, f);
+	}
+	fprintf(f, "\"/>\n</mistergamedescription>\n");
+	fclose(f);
+	return 1;
+}
+
+bool smc_shim_rom_load(const char *path, char type, int index)
+{
+	if (is_menu() || !path || !path[0]) return true;
+	char rbf[1024], mgl[1024];
+	if (!read_two(CORE_FILE, rbf, sizeof(rbf), mgl, sizeof(mgl))) return true;   // no game core smcd knows of
+	int driver = core_has_driver();
+	char l[2400], reply[64];
+	snprintf(l, sizeof(l), "ROM %s\t%s\t%d\n", rbf, path, driver);
+	tell(l, 1, reply, sizeof(reply));
+	if (strstr(reply, "DONE bounce"))
+	{
+		if (!write_rom_mgl(rbf, path, type, index)) return true;
+		unlink(GAME_FILE);
+		unlink(GAME_COPY);
+		bounce(rbf, BOUNCE_MGL);
+		return false;   // (a Main whose fpga_load_rbf() comes back: the menu core is loading)
+	}
+	if (strstr(reply, "DONE saves"))   // the Saves page's game is this one now
+	{
+		unlink(GAME_COPY);
+		FILE *f = fopen(GAME_FILE, "w");
+		if (f && write_rom_mgl(rbf, path, type, index)) { fprintf(f, "%s\n", BOUNCE_MGL); copy_file(BOUNCE_MGL, GAME_COPY); }
+		if (f) fclose(f);
+	}
+	else if (!strstr(reply, "DONE same")) { unlink(GAME_FILE); unlink(GAME_COPY); }
+	return true;
 }
 
 bool smc_shim_saves_available()

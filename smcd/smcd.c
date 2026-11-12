@@ -10,6 +10,9 @@
  * (or not a Super MemCard card): nocard; a Super MemCard card that isn't genuine (docs/12): notgenuine <card> <why>.
  *   LAUNCH <rbf>\t<mgl>     (Main) a game core is about to load: Core, and its save from the card if the card's is newer
  *   MENU                    (Main) the menu is back: the game just played goes to the card
+ *   ROM <rbf>\t<file>\t<0|1> (Main) a game file picked in the running core's OSD (1: the core has the card driver):
+ *                           DONE same (that game runs already) | DONE bounce (no driver: Main goes through the menu
+ *                           core and starts the core again with the game, LAUNCH) | DONE saves | DONE (as LAUNCH)
  *   HELLO                   the card: id, version, free space
  *   READ                    the memory manager's Read card: everything both ways
  *   SYSTEMS                 the systems with saves on the card
@@ -610,6 +613,24 @@ static void show_screen(struct conn *c, const char *sys, const char *game, int o
 }
 
 /* ---- the jobs ---- */
+/* the game that was running, before another starts without the menu between (another core or ROM picked in the OSD):
+ * its newest save to the card, if the card can be reached */
+static void leave_game(void) {
+    if (!play_game[0] || !strcmp(play_sys, "PSX"))
+        return;
+    struct conn c;
+    if (!card_open(&c))
+        return;
+    struct smc_sync_cfg k = cfg();
+    struct smc_sync_report rep;
+    memset(&rep, 0, sizeof(rep));
+    if (smc_sync_game(&c.bus, &k, play_sys, play_game, &rep) < 0)
+        lg("%s/%s: the save before the next game didn't reach the card", play_sys, play_game);
+    card_close(&c);
+}
+
+static void launch_game(const char *sys, const char *game, const char *mgl);
+
 static void do_launch(char *args) {
     smc_sync_hold_card(false);   /* before the core loads: the card picked now is the one it starts with */
     char *tab = strchr(args, '\t');
@@ -622,11 +643,53 @@ static void do_launch(char *args) {
     if (!mgl[0] || smc_mgl_read(mgl, &m))
         memset(&m, 0, sizeof(m));
     const char *sys = smc_launch_system(args, m.setname, m.same_dir);
+    leave_game();
     play_sys[0] = play_game[0] = 0;
     if (!sys)
         return;
+    launch_game(sys, m.game, mgl);
+}
+
+/* ROM <rbf>\t<file>\t<driver 0|1>: a game file picked in the running core's OSD. "same": it's the game running already;
+ * "bounce": a core without the card driver, so the card can't be reached now: Main goes through the menu core and
+ * starts the core again with this game (an MGL, LAUNCH as any other); else the old game's save to the card, the new
+ * game's from it, as LAUNCH */
+static const char *do_rom(char *args) {
+    char *t1 = strchr(args, '\t'), *t2 = t1 ? strchr(t1 + 1, '\t') : NULL;
+    if (!t1)
+        return "DONE\n";
+    *t1 = 0;
+    if (t2)
+        *t2 = 0;
+    const char *file = t1 + 1;
+    int driver = t2 ? atoi(t2 + 1) : 0;
+    char game[256];
+    const char *base = strrchr(file, '/');
+    snprintf(game, sizeof(game), "%s", base ? base + 1 : file);
+    char *dot = strrchr(game, '.');
+    if (dot && dot != game)
+        *dot = 0;
+    const char *sys = play_sys[0] ? play_sys : smc_launch_system(args, "", false);
+    if (!sys || !strcmp(sys, "PSX"))
+        return "DONE\n";   /* not a system with its saves on the card (PSX: its own card) */
+    char sysbuf[65];
+    snprintf(sysbuf, sizeof(sysbuf), "%s", sys);
+    if (!strcmp(sysbuf, "Saturn"))
+        smc_saturn_save_name(game);
+    if (!strcmp(sysbuf, play_sys) && !strcmp(game, play_game))
+        return "DONE same\n";
+    if (!driver)
+        return "DONE bounce\n";
+    smc_sync_hold_card(false);
+    leave_game();
+    play_sys[0] = play_game[0] = 0;
+    launch_game(sysbuf, game, "");
+    return play_game[0] ? "DONE saves\n" : "DONE\n";
+}
+
+static void launch_game(const char *sys, const char *game, const char *mgl) {
     snprintf(play_sys, sizeof(play_sys), "%s", sys);
-    snprintf(play_game, sizeof(play_game), "%s", m.game);
+    snprintf(play_game, sizeof(play_game), "%s", game);
     if (!strcmp(sys, "Saturn"))
         smc_saturn_save_name(play_game);   /* Main's name for its save: every disc of the game shares it */
     if (play_game[0] && strchr(play_game, '/') == NULL && play_game[0] != '.')
@@ -999,6 +1062,11 @@ static void handle(int fd) {
             do_launch(l + 7);
             /* "saves": a game whose saves are on the card, for Main's OSD Saves page (PSX keeps its own card) */
             say(fd, play_game[0] && strcmp(play_sys, "PSX") ? "DONE saves\n" : "DONE\n");
+            return;
+        }
+        if (!strncmp(l, "ROM ", 4)) {
+            lg("rom %s", l + 4);
+            say(fd, "%s", do_rom(l + 4));
             return;
         }
         if (!strcmp(l, "MENU")) {

@@ -57,11 +57,13 @@ SS1 (Nov 10 2026).
 
 1. Copy `smc_shim.cpp/.h`, `smc_frontport.cpp/.h`, `smc_osd.cpp/.h` into the source (built by the Makefile's `*.cpp`).
 2. `fpga_load_rbf()`: `smc_shim_core_start(name, xml)` for every core that isn't `menu.rbf`, before it loads.
-3. `main()`, after `user_io_init()`: `smc_shim_menu_start()` (it does nothing unless Main started with the menu core).
+3. `main()`, after `user_io_init()`: `smc_shim_main_start(argv[1], argv[2])` (Main's own arguments: the core and MGL it
+   started with; in place of the older `smc_shim_menu_start()`).
 4. Main's loop: `smc_shim_poll()`.
-5. **To come (designed, not yet in the test Main):** `smc_shim_rom_load(path)` where Main sends a new game into a
-   running core, and `smc_shim_core_start()` on Main's start-up path when it starts straight into a core. See "Every way
-   a game starts" below.
+5. `menu.cpp`, where the OSD's file browser hands Main a game: `smc_shim_rom_load(selPath, 'f', ioctl_index)` in
+   `MENU_GENERIC_FILE_SELECTED` and `smc_shim_rom_load(selPath, 's', ioctl_index)` in `MENU_GENERIC_IMAGE_SELECTED`
+   (the CD systems' disc: Mega CD and Saturn index 0, PC Engine CD), both only when `mgl->done` (not an MGL's own
+   file) and not `store_name`; `break` out when it returns false. See "Every way a game starts" below.
 6. `menu.cpp`, the OSD's Saves page (the table in "The OSD's Saves page" below): two menu states, the " Saves" row on
    the core's first page, its select, and the two states' code (with `smc_osd_scroll()`).
 
@@ -91,10 +93,10 @@ Copy `main/smc_shim.cpp/.h` and `main/smc_frontport.cpp/.h` into its source (GPL
 | call | where |
 |---|---|
 | `smc_shim_core_start(rbf, mgl)` | in `fpga_load_rbf()`, before a core that isn't the menu loads. Waits for `smcd` (the game's save from the card, at most 30 s; a second or two normally), passing its card frames meanwhile |
-| `smc_shim_menu_start()` | in `main()`, after `user_io_init()`, when Main starts with the menu core |
+| `smc_shim_main_start(rbf, mgl)` | in `main()`, after `user_io_init()`, with Main's arguments: the menu core, as `smc_shim_menu_start()`; a core started from outside (one this Main's `fpga_load_rbf()` didn't tell `smcd` of), `LAUNCH` then, late |
 | `smc_shim_poll()` | in Main's loop: passes `smcd`'s frames (also while a game runs, through the core's `sys_top` driver) |
-| `smc_shim_rom_load(path)` *(to come)* | where Main sends a game file into a running core (the OSD's file browser, an MGL's `<file>` after the core is up), before the save is mounted. Waits for `smcd` as `smc_shim_core_start()` does |
-| `smc_shim_core_start(rbf, mgl)` on start-up *(to come)* | when Main starts straight into a core (`load_core` of an MGL or a core while another core runs restarts Main with it), before that core loads |
+| `smc_shim_rom_load(path, type, index)` | where the OSD's file browser hands Main a game for the running core, before it loads it. `ROM` to `smcd`: the same game, nothing; a core with the card driver, the old game's save to the card and the new one's in place, then Main loads the file; a core without it, the **bounce**: an MGL for the core and the file (`/tmp/smc_bounce.mgl`, the running game's `setname` kept), the menu core loaded, and from it (`smc_shim_poll()`) the core again with that MGL, a `LAUNCH` as any other |
+| `smc_shim_core_start(rbf, mgl)` from a running core | another core picked in a game's OSD: a core with the driver, `LAUNCH` from there (`smcd` puts the old game's save on the card first); one without, the same bounce through the menu core |
 
 That is all of it in Main. Sockets (text lines):
 

@@ -1,6 +1,7 @@
 // Test harness: main/smc_shim.cpp as a MiSTer Main would run it, with the front ports stood in for by the virtual card
 // (vcardd), so smcd and the shim are tested together on a PC. Not part of anything shipped.
-//   shimtest <vcardd socket> launch <rbf> [<mgl>] | menu | serve <seconds>
+//   shimtest <vcardd socket> launch <rbf> [<mgl>] | menu | serve <seconds> | rom <file> | switch <rbf> [<mgl>]
+//            (SMC_NODRIVER=1: the core has no card driver)
 //            | osd <keys>   the OSD's Saves page while the game runs: keys d(own) u(p) s(elect), the page printed after each
 #include <stdio.h>
 #include <stdlib.h>
@@ -27,6 +28,7 @@ char is_menu() { return menu; }
 
 int smc_frontport_raw(int port, const uint8_t *out, uint8_t *in, int len, int ack_ms, int speed) {
     (void)ack_ms; (void)speed;
+    if (len == 0 && getenv("SMC_NODRIVER")) return -1;   // a stock core: no card driver
     if (port != 1) return len == 0 ? 0 : 0;   // the virtual card is in port 1; port 2 is empty
     if (len == 0) return 0;
     vbus.select(vbus.ctx, true);
@@ -58,6 +60,15 @@ void Info(const char *m, int, int, int, int) { printf("info %s\n", m); }
 int xml_load(const char *x) { printf("restart %s\n", x); menu = 0; smc_shim_core_start("_Console/NES_20260603.rbf", x); printf("relaunched\n"); return 0; }
 static void show() { for (int i = 0; i < OsdGetSize(); i++) printf("osd %d|%s\n", i, osd[i]); }
 void smc_frontport_reset() {}
+const char *getRootDir() { return "/media/fat"; }
+int fpga_load_rbf(const char *name, const char *, const char *xml) {
+    printf("load %s %s\n", name, xml ? xml : "");
+    if (!strcmp(name, "menu.rbf")) { menu = 1; return 0; }   // (Main would start again here)
+    smc_shim_core_start(name, xml);
+    menu = 0;
+    printf("loaded\n");
+    return 0;
+}
 
 int main(int argc, char **argv) {
     setvbuf(stdout, NULL, _IOLBF, 0);
@@ -78,6 +89,23 @@ int main(int argc, char **argv) {
             }
         }
         printf("osd done\n");
+        return 0;
+    } else if (!strcmp(argv[2], "rom") && argc >= 4) {
+        menu = 0;   // a game core runs; its OSD hands Main a file
+        int go = smc_shim_rom_load(argv[3], 'f', 1);
+        printf("rom returned %d\n", go);
+        if (!go) {   // the bounce: Main back in the menu core, then the game core again
+            for (int i = 0; i < 400 && menu; i++) { smc_shim_poll(); usleep(5000); }
+            printf("bounced\n");
+        }
+        smc_vcard_close(&vbus);
+        return 0;
+    } else if (!strcmp(argv[2], "switch") && argc >= 4) {
+        menu = 0;   // another core picked in a running core's OSD
+        smc_shim_core_start(argv[3], argc >= 5 ? argv[4] : "");
+        printf("switch returned\n");
+        for (int i = 0; i < 400 && menu; i++) { smc_shim_poll(); usleep(5000); }
+        smc_vcard_close(&vbus);
         return 0;
     } else if (!strcmp(argv[2], "menu")) {
         smc_shim_menu_start();

@@ -140,6 +140,35 @@ sleep 3
 grep -q "menu told" "$w/shim3.log" && ok "MENU told" || bad "MENU"
 grep -q "sync stopped with an error" /tmp/smcd.log && bad "sync errors in the log" || ok "no sync errors"
 
+# 4a. a game file picked in the running core's OSD (main/smc_shim.cpp smc_shim_rom_load): the same game, another with
+#     the card driver in the core (smcd reaches the card through it), another without (through the menu core and back)
+kill $shim 2>/dev/null || true; wait $shim 2>/dev/null || true
+rm -f /tmp/smc_core /tmp/smc_bounce /tmp/smc_bounce.mgl
+"$B/shimtest" "$w/vc.sock" launch _Console/NES_20260603.rbf "$w/game.mgl" > "$w/shim4.log" 2>&1 & shim=$!; pids="$pids $shim"
+for i in $(seq 100); do grep -q "launch returned" "$w/shim4.log" && break; sleep 0.1; done
+kill $shim 2>/dev/null || true; wait $shim 2>/dev/null || true
+grep -q "^_Console/NES_20260603.rbf$" /tmp/smc_core && ok "ROM: the shim keeps the core smcd heard of" || bad "/tmp/smc_core: $(cat /tmp/smc_core 2>&1)"
+"$B/shimtest" "$w/vc.sock" rom "$w/games/NES/Test Game.nes" > "$w/rom1.log" 2>&1
+grep -q "^rom returned 1" "$w/rom1.log" && ! grep -q "^load" "$w/rom1.log" && ok "ROM: the same game again: loaded as it is" || bad "ROM same: $(cat "$w/rom1.log")"
+cp "$w/games/NES/Test Game.nes" "$w/games/NES/Other Game.nes"
+n=$(grep -c "game sync done" /tmp/smcd.log)
+"$B/shimtest" "$w/vc.sock" rom "$w/games/NES/Other Game.nes" > "$w/rom2.log" 2>&1
+grep -q "^rom returned 1" "$w/rom2.log" && ! grep -q "^load" "$w/rom2.log" && [ "$(grep -c "game sync done" /tmp/smcd.log)" -ge $((n + 1)) ] \
+    && grep -q "path=\"$w/games/NES/Other Game.nes\"" /tmp/smc_bounce.mgl && grep -qx /tmp/smc_bounce.mgl /tmp/smc_game \
+    && ok "ROM, a core with the driver: the old game's save to the card, the new one's from it, then loaded" || bad "ROM driver: $(cat "$w/rom2.log")"
+cp "$w/games/NES/Test Game.nes" "$w/games/NES/Third Game.nes"
+SMC_NODRIVER=1 "$B/shimtest" "$w/vc.sock" rom "$w/games/NES/Third Game.nes" > "$w/rom3.log" 2>&1
+grep -q "^rom returned 0" "$w/rom3.log" && grep -q "^load menu.rbf" "$w/rom3.log" && grep -q "^load _Console/NES_20260603.rbf /tmp/smc_bounce.mgl" "$w/rom3.log" \
+    && grep -q "^bounced" "$w/rom3.log" && grep -q "<rbf>_Console/NES_20260603</rbf>" /tmp/smc_bounce.mgl && grep -q "Third Game.nes" /tmp/smc_bounce.mgl \
+    && grep -q "launch _Console/NES_20260603.rbf	/tmp/smc_bounce.mgl" /tmp/smcd.log && [ ! -e /tmp/smc_bounce ] \
+    && ok "ROM, a stock core: through the menu core, then the core again with the game (LAUNCH)" || bad "ROM bounce: $(cat "$w/rom3.log")"
+SMC_NODRIVER=1 "$B/shimtest" "$w/vc.sock" switch _Console/SNES_20260603.rbf > "$w/sw.log" 2>&1
+grep -q "^load menu.rbf" "$w/sw.log" && grep -q "^load _Console/SNES_20260603.rbf" "$w/sw.log" && grep -q "launch _Console/SNES_20260603.rbf" /tmp/smcd.log \
+    && ok "another core picked in a stock core's OSD: through the menu core too" || bad "core switch: $(cat "$w/sw.log")"
+rm -f "$w/games/NES/Other Game.nes" "$w/games/NES/Third Game.nes" "$w/saves/NES/Other Game.sav" "$w/saves/NES/Third Game.sav"
+"$B/shimtest" "$w/vc.sock" menu > "$w/shim5.log" 2>&1 & shim=$!; pids="$pids $shim"   # the menu again, passing frames
+sleep 3
+
 # 4b. the memory manager's Play: the save on a card, then Main told to load the game (its MGL from the launch here, else
 #     one made from its ROM). Main's pipe is a file here: what smcd wrote to it is checked
 cmp -s "$w/state/launch/NES/Test Game.mgl" "$w/game.mgl" && ok "PLAY: the game's MGL kept from its launch" || bad "the kept MGL"
