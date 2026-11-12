@@ -264,8 +264,16 @@ static void bounce_go()
 	fpga_load_rbf(rbf, NULL, mgl[0] ? mgl : NULL);   // from the menu: LAUNCH, as any game
 }
 
+// a menu core by its path ("/media/fat/menu.rbf" as load_core gives it, Console Mode's menu_ConsoleMode.rbf): not a game
+static int is_menu_rbf(const char *rbf)
+{
+	const char *b = strrchr(rbf, '/');
+	return !strncasecmp(b ? b + 1 : rbf, "menu", 4);
+}
+
 void smc_shim_core_start(const char *rbf, const char *mgl)
 {
+	if (rbf && is_menu_rbf(rbf)) return;   // the menu's start (smc_shim_main_start) tells smcd
 	if (!is_menu() && !restarting)
 	{
 		// a core loaded from a game's OSD, not from the menu: the Saves page's game is that one's no longer
@@ -361,9 +369,12 @@ static int write_rom_mgl(const char *rbf, const char *path, char type, int index
 	return 1;
 }
 
-bool smc_shim_rom_load(const char *path, char type, int index)
+bool smc_shim_rom_load(const char *file, char type, int index)
 {
-	if (is_menu() || !path || !path[0]) return true;
+	if (is_menu() || !file || !file[0]) return true;
+	char path[1200];   // the OSD's paths are under Main's root ("../usb0/games/..."): whole, for smcd and the MGL
+	if (file[0] == '/') snprintf(path, sizeof(path), "%s", file);
+	else snprintf(path, sizeof(path), "%s/%s", getRootDir(), file);
 	char rbf[1024], mgl[1024];
 	if (!read_two(CORE_FILE, rbf, sizeof(rbf), mgl, sizeof(mgl))) return true;   // no game core smcd knows of
 	int driver = core_has_driver();

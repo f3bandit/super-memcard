@@ -525,6 +525,23 @@ touched), with the game lists installed (cm_modules' gamedb module, 17 lists):
 - `tools/smcview` shows the section with the card's icons on the TV, as Console Mode's Memory Cards screen.
 - "The identity check didn't finish (no answer)" now and then between commands on this card: the next command worked.
 
+### Every launch path on the BitFunX, SNES and Genesis (Nov 12 2026, SS1, test Main with the ROM-load hook)
+
+Card 1 of each system, the menu core with the card bridge (`menu_fx.rbf` bound over `menu.rbf`). OSD driven from the
+SS1 itself (`smcd/osdtest/`: a uinput keyboard, the test Main's OSD rows over its socket).
+
+| path | stock core | our core (card driver) |
+|---|---|---|
+| MGL from the menu | SNES `SNES_20260823`, MegaDrive `MegaDrive_20260603`: LAUNCH, card 1, synced before the core | SNES `SNES_3ac236a`, Genesis `Genesis_adc0c42`: the same |
+| a save made in game (OSD Save Backup RAM) | (reaches the card at the menu) | to card 1 3 s (SNES 8 KB) and 7 s (Genesis 64 KB) after it |
+| the card's save back (local file gone) | SNES: pulled before the core, same bytes | Genesis: pulled before the core, same bytes (12 s, 64 KB) |
+| another ROM picked in the OSD | the bounce: menu core, the old game to the card, the core again with the new game: about 3 s (SNES, MegaDrive) | through the running core, no bounce: about 2 s (SNES, Genesis) |
+| the same ROM picked again | nothing done | nothing done |
+
+Found on the way: the OSD's paths are relative to Main's root (`../usb0/games/...`), so the bounce MGL's file didn't
+load: made whole. `load_core /media/fat/menu.rbf` (the menu by its full path) went to smcd as a launch: ignored now. The
+test saves made (Chrono Trigger, Phantasy Star IV) went to backups and card 1 was cleared again (`CLEAR`).
+
 ### Open
 
 - (Closed: the flaky PC test was the first write after a card switch, see above.)
