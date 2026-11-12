@@ -1525,13 +1525,38 @@ static void sync_system(const struct smc_bus *b, const char *sys, int card, stru
     for (int i = 0; i < nents; i++)
         if (!strcmp(ents[i].sys, sys))
             ents[i].visited = false;
-    for (int gi = 0;; gi++) {
-        char id[65];
-        if (smc_list_card(b, sys, card, gi, id) != SMC_OK)
+    /* the card's sets; two for one save file (a game filed by name before game IDs, and by its ID since): only the
+     * newest comes in, or both would be written into the same file one after the other */
+    static char ids[256][65], owners[256][256];
+    static uint32_t times[256];
+    int nids = 0;
+    for (int gi = 0; nids < 256; gi++) {
+        if (smc_list_card(b, sys, card, gi, ids[nids]) != SMC_OK)
             break;
-        if (sync_game(b, sys, card, id, id, rep) < 0) {
+        struct smc_game_info info;
+        owners[nids][0] = 0;
+        times[nids] = 0;
+        if (smc_game_info(b, sys, card, ids[nids], &info) == SMC_OK) {
+            snprintf(owners[nids], sizeof(owners[0]), "%s", info.save_name);
+            times[nids] = info.time;
+        }
+        nids++;
+    }
+    for (int i = 0; i < nids; i++) {
+        int better = -1;
+        for (int j = 0; j < nids && better < 0; j++)
+            if (j != i && owners[i][0] && !strcmp(owners[i], owners[j]) &&
+                (times[j] > times[i] || (times[j] == times[i] && j < i)))
+                better = j;
+        if (better >= 0) {
+            logf_("%s/%s on card %d: an older copy of %s (the newer is %s): left on the card, not loaded", sys, ids[i],
+                  card, owners[i], ids[better]);
+            rep->skipped++;
+            continue;
+        }
+        if (sync_game(b, sys, card, ids[i], ids[i], rep) < 0) {
             rep->failed++;
-            logf_("failed: %s/%s: the card didn't answer", sys, id);
+            logf_("failed: %s/%s: the card didn't answer", sys, ids[i]);
         }
     }
     char dir[1024];

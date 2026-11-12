@@ -975,6 +975,27 @@ static void t_sync_two_saves_one_game(void) {
     CHECK_EQ(get_save(0, "NES/FF6.sav", got, sizeof(got)), 8192);
 }
 
+static void t_sync_two_sets_one_save_file(void) {
+    /* a card with two sets for one save file (filed by its name before game IDs, by its ID since): only the newer
+     * comes in; the older stays on the card */
+    sync_setup();
+    CHECK_EQ(smc_hello(&vbus, SMC_HOST_TEST, 0, NULL), 1);
+    CHECK(smc_select_card(&vbus, "NES", "Zelda", 1, NULL) >= 0);
+    CHECK_EQ(smc_write_file_at(&vbus, "save.sav", sA, 8192, 1, 1700000000), SMC_OK);
+    CHECK(smc_select_card(&vbus, "NES", "CRC-12345678", 1, NULL) >= 0);
+    CHECK_EQ(smc_write_file_at(&vbus, "save.sav", sB, 8192, 1, 1700000500), SMC_OK);
+    CHECK_EQ(smc_write_file(&vbus, "name.txt", (const uint8_t *)"Zelda", 5, 1), SMC_OK);
+    struct smc_sync_report r = run_sync(0);
+    CHECK_EQ(r.pulled, 1);
+    CHECK_EQ(r.skipped, 1);
+    CHECK_EQ(get_save(0, "NES/Zelda.sav", got, sizeof(got)), 8192);
+    CHECK(memcmp(got, sB, 8192) == 0);
+    r = run_sync(0); /* settled: the older is still left alone */
+    CHECK_EQ(r.pulled + r.pushed, 0);
+    CHECK_EQ(get_save(0, "NES/Zelda.sav", got, sizeof(got)), 8192);
+    CHECK(memcmp(got, sB, 8192) == 0);
+}
+
 static void t_sync_like_a_ps1(void) {
     /* the card is read or written only when a game's save is loaded or saved */
     sync_setup();
@@ -1044,4 +1065,5 @@ static void t_sync_like_a_ps1(void) {
     {"game IDs from the games' own headers", t_game_ids_from_headers, true, NULL}, \
     {"sync: one save set per game, filed by game ID, with its time", t_sync_by_game_id, true, NULL}, \
     {"sync: two saves here for one game: two sets, both kept", t_sync_two_saves_one_game, true, NULL}, \
+    {"sync: two card sets for one save file: the newer comes in", t_sync_two_sets_one_save_file, true, NULL}, \
     {"sync: like a PS1: a game's save in at its start, out after it", t_sync_like_a_ps1, true, NULL},
