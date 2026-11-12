@@ -781,7 +781,7 @@ static void game_poll(void) {
     }
     struct smc_sync_cfg k = cfg();
     struct smc_sync_report rep;
-    int rc = smc_sync_game(&c.bus, &k, play_sys, play_game, &rep);
+    int rc = smc_push_game(&c.bus, &k, play_sys, play_game, &rep);   /* push only: the game has its save open */
     if (rc < 0)
         lg("in-game sync stopped with an error");
     if (rc < 0 || rep.failed) {

@@ -127,6 +127,10 @@ int smc_sync(const struct smc_bus *b, const struct smc_sync_cfg *cfg, struct smc
 /* game: the save's name, which is the game file's name without its extension (Main's rule) */
 int smc_sync_game(const struct smc_bus *b, const struct smc_sync_cfg *cfg, const char *sys, const char *game,
                   struct smc_sync_report *rep);
+/* The same while the game runs: its changed saves to the card only; nothing from the card reaches the saves folder
+ * (what the card has newer waits for the menu's sync: skipped) */
+int smc_push_game(const struct smc_bus *b, const struct smc_sync_cfg *cfg, const char *sys, const char *game,
+                  struct smc_sync_report *rep);
 /* sys: one system (Main's save folder), or NULL for all */
 int smc_sync_changed(const struct smc_bus *b, const struct smc_sync_cfg *cfg, const char *sys,
                      struct smc_sync_report *rep);

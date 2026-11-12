@@ -1033,6 +1033,35 @@ static void t_sync_clear_card_only(void) {
     CHECK_EQ(get_save(0, "SNES/Test Only.srm", got, sizeof(got)), -1);
 }
 
+static void t_sync_push_only_in_game(void) {
+    /* while a game runs: its new save to the card, nothing from the card into the file Main has open */
+    sync_setup();
+    put_save(0, "SNES/Game.srm", sA, 8192);
+    CHECK_EQ(run_sync(0).pushed, 1);
+    CHECK_EQ(run_sync(1).pulled, 1);
+    sleep(1);
+    put_save(0, "SNES/Game.srm", sB, 8192); /* the first SuperStation plays on */
+    CHECK_EQ(run_sync(0).pushed, 1);
+    char saves[400], state[400];
+    snprintf(saves, sizeof(saves), "%s/saves", ss[1]);
+    snprintf(state, sizeof(state), "%s/state", ss[1]);
+    struct smc_sync_cfg cfg = {saves, state, smc_console_systems, SMC_HOST_TEST, slog};
+    struct smc_sync_report r;
+    CHECK_EQ(smc_push_game(&vbus, &cfg, "SNES", "Game", &r), 0); /* the second, in game: the card's newer copy waits */
+    CHECK_EQ(r.pulled, 0);
+    CHECK_EQ(r.skipped, 1);
+    CHECK_EQ(get_save(1, "SNES/Game.srm", got, sizeof(got)), 8192);
+    CHECK(memcmp(got, sA, 8192) == 0);
+    CHECK_EQ(smc_sync_game(&vbus, &cfg, "SNES", "Game", &r), 0); /* at the menu: in */
+    CHECK_EQ(r.pulled, 1);
+    CHECK_EQ(get_save(1, "SNES/Game.srm", got, sizeof(got)), 8192);
+    CHECK(memcmp(got, sB, 8192) == 0);
+    sleep(1);
+    put_save(1, "SNES/Game.srm", sA, 8192); /* a save in game: out */
+    CHECK_EQ(smc_push_game(&vbus, &cfg, "SNES", "Game", &r), 0);
+    CHECK_EQ(r.pushed, 1);
+}
+
 static void t_sync_like_a_ps1(void) {
     /* the card is read or written only when a game's save is loaded or saved */
     sync_setup();
@@ -1104,4 +1133,5 @@ static void t_sync_like_a_ps1(void) {
     {"sync: two saves here for one game: two sets, both kept", t_sync_two_saves_one_game, true, NULL}, \
     {"sync: two card sets for one save file: the newer comes in", t_sync_two_sets_one_save_file, true, NULL}, \
     {"sync: a card cleared: off the card only, no SuperStation loses a save", t_sync_clear_card_only, true, NULL}, \
+    {"sync: in game, push only: nothing from the card under the running game", t_sync_push_only_in_game, true, NULL}, \
     {"sync: like a PS1: a game's save in at its start, out after it", t_sync_like_a_ps1, true, NULL},

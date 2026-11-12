@@ -1,0 +1,1032 @@
+diff --git a/fpga_io.cpp b/fpga_io.cpp
+index b64cfe5..5f9d5eb 100644
+--- a/fpga_io.cpp
++++ b/fpga_io.cpp
+@@ -22,6 +22,7 @@
+ #include "fpga_system_manager.h"
+ #include "fpga_reset_manager.h"
+ #include "fpga_nic301.h"
++#include "smc_shim.h"   // Super MemCard
+ 
+ #define FPGA_REG_BASE 0xFF000000
+ #define FPGA_REG_SIZE 0x01000000
+@@ -426,6 +427,7 @@ static int make_env(const char *name, const char *cfg)
+ int fpga_load_rbf(const char *name, const char *cfg, const char *xml)
+ {
+ 	OsdDisable();
++	if (strcasecmp(name, "menu.rbf")) smc_shim_core_start(name, xml);   // Super MemCard: the game about to run
+ 	static char path[1024];
+ 	int ret = 0;
+ 
+diff --git a/main.cpp b/main.cpp
+index f1eaf82..0e617b2 100644
+--- a/main.cpp
++++ b/main.cpp
+@@ -34,6 +34,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ #include "scheduler.h"
+ #include "osd.h"
+ #include "offload.h"
++#include "smc_shim.h"   // Super MemCard
+ 
+ const char *version = "$VER:" VDATE;
+ 
+@@ -71,6 +72,7 @@ int main(int argc, char *argv[])
+ 
+ 	FindStorage();
+ 	user_io_init((argc > 1) ? argv[1] : "",(argc > 2) ? argv[2] : NULL);
++	smc_shim_main_start((argc > 1) ? argv[1] : "", (argc > 2) ? argv[2] : NULL);   // Super MemCard: the menu, or a core
+ 
+ #ifdef USE_SCHEDULER
+ 	scheduler_init();
+@@ -84,6 +86,7 @@ int main(int argc, char *argv[])
+ 		}
+ 
+ 		user_io_poll();
++		smc_shim_poll();   // Super MemCard: the card frames smcd sends, the bounce back from the menu core
+ 		frame_timer();
+ 		input_poll(0);
+ 		HandleUI();
+diff --git a/menu.cpp b/menu.cpp
+index eace36e..cf15b5e 100644
+--- a/menu.cpp
++++ b/menu.cpp
+@@ -49,6 +49,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ #include "file_io.h"
+ #include "osd.h"
+ #include "hardware.h"
++#include "smc_osd.h"   // Super MemCard: the OSD Saves page
++#include "smc_shim.h"  // Super MemCard: smc_shim_rom_load
+ #include "menu.h"
+ #include "user_io.h"
+ #include "debug.h"
+@@ -186,6 +188,10 @@ enum MENU
+ 	MENU_SAVE_CHECK,
+ 	MENU_SAVE_WAIT,
+ 
++	// Super MemCard: the running game's saves on the card (smc_osd.cpp)
++	MENU_SMC_SAVES1,
++	MENU_SMC_SAVES2,
++
+ 	// Arcade
+ 	MENU_ARCADE_DIP1,
+ 	MENU_ARCADE_DIP2,
+@@ -1287,6 +1293,8 @@ void HandleUI(void)
+ 	static int flash_state = 0;
+ 	static uint32_t dip_submenu;
+ 	static uint32_t manual_submenu;
++	static uint32_t smc_submenu;   // Super MemCard: the generic menu's row of "Saves" (-1: none)
++	static uint32_t smc_ret_sub = 0;
+ 	static int need_reset = 0;
+ 	static int flat = 0;
+ 	static int menusub_parent = 0;
+@@ -2147,6 +2155,7 @@ void HandleUI(void)
+ 
+ 			dip_submenu = -1;
+ 			manual_submenu = -1;
++			smc_submenu = -1;
+ 
+ 			int last_space = 0;
+ 
+@@ -2432,6 +2441,16 @@ void HandleUI(void)
+ 				}
+ 			} while (p);
+ 
++			// Super MemCard: the game's saves on the card (main page only, after the core's own options)
++			if (!page && smc_osd_available())
++			{
++				smc_submenu = selentry;
++				MenuWrite(entry, " Saves", menusub == selentry, 0);
++				menumask = (menumask << 1) | 1;
++				entry++;
++				selentry++;
++			}
++
+ 			if (!entry) break;
+ 
+ 			for (; entry < OsdGetSize() - 1; entry++) MenuWrite(entry, "", 0, 0);
+@@ -2552,7 +2571,17 @@ void HandleUI(void)
+ 				select = 1;
+ 			}
+ 
+-			if (manual_submenu == menusub)
++			if (smc_submenu == menusub && select)
++			{
++				// Super MemCard "Saves": the game's saves on the card
++				if (smc_osd_open())
++				{
++					smc_ret_sub = menusub;
++					menusub = 0;
++					menustate = MENU_SMC_SAVES1;
++				}
++			}
++			else if (manual_submenu == menusub)
+ 			{
+ 				if (select)
+ 				{
+@@ -2906,6 +2935,10 @@ void HandleUI(void)
+ 				FileSaveConfig(str, selPath, sizeof(selPath));
+ 			}
+ 
++			// Super MemCard: a game picked in the OSD: the old game's save to the card and the new one's in place first (a
++			// core without the card driver goes through the menu core and back, and this Main doesn't go on)
++			if (selPath[0] && mgl->done && !store_name && !smc_shim_rom_load(selPath, 'f', ioctl_index)) break;
++
+ 			if (selPath[0])
+ 			{
+ 
+@@ -3041,6 +3074,10 @@ void HandleUI(void)
+ 			memcpy(Selected_S[(int)ioctl_index], selPath, sizeof(Selected_S[(int)ioctl_index]));
+ 			if (mgl->done) recent_update(SelectedDir, Selected_S[(int)ioctl_index], SelectedLabel, ioctl_index + 500);
+ 
++			// Super MemCard: a CD game picked in the OSD (its disc, not a save image), as a file above
++			if (selPath[0] && mgl->done && !store_name && ((is_megacd() && !ioctl_index) || is_pce() || (is_saturn() && !ioctl_index))
++				&& !smc_shim_rom_load(selPath, 's', ioctl_index)) break;
++
+ 			char idx = user_io_ext_idx(selPath, fs_pFileExt) << 6 | ioctl_index;
+ 			if (addon[0] == 'f' && addon[1] != '1') process_addon(addon, idx);
+ 
+@@ -3734,6 +3771,28 @@ void HandleUI(void)
+ 		break;
+ 
+ 
++		/******************************************************************/
++		/* Super MemCard: the running game's saves on the card            */
++		/******************************************************************/
++	case MENU_SMC_SAVES1:
++		helptext_idx = 0;
++		smc_osd_print();
++		menustate = MENU_SMC_SAVES2;
++		parentstate = menustate;
++		break;
++
++	case MENU_SMC_SAVES2:
++		menumask = 0;
++		if (menu || back)
++		{
++			menustate = MENU_GENERIC_MAIN1;
++			menusub = smc_ret_sub;
++			break;
++		}
++		smc_osd_scroll();
++		if (smc_osd_key(up, down, c, select)) menustate = MENU_SMC_SAVES1;
++		break;
++
+ 	case MENU_ARCADE_DIP1:
+ 		helptext_idx = 0;
+ 		menumask = 0;
+diff --git a/scheduler.cpp b/scheduler.cpp
+index d52bd41..5bb5c02 100644
+--- a/scheduler.cpp
++++ b/scheduler.cpp
+@@ -1,3 +1,4 @@
++#include "smc_shim.h"   // Super MemCard
+ #include "scheduler.h"
+ #include <stdio.h>
+ #include "libco.h"
+@@ -32,6 +33,7 @@ static void scheduler_co_poll(void)
+ 		{
+ 			SPIKE_SCOPE("co_poll", 1000);
+ 			user_io_poll();
++			smc_shim_poll();   // Super MemCard: the card frames smcd sends, the bounce back from the menu core
+ 			frame_timer();
+ 			input_poll(0);
+ 			video_poll();
+diff --git a/smc_frontport.cpp b/smc_frontport.cpp
+new file mode 100644
+index 0000000..7c6704a
+--- /dev/null
++++ b/smc_frontport.cpp
+@@ -0,0 +1,88 @@
++// Super MemCard: the front ports from a MiSTer Main (smc_frontport.h). Copyright (C) 2026 f3bandit.
++// GPL-3.0-or-later, as Main_MiSTer.
++#include "smc_frontport.h"
++
++#include <unistd.h>
++
++#include "hardware.h"   // GetTimer, CheckTimer
++#include "spi.h"        // spi_uio_cmd_cont, spi_w, DisableIO
++
++// the driver's commands (core/sys/smc_port.sv)
++#define SMC_ID          0x80   // reply: 534D ('SM'), version, mode
++#define SMC_MODE        0x81   // write: bit 0 = the front ports are the driver's
++#define SMC_RAW         0x87   // write: {port 2, len}, {speed, ack wait in 10.24 us units}, the bytes as words
++#define SMC_RAW_STATUS  0x88   // reply: {busy, done, count}, then the card's bytes as words
++
++static int ver = -1;            // the driver's version in the loaded core; 0: none; -1: not asked yet
++static unsigned long next_probe;
++static int held;
++
++void smc_frontport_reset() { ver = -1; }
++
++// Asked again at most once a second while the answer is "no": right after Main loads a core it may not answer yet
++static int present()
++{
++	if (ver == 0 && CheckTimer(next_probe)) ver = -1;
++	if (ver < 0)
++	{
++		next_probe = GetTimer(1000);
++		// the answer to a word comes back with that same word (as with hps_io's own commands): the command word
++		// itself returns the first reply word
++		uint16_t id = spi_uio_cmd_cont(SMC_ID);
++		uint16_t v = spi_w(0);
++		DisableIO();
++		ver = (id == 0x534D && v) ? v : 0;
++	}
++	return ver > 0;
++}
++
++void smc_frontport_hold(int on)
++{
++	if (on == held) return;
++	if (present())
++	{
++		spi_uio_cmd_cont(SMC_MODE); spi_w(on ? 1 : 0); DisableIO();
++		if (on) usleep(50000);   // a card just switched onto the bus misses the first frame (seen on the SS1)
++	}
++	held = on;
++}
++
++int smc_frontport_raw(int port, const uint8_t *out, uint8_t *in, int len, int ack_ms, int speed)
++{
++	if (!present() || ver < 2) return -1;
++	if (speed < 0 || speed > 3 || ver < 3) speed = 0;   // speeds: driver version 3
++	if (len == 0) return 0;
++	if (len < 0 || len > 255 || (port != 1 && port != 2)) return -1;
++	int mine = !held;
++	if (mine)
++	{
++		spi_uio_cmd_cont(SMC_MODE); spi_w(1); DisableIO();
++		usleep(50000);
++	}
++
++	spi_uio_cmd_cont(SMC_RAW);
++	spi_w((port == 2 ? 0x100 : 0) | len);
++	spi_w((uint16_t)(speed << 14 | (ack_ms > 167 ? 167 : ack_ms) * 100000 / 1024));   // units of 10.24 us
++	for (int k = 0; k < len; k += 2) spi_w((uint16_t)(out[k] | ((k + 1 < len ? out[k + 1] : 0) << 8)));
++	DisableIO();
++
++	int count = -3;
++	unsigned long until = GetTimer(2000 + ack_ms * 4);
++	while (!CheckTimer(until))
++	{
++		usleep(500);
++		uint16_t st = spi_uio_cmd_cont(SMC_RAW_STATUS);
++		if ((st & 0x8000) || !(st & 0x4000)) { DisableIO(); continue; }   // busy, or not done yet
++		count = st & 0xFF;
++		for (int k = 0; k < len; k += 2)
++		{
++			uint16_t w = spi_w(0);
++			in[k] = w & 0xFF;
++			if (k + 1 < len) in[k + 1] = w >> 8;
++		}
++		DisableIO();
++		break;
++	}
++	if (mine) { spi_uio_cmd_cont(SMC_MODE); spi_w(0); DisableIO(); }
++	return count;
++}
+diff --git a/smc_frontport.h b/smc_frontport.h
+new file mode 100644
+index 0000000..4d553c3
+--- /dev/null
++++ b/smc_frontport.h
+@@ -0,0 +1,17 @@
++// Super MemCard: the SuperStation One's front ports from a MiSTer Main, through the front-port driver in the loaded
++// core (core/sys/smc_port.sv: in the menu core on hps_io's EXT_BUS, in a game core in sys_top). Copyright (C) 2026
++// f3bandit. GPL-3.0-or-later, as Main_MiSTer.
++#pragma once
++#include <stdint.h>
++
++// One raw frame on front port 1 or 2: out[0..len-1] in one select, the card's byte for each into in[], stopping after
++// the first byte the card doesn't ACK. ack_ms: how long a byte's ACK may take (1..167). speed: 0 as a PS1 (250 kHz),
++// 1 500 kHz, 2 1 MHz, 3 2 MHz. Returns the bytes exchanged (0: nothing answered); -1 no driver in this core (len 0
++// only asks that), -2 busy, -3 no answer from the driver in time.
++int smc_frontport_raw(int port, const uint8_t *out, uint8_t *in, int len, int ack_ms, int speed);
++
++// Keep the front ports switched to the driver (1) across several frames, or give them back to the core (0).
++void smc_frontport_hold(int on);
++
++// Forget what the loaded core answered (call when another core is loaded).
++void smc_frontport_reset();
+diff --git a/smc_osd.cpp b/smc_osd.cpp
+new file mode 100644
+index 0000000..17b58bb
+--- /dev/null
++++ b/smc_osd.cpp
+@@ -0,0 +1,172 @@
++// Super MemCard: the OSD's Saves page (smc_osd.h). Copyright (C) 2026 f3bandit. GPL-3.0-or-later, as Main_MiSTer.
++#include "smc_osd.h"
++
++#include <linux/input.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <time.h>
++
++#include "osd.h"       // OsdWrite, OsdSetTitle, OsdGetSize, OsdUpdate, ScrollText, ScrollReset
++#include "smc_shim.h"
++
++#define MAX_SAVES 100
++
++struct save_row
++{
++	int card;      // the virtual card
++	int files;
++	long time;     // its newest file's time; 0 for the new one
++	int playing;   // the one the game runs with now
++	int is_new;    // "New save": the first free card, the game starts with no save
++	char label[25];   // the name the user gave it (the memory manager's Rename), "" if none
++};
++
++#define ROW_W  29   // a row's characters on the OSD (its last columns stay clear)
++
++static save_row rows[MAX_SAVES + 1];
++static int nrows, sel, top, confirm = -1;
++static char game[128];
++static char msg[40];   // on the page's last row (Main's Info() pop-up doesn't show over a menu page)
++
++static void say(const char *m) { snprintf(msg, sizeof(msg), " %s", m); }
++
++bool smc_osd_available()
++{
++	return smc_shim_saves_available();
++}
++
++int smc_osd_open()
++{
++	static char ans[8192];
++	nrows = sel = top = 0;
++	confirm = -1;
++	game[0] = msg[0] = 0;
++	ScrollReset();
++	// what's wrong is said on the page itself (no rows then)
++	if (smc_shim_ask("SAVES", ans, sizeof(ans)) < 0) { say("The card didn't answer"); return 1; }
++	if (!strncmp(ans, "nocard", 6)) { say("No memory card in the port"); return 1; }
++	if (!strncmp(ans, "notgenuine", 10)) { say("Not a Retro Remake card"); return 1; }
++	if (!strncmp(ans, "nogame", 6)) { say("No saves for it on the card"); return 1; }
++	int new_card = 0;
++	for (char *l = strtok(ans, "\n"); l; l = strtok(NULL, "\n"))
++	{
++		int card, files, playing;
++		long t;
++		char sys[64], name[128], label[25] = "";
++		if (sscanf(l, "save\t%d\t%d\t%ld\t%d\t%24[^\n]", &card, &files, &t, &playing, label) >= 4 && nrows < MAX_SAVES)
++		{
++			save_row &r = rows[nrows++];
++			memset(&r, 0, sizeof(r));
++			r.card = card;
++			r.files = files;
++			r.time = t;
++			r.playing = playing;
++			snprintf(r.label, sizeof(r.label), "%s", label);
++		}
++		else if (sscanf(l, "game\t%63[^\t]\t%127[^\n]", sys, name) == 2)
++			snprintf(game, sizeof(game), "%s", name);
++		else if (sscanf(l, "new\t%d", &card) == 1)
++			new_card = card;
++	}
++	if (new_card)   // last: rows has room for it
++	{
++		save_row &r = rows[nrows++];
++		memset(&r, 0, sizeof(r));
++		r.card = new_card;
++		r.is_new = 1;
++	}
++	if (!nrows) say("No saves for it on the card");
++	for (int i = 0; i < nrows; i++) if (rows[i].playing) sel = i;
++	return 1;
++}
++
++static int list_rows() { return OsdGetSize() - 3; }   // the game's name and a gap above, the hint below
++
++static void fit()
++{
++	if (sel < 0) sel = 0;
++	if (sel >= nrows) sel = nrows - 1;
++	if (sel < top) top = sel;
++	if (sel >= top + list_rows()) top = sel - list_rows() + 1;
++	if (top < 0) top = 0;
++}
++
++// a row's whole text: " Card 2  now  Speedrun  Oct 05 2026 20:47". Its head (" Card 2  now  ") stays put; the rest,
++// the name and the date, scrolls on the selected row when it's longer than the OSD. Returns the head's length
++static int row_text(const save_row &r, char *s, size_t n)
++{
++	if (r.is_new) { snprintf(s, n, " New save (card %d)", r.card); return 0; }
++	char when[24] = "";
++	time_t t = (time_t)r.time;
++	if (r.files && t) strftime(when, sizeof(when), "%b %d %Y %H:%M", localtime(&t));
++	int head = snprintf(s, n, " Card %-2d  %s", r.card, r.playing ? "now  " : "");
++	snprintf(s + head, n - head, "%s%s%s", r.label, r.label[0] ? "  " : "", r.files ? when : "empty");
++	return head;
++}
++
++void smc_osd_scroll()
++{
++	if (sel < 0 || sel >= nrows || msg[0] || confirm == sel) return;   // the hint row speaks: the row stays still
++	char s[96];
++	int head = row_text(rows[sel], s, sizeof(s));
++	int len = (int)strlen(s);
++	if (len > ROW_W) ScrollText(2 + sel - top, s, head, len, ROW_W + 1, 1);
++}
++
++void smc_osd_print()
++{
++	char s[64];
++	fit();
++	OsdSetTitle("Saves");
++	snprintf(s, sizeof(s), " %.27s", game);
++	OsdWrite(0, s, 0, 1);
++	OsdWrite(1, "");
++	for (int i = 0; i < list_rows(); i++)
++	{
++		int k = top + i;
++		if (k >= nrows) { OsdWrite(2 + i, ""); continue; }
++		char full[96];
++		row_text(rows[k], full, sizeof(full));
++		snprintf(s, sizeof(s), "%.*s", ROW_W, full);   // cut to the OSD; the selected one scrolls (smc_osd_scroll)
++		OsdWrite(2 + i, s, k == sel, 0);
++	}
++	const char *hint = msg[0] ? msg : confirm == sel ? " Again: restart with this save" : nrows > list_rows() ? " More: up/down" : "";
++	OsdWrite(OsdGetSize() - 1, hint, msg[0] || confirm == sel, 0);
++}
++
++int smc_osd_key(int up, int down, int key, int select)
++{
++	int was = sel;
++	if (up) sel--;
++	if (down) sel++;
++	if (key == KEY_PAGEUP || key == KEY_LEFT) sel -= list_rows();
++	if (key == KEY_PAGEDOWN || key == KEY_RIGHT) sel += list_rows();
++	if (key == KEY_HOME) sel = 0;
++	if (key == KEY_END) sel = nrows - 1;
++	fit();
++	if (sel != was) { confirm = -1; msg[0] = 0; ScrollReset(); return 1; }
++	if (!select || !nrows) return 0;
++
++	const save_row &r = rows[sel];
++	if (r.playing) { say("Already running this save"); return 1; }
++	if (confirm != sel) { confirm = sel; msg[0] = 0; return 1; }   // asked first: a game restarts, its unsaved progress is lost
++
++	// the system's saves move between cards: seconds (more with many saves). Said on the page before Main waits
++	char cmd[32], ans[256];
++	say("Switching saves...");
++	smc_osd_print();
++	OsdUpdate();
++	snprintf(cmd, sizeof(cmd), "USE %d", r.card);
++	if (smc_shim_ask(cmd, ans, sizeof(ans), 600000) < 0 || strncmp(ans, "use ok", 6))
++	{
++		confirm = -1;
++		say("Couldn't switch the save");
++		return 1;
++	}
++	say("Restarting the game...");
++	smc_osd_print();
++	OsdUpdate();
++	smc_shim_restart();   // Main starts again with the game
++	return 1;
++}
+diff --git a/smc_osd.h b/smc_osd.h
+new file mode 100644
+index 0000000..efa9df2
+--- /dev/null
++++ b/smc_osd.h
+@@ -0,0 +1,31 @@
++// Super MemCard in a MiSTer Main: the OSD's Saves page. Copyright (C) 2026 f3bandit. GPL-3.0-or-later, as Main_MiSTer.
++//
++// While a game whose saves are on the card runs, the core's OSD page gets a "Saves" entry. It lists that game's saves,
++// one per virtual card on the card, and a new one on the first free card. Picking one restarts the game with that
++// save (smcd puts it in place first; this SuperStation's save goes to its card before).
++//
++// In Main's menu.cpp (the same as its Cheats page):
++//   on the core's main OSD page, after its options:   if (!page && smc_osd_available()) { saves_row = selentry; MenuWrite(entry++, " Saves", menusub == selentry++, 0); ... }
++//   on select of that row:                             if (smc_osd_open()) { menusub = 0; menustate = MENU_SMC_SAVES1; }
++//   MENU_SMC_SAVES1:                                   smc_osd_print(); menustate = MENU_SMC_SAVES2;
++//   MENU_SMC_SAVES2:                                   menu/back: the core's page again; else smc_osd_scroll();
++//                                                      if (smc_osd_key(up, down, c, select)) menustate = MENU_SMC_SAVES1;
++#pragma once
++
++// a game with its saves on the card is running: the core's OSD page shows "Saves"
++bool smc_osd_available();
++
++// asks smcd for the game's saves: 1 to show the page (when something's wrong, the page says so instead of a list)
++int smc_osd_open();
++
++// draws the page (title, the game, its saves, the hint)
++void smc_osd_print();
++
++// from the page's loop (MENU_SMC_SAVES2, every pass): the selected row scrolls when it's longer than the OSD (its name
++// and date), as Main's file names do
++void smc_osd_scroll();
++
++// a key on the page (up, down, the key code for page up/down/home/end, select): 1 when it needs drawing again.
++// Select on a save asks first ("again: restart"), then restarts the game with it (Main starts again). Its messages are
++// on the page's last row: Main's Info() pop-up doesn't show over a menu page.
++int smc_osd_key(int up, int down, int key, int select);
+diff --git a/smc_shim.cpp b/smc_shim.cpp
+new file mode 100644
+index 0000000..b764fe0
+--- /dev/null
++++ b/smc_shim.cpp
+@@ -0,0 +1,451 @@
++// Super MemCard: the shim between a MiSTer Main and smcd (smc_shim.h). Copyright (C) 2026 f3bandit.
++// GPL-3.0-or-later, as Main_MiSTer.
++#include "smc_shim.h"
++
++#include <errno.h>
++#include <fcntl.h>
++#include <poll.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <strings.h>
++#include <sys/socket.h>
++#include <sys/un.h>
++#include <unistd.h>
++
++#include "smc_frontport.h"
++#include "file_io.h"   // getRootDir
++#include "user_io.h"   // user_io_get_core_name, is_menu
++
++#define SMCD_SOCK  "/tmp/smcd.sock"
++#define FRONT_SOCK "/tmp/smc_frontport.sock"
++// the game running with its saves on the card, for the OSD's Saves page: its MGL's (or MRA's) path, and a copy of an
++// MGL (the restart's, should the first one be gone). In /tmp: Main starts again after each core, and these outlive it
++#define GAME_FILE  "/tmp/smc_game"
++#define GAME_COPY  "/tmp/smc_game.mgl"
++// the core smcd last heard of ("<rbf>\n<mgl>\n"), and a game waiting for the menu core to reach the card first (the
++// bounce: a core without the card driver, a game or core picked in its OSD): "<rbf>\n<mgl>\n", with its MGL
++#define CORE_FILE   "/tmp/smc_core"
++#define BOUNCE_FILE "/tmp/smc_bounce"
++#define BOUNCE_MGL  "/tmp/smc_bounce.mgl"
++
++int xml_load(const char *xml);   // Main's MGL/MRA loader (support/arcade/mra_loader.cpp)
++int fpga_load_rbf(const char *name, const char *cfg, const char *xml);   // Main's core loader (fpga_io.cpp)
++
++static int restarting;           // the OSD's Saves page restarts the game: LAUNCH again, from the game's core
++
++static int listen_fd = -1, peer_fd = -1;
++static char peer_buf[1024];
++static size_t peer_len;
++
++static int unix_connect(const char *path)
++{
++	int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
++	if (fd < 0) return -1;
++	struct sockaddr_un a;
++	memset(&a, 0, sizeof(a));
++	a.sun_family = AF_UNIX;
++	snprintf(a.sun_path, sizeof(a.sun_path), "%s", path);
++	if (connect(fd, (struct sockaddr *)&a, sizeof(a))) { close(fd); return -1; }
++	return fd;
++}
++
++static void send_line(int fd, const char *s)
++{
++	size_t n = strlen(s), o = 0;
++	while (o < n)
++	{
++		ssize_t w = send(fd, s + o, n - o, MSG_NOSIGNAL);
++		if (w < 0 && errno == EINTR) continue;
++		if (w <= 0) return;
++		o += (size_t)w;
++	}
++}
++
++static void listen_front()
++{
++	if (listen_fd >= 0) return;
++	unlink(FRONT_SOCK);
++	listen_fd = socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
++	if (listen_fd < 0) return;
++	struct sockaddr_un a;
++	memset(&a, 0, sizeof(a));
++	a.sun_family = AF_UNIX;
++	snprintf(a.sun_path, sizeof(a.sun_path), "%s", FRONT_SOCK);
++	if (bind(listen_fd, (struct sockaddr *)&a, sizeof(a)) || listen(listen_fd, 2))
++	{
++		close(listen_fd);
++		listen_fd = -1;
++	}
++}
++
++static int hexval(int c)
++{
++	return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1;
++}
++
++// one request from smcd
++static void serve_line(char *l)
++{
++	char out[600];
++	if (!strncmp(l, "FRAME ", 6))
++	{
++		int port, speed, ms, used = 0;
++		if (sscanf(l + 6, "%d %d %d %n", &port, &speed, &ms, &used) < 3) { send_line(peer_fd, "ERR -1\n"); return; }
++		const char *h = l + 6 + used;
++		uint8_t o[255], in[255];
++		int len = 0;
++		while (len < 255 && hexval(h[2 * len]) >= 0 && hexval(h[2 * len + 1]) >= 0)
++		{
++			o[len] = (uint8_t)(hexval(h[2 * len]) << 4 | hexval(h[2 * len + 1]));
++			len++;
++		}
++		int n = smc_frontport_raw(port, o, in, len, ms, speed);
++		if (n < 0) { snprintf(out, sizeof(out), "ERR %d\n", n); send_line(peer_fd, out); return; }
++		int k = snprintf(out, sizeof(out), "OK %d ", n);
++		for (int i = 0; i < len && k + 3 < (int)sizeof(out); i++) k += snprintf(out + k, sizeof(out) - k, "%02x", in[i]);
++		snprintf(out + k, sizeof(out) - k, "\n");
++		send_line(peer_fd, out);
++	}
++	else if (!strncmp(l, "HOLD ", 5))
++	{
++		smc_frontport_hold(atoi(l + 5) ? 1 : 0);
++		send_line(peer_fd, "OK\n");
++	}
++	else send_line(peer_fd, "ERR -1\n");
++}
++
++// pass smcd's frames: accept it, read its lines, answer them. wait_ms: how long to wait for something to do
++static void serve(int wait_ms)
++{
++	listen_front();
++	if (listen_fd < 0) return;
++	struct pollfd p[2] = { { listen_fd, POLLIN, 0 }, { peer_fd, POLLIN, 0 } };
++	if (poll(p, peer_fd >= 0 ? 2 : 1, wait_ms) <= 0) return;
++	if (p[0].revents & POLLIN)
++	{
++		int fd = accept4(listen_fd, NULL, NULL, SOCK_CLOEXEC);
++		if (fd >= 0)
++		{
++			if (peer_fd >= 0) close(peer_fd);   // smcd keeps one connection; a new one replaces it
++			peer_fd = fd;
++			peer_len = 0;
++		}
++		return;
++	}
++	if (peer_fd < 0 || !(p[1].revents & (POLLIN | POLLHUP | POLLERR))) return;
++	ssize_t r = recv(peer_fd, peer_buf + peer_len, sizeof(peer_buf) - 1 - peer_len, MSG_DONTWAIT);
++	if (r <= 0)
++	{
++		if (r < 0 && (errno == EAGAIN || errno == EINTR)) return;
++		close(peer_fd);
++		peer_fd = -1;
++		smc_frontport_hold(0);   // smcd went away: the front ports are the core's again
++		return;
++	}
++	peer_len += (size_t)r;
++	peer_buf[peer_len] = 0;
++	char *nl;
++	while ((nl = strchr(peer_buf, '\n')))
++	{
++		*nl = 0;
++		serve_line(peer_buf);
++		size_t used = (size_t)(nl + 1 - peer_buf);
++		memmove(peer_buf, nl + 1, peer_len - used + 1);
++		peer_len -= used;
++	}
++	if (peer_len >= sizeof(peer_buf) - 1) peer_len = 0;   // a line too long: dropped
++}
++
++static int read_two(const char *file, char *a, size_t an, char *b, size_t bn)
++{
++	a[0] = b[0] = 0;
++	FILE *f = fopen(file, "r");
++	if (!f) return 0;
++	if (fgets(a, (int)an, f)) a[strcspn(a, "\n")] = 0;
++	if (fgets(b, (int)bn, f)) b[strcspn(b, "\n")] = 0;
++	fclose(f);
++	return a[0] != 0;
++}
++
++static void write_two(const char *file, const char *a, const char *b)
++{
++	FILE *f = fopen(file, "w");
++	if (!f) return;
++	fprintf(f, "%s\n%s\n", a ? a : "", b ? b : "");
++	fclose(f);
++}
++
++static void bounce_go();
++
++void smc_shim_poll()
++{
++	static char core[64];
++	if (strncmp(core, user_io_get_core_name(), sizeof(core) - 1))
++	{
++		snprintf(core, sizeof(core), "%s", user_io_get_core_name());
++		smc_frontport_reset();   // another core: ask its driver again
++	}
++	if (is_menu() && !access(BOUNCE_FILE, R_OK)) bounce_go();   // back in the menu core for a bounce: the game now
++	serve(0);
++}
++
++// tell smcd; with wait, wait for its DONE (passing frames meanwhile) and give its answer in reply
++static void tell(const char *line, int wait, char *reply = NULL, size_t rn = 0)
++{
++	if (reply && rn) reply[0] = 0;
++	listen_front();   // before smcd hears of it: it connects to pass its frames straight away
++	int fd = unix_connect(SMCD_SOCK);
++	if (fd < 0) return;   // no smcd: Super MemCard isn't installed or running
++	send_line(fd, line);
++	if (!wait) { close(fd); return; }
++	char buf[64];
++	size_t len = 0;
++	for (int t = 0; t < 3000; t++)   // 30 s
++	{
++		serve(0);
++		struct pollfd p = { fd, POLLIN, 0 };
++		if (poll(&p, 1, 10) > 0)
++		{
++			ssize_t r = recv(fd, buf + len, sizeof(buf) - 1 - len, 0);
++			if (r <= 0) break;
++			len += (size_t)r;
++			buf[len] = 0;
++			if (strstr(buf, "DONE")) { if (reply) snprintf(reply, rn, "%s", buf); break; }
++			if (len >= sizeof(buf) - 1) len = 0;
++		}
++	}
++	close(fd);
++}
++
++static void copy_file(const char *from, const char *to)
++{
++	FILE *a = fopen(from, "rb");
++	if (!a) return;
++	FILE *b = fopen(to, "wb");
++	if (b)
++	{
++		char t[4096];
++		size_t n;
++		while ((n = fread(t, 1, sizeof(t), a)) > 0) fwrite(t, 1, n, b);
++		fclose(b);
++	}
++	fclose(a);
++}
++
++static int smcd_up()
++{
++	int fd = unix_connect(SMCD_SOCK);
++	if (fd < 0) return 0;
++	close(fd);
++	return 1;
++}
++
++// the running core has the card driver (core/sys/smc_port.sv): the card can be reached while it runs
++static int core_has_driver()
++{
++	return smc_frontport_raw(1, NULL, NULL, 0, 1, 0) != -1;
++}
++
++// a core without the card driver: through the menu core (it reaches the card) and back, smcd seeing the change
++static void bounce(const char *rbf, const char *mgl)
++{
++	write_two(BOUNCE_FILE, rbf, mgl);
++	printf("Super MemCard: through the menu core to reach the card, then %s %s\n", rbf, mgl ? mgl : "");
++	fpga_load_rbf("menu.rbf", NULL, NULL);   // Main starts again with the menu core: smc_shim_poll() goes on
++}
++
++static void bounce_go()
++{
++	char rbf[1024], mgl[1024];
++	int ok = read_two(BOUNCE_FILE, rbf, sizeof(rbf), mgl, sizeof(mgl));
++	unlink(BOUNCE_FILE);   // once only, whatever happens next
++	if (!ok) return;
++	fpga_load_rbf(rbf, NULL, mgl[0] ? mgl : NULL);   // from the menu: LAUNCH, as any game
++}
++
++// a menu core by its path ("/media/fat/menu.rbf" as load_core gives it, Console Mode's menu_ConsoleMode.rbf): not a game
++static int is_menu_rbf(const char *rbf)
++{
++	const char *b = strrchr(rbf, '/');
++	return !strncasecmp(b ? b + 1 : rbf, "menu", 4);
++}
++
++void smc_shim_core_start(const char *rbf, const char *mgl)
++{
++	if (rbf && is_menu_rbf(rbf)) return;   // the menu's start (smc_shim_main_start) tells smcd
++	if (!is_menu() && !restarting)
++	{
++		// a core loaded from a game's OSD, not from the menu: the Saves page's game is that one's no longer
++		unlink(GAME_FILE);
++		unlink(GAME_COPY);
++		if (!rbf || !smcd_up()) return;
++		if (!core_has_driver()) { bounce(rbf, mgl); return; }   // the old game's save can't reach the card from here
++		// the running core reaches the card: LAUNCH from here (smcd puts the old game's save on the card first)
++	}
++	if (!rbf) return;
++	write_two(CORE_FILE, rbf, mgl);
++	restarting = 0;
++	int again = mgl && !strcmp(mgl, GAME_COPY);   // the restart's copy: the game's file stays what it was
++	if (!again) { unlink(GAME_FILE); unlink(GAME_COPY); }
++	char l[1200], reply[64];
++	snprintf(l, sizeof(l), "LAUNCH %s\t%s\n", rbf, mgl ? mgl : "");
++	tell(l, 1, reply, sizeof(reply));
++	if (!strstr(reply, "DONE saves") || !mgl || !mgl[0]) { unlink(GAME_FILE); unlink(GAME_COPY); return; }
++	if (again) return;
++	FILE *f = fopen(GAME_FILE, "w");
++	if (f) { fprintf(f, "%s\n", mgl); fclose(f); }
++	size_t n = strlen(mgl);
++	if (n > 4 && !strcasecmp(mgl + n - 4, ".mgl")) copy_file(mgl, GAME_COPY);
++}
++
++void smc_shim_menu_start()
++{
++	if (!is_menu()) return;   // Main starts again after every core: only the menu's start is the game's end
++	unlink(GAME_FILE);
++	unlink(GAME_COPY);
++	unlink(CORE_FILE);
++	if (!access(BOUNCE_FILE, R_OK)) return;   // a bounce: the next game's LAUNCH (smc_shim_poll) does it all
++	tell("MENU\n", 0);
++}
++
++static const char *base_name(const char *p)
++{
++	const char *b = strrchr(p, '/');
++	return b ? b + 1 : p;
++}
++
++void smc_shim_main_start(const char *rbf, const char *mgl)
++{
++	if (is_menu()) { smc_shim_menu_start(); return; }
++	// Main started straight into a core: smcd heard of it if this Main's last fpga_load_rbf() said so (it restarts Main
++	// after every core); else (a core started by something else) LAUNCH now, late: the core is already in
++	char was[1024], wmgl[1024];
++	read_two(CORE_FILE, was, sizeof(was), wmgl, sizeof(wmgl));
++	if (!rbf || !rbf[0] || (was[0] && !strcasecmp(base_name(was), base_name(rbf)))) return;
++	if (!smcd_up()) return;
++	write_two(CORE_FILE, rbf, mgl);
++	char l[2200], reply[64];
++	snprintf(l, sizeof(l), "LAUNCH %s\t%s\n", rbf, mgl ? mgl : "");
++	tell(l, 1, reply, sizeof(reply));
++}
++
++// an MGL starting the running core with this file: the running game's own setname kept (Game Boy Color on the Game Boy
++// core, ...)
++static int write_rom_mgl(const char *rbf, const char *path, char type, int index)
++{
++	char setname[512] = "";
++	FILE *g = fopen(GAME_COPY, "r");
++	if (g)
++	{
++		static char t[16384];
++		size_t n = fread(t, 1, sizeof(t) - 1, g);
++		t[n] = 0;
++		fclose(g);
++		char *a = strstr(t, "<setname"), *e = a ? strstr(a, "</setname>") : NULL;
++		if (a && e && e - a + 10 < (long)sizeof(setname)) snprintf(setname, sizeof(setname), "%.*s", (int)(e - a + 10), a);
++	}
++	char r[1024];
++	const char *root = getRootDir();
++	size_t rl = strlen(root);
++	snprintf(r, sizeof(r), "%s", !strncmp(rbf, root, rl) && rbf[rl] == '/' ? rbf + rl + 1 : rbf);
++	size_t n = strlen(r);
++	if (n > 4 && !strcasecmp(r + n - 4, ".rbf")) r[n - 4] = 0;
++	FILE *f = fopen(BOUNCE_MGL, "w");
++	if (!f) return 0;
++	fprintf(f, "<mistergamedescription>\n\t<rbf>%s</rbf>\n", r);
++	if (setname[0]) fprintf(f, "\t%s\n", setname);
++	fprintf(f, "\t<file delay=\"1\" type=\"%c\" index=\"%d\" path=\"", type, index);
++	for (const char *c = path; *c; c++)   // XML-escaped
++	{
++		if (*c == '&') fputs("&amp;", f);
++		else if (*c == '"') fputs("&quot;", f);
++		else if (*c == '<') fputs("&lt;", f);
++		else if (*c == '>') fputs("&gt;", f);
++		else fputc(*c, f);
++	}
++	fprintf(f, "\"/>\n</mistergamedescription>\n");
++	fclose(f);
++	return 1;
++}
++
++bool smc_shim_rom_load(const char *file, char type, int index)
++{
++	if (is_menu() || !file || !file[0]) return true;
++	char path[1200];   // the OSD's paths are under Main's root ("../usb0/games/..."): whole, for smcd and the MGL
++	if (file[0] == '/') snprintf(path, sizeof(path), "%s", file);
++	else snprintf(path, sizeof(path), "%s/%s", getRootDir(), file);
++	char rbf[1024], mgl[1024];
++	if (!read_two(CORE_FILE, rbf, sizeof(rbf), mgl, sizeof(mgl))) return true;   // no game core smcd knows of
++	int driver = core_has_driver();
++	char l[2400], reply[64];
++	snprintf(l, sizeof(l), "ROM %s\t%s\t%d\n", rbf, path, driver);
++	tell(l, 1, reply, sizeof(reply));
++	if (strstr(reply, "DONE bounce"))
++	{
++		if (!write_rom_mgl(rbf, path, type, index)) return true;
++		unlink(GAME_FILE);
++		unlink(GAME_COPY);
++		bounce(rbf, BOUNCE_MGL);
++		return false;   // (a Main whose fpga_load_rbf() comes back: the menu core is loading)
++	}
++	if (strstr(reply, "DONE saves"))   // the Saves page's game is this one now
++	{
++		unlink(GAME_COPY);
++		FILE *f = fopen(GAME_FILE, "w");
++		if (f && write_rom_mgl(rbf, path, type, index)) { fprintf(f, "%s\n", BOUNCE_MGL); copy_file(BOUNCE_MGL, GAME_COPY); }
++		if (f) fclose(f);
++	}
++	else if (!strstr(reply, "DONE same")) { unlink(GAME_FILE); unlink(GAME_COPY); }
++	return true;
++}
++
++bool smc_shim_saves_available()
++{
++	return !is_menu() && (!access(GAME_FILE, R_OK) || !access(GAME_COPY, R_OK));
++}
++
++int smc_shim_ask(const char *cmd, char *out, size_t n, int timeout_ms)
++{
++	if (!out || n < 2) return -1;
++	out[0] = 0;
++	listen_front();
++	int fd = unix_connect(SMCD_SOCK);
++	if (fd < 0) return -1;
++	char l[300];
++	snprintf(l, sizeof(l), "%s\n", cmd);
++	send_line(fd, l);
++	size_t len = 0;
++	int done = 0;
++	for (int t = 0; t < timeout_ms / 10 && !done; t++)   // smcd reads the card through our frames meanwhile
++	{
++		serve(0);
++		struct pollfd p = { fd, POLLIN, 0 };
++		if (poll(&p, 1, 10) <= 0) continue;
++		ssize_t r = recv(fd, out + len, n - 1 - len, 0);
++		if (r <= 0) break;
++		len += (size_t)r;
++		out[len] = 0;
++		char *e = strstr(out, "END\n");
++		if (e && (e == out || e[-1] == '\n')) { *e = 0; len = (size_t)(e - out); done = 1; }
++		if (len >= n - 1) break;   // too long for out: what fitted
++	}
++	close(fd);
++	return done ? (int)len : -1;
++}
++
++void smc_shim_restart()
++{
++	char path[1024] = "";
++	FILE *f = fopen(GAME_FILE, "r");
++	if (f)
++	{
++		if (!fgets(path, sizeof(path), f)) path[0] = 0;
++		fclose(f);
++		path[strcspn(path, "\n")] = 0;
++	}
++	if (!path[0] || access(path, R_OK)) snprintf(path, sizeof(path), "%s", GAME_COPY);
++	if (access(path, R_OK)) return;
++	restarting = 1;   // LAUNCH again: smcd's card for the game from now on
++	xml_load(path);
++}
+diff --git a/smc_shim.h b/smc_shim.h
+new file mode 100644
+index 0000000..ab7b499
+--- /dev/null
++++ b/smc_shim.h
+@@ -0,0 +1,44 @@
++// Super MemCard in a MiSTer Main: the shim between Main and smcd (the Super MemCard program, a separate program on the
++// SuperStation). Copyright (C) 2026 f3bandit. GPL-3.0-or-later, as Main_MiSTer.
++//
++// Main only passes card frames to the front ports for smcd and tells it when a game starts and when the menu is back.
++// Everything else (which save, the sync, game IDs, the memory manager's commands) is smcd's. No smcd running: nothing
++// happens, and Main works as without Super MemCard.
++//
++// Sockets (text lines):
++//   /tmp/smcd.sock           smcd listens. Main sends   LAUNCH <rbf>\t<mgl>   (waits for DONE, passing frames meanwhile)
++//                                                       ROM <rbf>\t<file>\t<driver>  (waits: DONE same|bounce|saves)
++//                                                       MENU
++//                                                       (the OSD Saves page: SAVES, USE <card>, answers end with END)
++//   /tmp/smc_frontport.sock  Main listens. smcd sends   FRAME <port> <speed> <ack ms> <hex>  ->  OK <count> <hex> | ERR <code>
++//                                                       HOLD <0|1>                           ->  OK
++#pragma once
++#include <stddef.h>
++
++// Before a game core is loaded (in fpga_load_rbf(), when the core isn't the menu): smcd loads that game's save from the
++// card. Waits for smcd (at most 30 s), passing its card frames meanwhile.
++void smc_shim_core_start(const char *rbf, const char *mgl);
++
++// Main has started with the menu core (after user_io_init()): smcd saves the game just played to the card.
++void smc_shim_menu_start();
++// In place of smc_shim_menu_start(), with Main's arguments (the core and MGL it started with): the menu as above; a
++// core Main started straight into without its fpga_load_rbf() telling smcd (a core started from outside): LAUNCH then.
++void smc_shim_main_start(const char *rbf, const char *mgl);
++
++// A game file picked in the running core's OSD (menu.cpp, where the file browser hands Main the file: type 'f' a file
++// sent to the core, 's' a mounted image, index the core's slot), before Main loads it. A core with the card driver:
++// smcd puts the old game's save on the card and the new one's in place, then true (Main loads the file). A core
++// without it: Main goes through the menu core (which reaches the card) and starts the core again with the file (an
++// MGL): the menu core is loading, false. The same game again, no smcd, or no game core: true at once.
++bool smc_shim_rom_load(const char *path, char type, int index);
++
++// From Main's loop: passes smcd's card frames (also while a game runs, through the core's sys_top driver).
++void smc_shim_poll();
++
++// The OSD's Saves page (smc_osd.cpp): a game whose saves are on the card is running (smcd said so at its LAUNCH)
++bool smc_shim_saves_available();
++// a command to smcd and its answer (the lines before END) in out: its length, or -1 (no smcd, or no answer in time).
++// Passes smcd's card frames while it waits
++int smc_shim_ask(const char *cmd, char *out, size_t n, int timeout_ms = 20000);
++// starts the running game again from its MGL (or MRA), so its core loads the save smcd just put in place
++void smc_shim_restart();

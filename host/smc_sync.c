@@ -787,8 +787,17 @@ static int push(const struct smc_bus *b, struct entry *e, const char *id, const 
     return 0;
 }
 
+/* while a game runs (smc_push_game): its saves go to the card, nothing comes from it (Main has the game's save file
+ * open, and the game its save in memory): what the card has new waits for the next sync, at the menu */
+static bool push_only;
+
 static int pull(struct entry *e, const uint8_t *data, uint32_t n, uint32_t gen, uint32_t time,
                 struct smc_sync_report *rep) {
+    if (push_only) {
+        rep->skipped++;
+        logf_("in game: %s/%s %s: the card's newer copy waits for the menu", e->sys, e->game, e->file);
+        return 0;
+    }
     char p[1024], dir[1024];
     snprintf(dir, sizeof(dir), "%s/%s", C->saves_dir, e->sys);
     local_path(p, sizeof(p), e->sys, e->game, e->file);
@@ -893,6 +902,10 @@ static int sync_one_(const struct smc_bus *b, struct entry *e, const char *id, i
         /* deleted on the card (by another SuperStation, or by this one) */
         if (have_local && (local_changed || e->gen >= cf->gen))
             return push(b, e, id, bufA, ln, cf->gen + 1, rep); /* played since: the save comes back */
+        if (have_local && push_only) {
+            rep->skipped++;   /* in game: deleted here at the menu, not under the running game */
+            return 0;
+        }
         if (have_local && trash_local(e, p) != 0)
             return -1;
         if (have_local) {
@@ -1751,6 +1764,18 @@ int smc_sync_game(const struct smc_bus *b, const struct smc_sync_cfg *cfg, const
         return ok;
     sync_system_now(b, sys, game, rep);
     done_log("game sync", rep);
+    return end();
+}
+
+int smc_push_game(const struct smc_bus *b, const struct smc_sync_cfg *cfg, const char *sys, const char *game,
+                  struct smc_sync_report *rep) {
+    int ok = begin(b, cfg, rep);
+    if (ok <= 0)
+        return ok;
+    push_only = true;
+    sync_system_now(b, sys, game, rep);
+    push_only = false;
+    done_log("in-game push", rep);
     return end();
 }
 
