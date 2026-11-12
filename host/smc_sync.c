@@ -242,7 +242,17 @@ static long read_file(const char *path, uint8_t *buf, size_t max) {
 }
 
 /* write whole: <path>.smc-new, fsync, rename */
+/* A save that's there is written in place, never replaced: Main keeps a running game's save file open, and writes
+ * the game's saves to that open file. Replacing it (a new file renamed over it) left Main writing to the old, deleted
+ * one: every save from then on lost when the game ended (08, a real card on the SS1). A new save: a new file, renamed. */
 static int write_file(const char *path, const uint8_t *buf, size_t n) {
+    FILE *g = fopen(path, "r+b");
+    if (g) {
+        bool ok = fwrite(buf, 1, n, g) == n && fflush(g) == 0 && ftruncate(fileno(g), (off_t)n) == 0 &&
+                  fsync(fileno(g)) == 0;
+        fclose(g);
+        return ok ? 0 : -1;
+    }
     char tmp[1100];
     snprintf(tmp, sizeof(tmp), "%s.smc-new", path);
     FILE *f = fopen(tmp, "wb");
@@ -742,15 +752,24 @@ static void card_id_of_save(const struct smc_bus *b, const char *sys, int card, 
 
 static uint8_t *bufA, *bufB;
 
+/* why the last save failed, for its "failed:" line */
+static char why[80];
+static int failed_at(int rc, const char *step) {
+    snprintf(why, sizeof(why), "%s: %s", step, rc == SMC_E_NO_REPLY ? "no answer" : rc == SMC_E_BAD ? "refused"
+             : rc == SMC_E_CHECKSUM ? "kept failing its checksum" : rc == SMC_E_NOT_FOUND ? "not found" : "error");
+    return rc ? rc : -1;
+}
+
 static int push(const struct smc_bus *b, struct entry *e, const char *id, const uint8_t *data, long n, uint32_t gen,
                 struct smc_sync_report *rep) {
-    if (smc_select_card(b, e->sys, id, e->card, NULL) < 0)
-        return -1;
+    int src = smc_select_card(b, e->sys, id, e->card, NULL);
+    if (src < 0)
+        return failed_at(src, "select");
     if (strcmp(id, e->game) != 0) {
         /* shortened ID: keep the full save name on the card */
         int rc = smc_write_file(b, NAME_TXT, (const uint8_t *)e->game, (uint32_t)strlen(e->game), 1);
         if (rc)
-            return rc;
+            return failed_at(rc, "write name.txt");
     }
     /* the save's time: when Main wrote it (its file's time, the SuperStation's clock) */
     char lp[1024];
@@ -759,7 +778,7 @@ static int push(const struct smc_bus *b, struct entry *e, const char *id, const 
     uint32_t t = stat(lp, &st) == 0 && st.st_mtime > 0 ? (uint32_t)st.st_mtime : 0;
     int rc = smc_write_file_at(b, e->file, data, (uint32_t)n, gen, t);
     if (rc)
-        return rc;
+        return failed_at(rc, "write");
     e->gen = gen;
     e->crc = smc_crc32(data, (size_t)n, 0);
     e->seen = true;
@@ -881,8 +900,9 @@ static int sync_one_(const struct smc_bus *b, struct entry *e, const char *id, i
     if (have_local && !have_card)
         return push(b, e, id, bufA, ln, (e->seen ? e->gen : 0) + 1, rep);
     if (!have_local && have_card) {
-        if (smc_read_file(b, card_idx, cf->size, bufB) != SMC_OK)
-            return -1;
+        int rr = smc_read_file(b, card_idx, cf->size, bufB);
+        if (rr != SMC_OK)
+            return failed_at(rr, "read the card's copy");
         return pull(e, bufB, cf->size, cf->gen, cf->time, rep);
     }
     if (!have_local)
@@ -893,8 +913,9 @@ static int sync_one_(const struct smc_bus *b, struct entry *e, const char *id, i
     }
     if (local_changed && !card_changed)
         return push(b, e, id, bufA, ln, cf->gen + 1, rep);
-    if (smc_read_file(b, card_idx, cf->size, bufB) != SMC_OK)
-        return -1;
+    int rr = smc_read_file(b, card_idx, cf->size, bufB);
+    if (rr != SMC_OK)
+        return failed_at(rr, "read the card's copy");
     if (!local_changed)
         return pull(e, bufB, cf->size, cf->gen, cf->time, rep);
     /* both changed, or first sync with both sides there */
@@ -1332,9 +1353,10 @@ static int sync_game(const struct smc_bus *b, const char *sys, int card, const c
             return -1;
         if (smc_select_card(b, sys, id, card, NULL) < 0) /* pushes in between select other sets */
             return -1;
+        why[0] = 0;
         if (sync_one(b, e, id, i, &files[i], rep) != 0) {
             rep->failed++;
-            logf_("failed: %s/%s %s", sys, local_game, files[i].name);
+            logf_("failed: %s/%s %s (%s)", sys, local_game, files[i].name, why[0] ? why : "?");
         }
     }
 
@@ -1353,9 +1375,10 @@ static int sync_game(const struct smc_bus *b, const char *sys, int card, const c
         if (on_card)
             continue;
         struct entry *e = add(sys, card, local_game, cfile);
+        why[0] = 0;
         if (!e || sync_one(b, e, id, -1, NULL, rep) != 0) {
             rep->failed++;
-            logf_("failed: %s/%s %s", sys, local_game, cfile);
+            logf_("failed: %s/%s %s (%s)", sys, local_game, cfile, why[0] ? why : "?");
         }
     }
     if (d)

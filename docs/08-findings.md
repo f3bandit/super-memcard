@@ -433,6 +433,31 @@ BitFunX Gen2 with this firmware in front port 2 and the original Sony card (with
 - The first frame after the ports are switched on still gets no answer (as before): a plain read first.
 - A frame needs smcd's ACK wait (100 ms): with 2 ms, Super MemCard frames to this card weren't answered.
 
+Then a real save, end to end (Crystalis on `NES_smc.rbf` under the test Main, the BitFunX in port 2, smcd without -G):
+
+- **Speed per card, measured.** At 500 kHz the card flipped bits in status bytes too (Create's 47 came back 07), so
+  saves "failed" though the card had them. smcd now measures each card once (`front_calibrate`): CERT, whose 105-byte
+  answer never changes, 10 times at each faster speed against PS1 speed; four short Hellos weren't enough (they passed
+  at 500 kHz). This card: speed 0.
+- **ACK wait 167 ms** (`SMC_ACK_TIMEOUT_MS`, the front ports' most): the card took up to ~90 ms to ACK a write while
+  its SD card wrote; with smcd's frames back to back a commit answered past 100 ms. The card had the save (read back:
+  equal), smcd reported it failed and its state went stale.
+- **A failed save is sent again** (every 30 s while the game runs); before, a failure counted as synced until the game
+  saved again. A launch with no card reachable no longer keeps the previous game's "synced" time.
+- **Core during the game.** With Main's stock menu core the card isn't reachable at launch; smcd now tells the card
+  the system (Core) the first time it reaches it in the game: the card's screen shows "SuperStation", the card number
+  and "NES saves" (seen on the card).
+- **Never replace a save file Main has open.** A sync that brought a save in while the game ran (here: LAUNCH sent by
+  hand to a restarted smcd) wrote a new file and renamed it over `Crystalis.sav`; Main went on writing the game's
+  saves to the old, deleted file (`/proc/<Main>/fd`: "(deleted)"), so they were lost when the game ended (rescued
+  from the open file). `write_file` now writes an existing save in place.
+- `failed:` lines say the step and why (select, write name.txt, write, read the card's copy: no answer, refused, ...).
+- The game IDs: smcd files a save under its ROM's ID (`CRC-1335CB05` for this Crystalis), its name in `name.txt`.
+- MiSTer writes a game's save to the SD card when the OSD opens (Autosave) only if the game's save RAM changed;
+  otherwise OSD > Save Backup RAM.
+- Console Mode itself has none of the hooks yet (its Main's shim calls, its menu core's raw frames): this was the test
+  Main with Main's stock menu core, and leaving a game lands in the stock menu, not Console Mode.
+
 ### Open
 
 - (Closed: the flaky PC test was the first write after a card switch, see above.)

@@ -202,6 +202,37 @@ static void front_bad_data(void *ctx) {
     }
 }
 
+/* The fastest speed a card answers right, measured once per card: CERT (its 105-byte answer never changes for a card:
+ * the chip ID, and its key and certificate or zeros) 10 times at each faster speed, compared byte for byte with CERT
+ * at PS1 speed. A card that corrupts bytes at a speed without losing any (a BitFunX Gen2 at 500 kHz: about one byte in
+ * 300, in status bytes and data alike, 08) is caught here before a save is sent. Hello is too short for it: 4 clean
+ * Hellos at 500 kHz still let corrupted saves through. A frame not answered whole still steps down as before. */
+static char speed_card[17];
+static void front_calibrate(struct front *f, const char *card_id) {
+    if (!strcmp(speed_card, card_id))
+        return;   /* this card's speed is known (it can only have gone down since) */
+    snprintf(speed_card, sizeof(speed_card), "%s", card_id);
+    uint8_t out[107] = {0x81, 0x6B}, ref[107], in[107];
+    if (front_raw(f, out, ref, sizeof(out), 0) != (int)sizeof(out)) {
+        frame_speed = 0;
+        lg("card %s: speed 0 (no CERT to measure with)", card_id);
+        return;
+    }
+    int sp;
+    for (sp = SMC_SPEED; sp > 0; sp--) {
+        int ok = 1;
+        for (int t = 0; t < 10 && ok; t++) {
+            usleep(10000);
+            ok = front_raw(f, out, in, sizeof(out), sp) == (int)sizeof(out) && !memcmp(in + 2, ref + 2, 105);
+        }
+        if (ok)
+            break;
+        usleep(60000);   /* a card that missed a frame answers the next one after a moment (08) */
+    }
+    frame_speed = sp;
+    lg("card %s: speed %d (the fastest it answered right)", card_id, sp);
+}
+
 struct conn {
     struct smc_bus bus;
     struct front front;
@@ -348,6 +379,7 @@ static int card_open_bus(struct conn *c) {
         c->front.port = p;
         int h = smc_hello(&c->bus, SMC_HOST_MAIN, 0, &c->card);
         if (h == 1 && genuine(c)) {
+            front_calibrate(&c->front, c->card.id);
             icons_to_card(c);
             return 1;
         }
@@ -384,6 +416,8 @@ static struct smc_sync_cfg cfg(void) {
 /* the game being played: its system and save name (empty: none known) */
 static char play_sys[65], play_game[256];
 static time_t seen, synced;   /* its saves' newest time: last seen, last on the card */
+static time_t retry_at;       /* a save that didn't reach the card: not tried again before this */
+static int core_told;         /* the card was told this game's system (Core): its screen shows it */
 static int no_card;           /* its core has no front ports, or no card: stop asking until the next game */
 
 static time_t game_saves_time(const char *sys, const char *game) {
@@ -549,18 +583,25 @@ static void do_launch(char *args) {
     struct conn c;
     if (!card_open(&c)) {
         lg("%s: no card reachable (the save is checked again while the game runs)", sys);
+        seen = synced = 0;   /* nothing of this game on the card yet: the game poll sends its save */
+        core_told = 0;       /* and tells the card the system when it first reaches it */
         return;
     }
     int card = smc_core(&c.bus, sys, true);
+    core_told = card > 0;
     lg("%s core: %s %d", sys, card > 0 ? "its card" : "the card didn't answer Core", card);
+    int sync_ok = 1;
     if (card > 0 && play_game[0]) {
         struct smc_sync_cfg k = cfg();
         struct smc_sync_report rep;
-        if (smc_sync_game(&c.bus, &k, sys, play_game, &rep) < 0)
+        int rc = smc_sync_game(&c.bus, &k, sys, play_game, &rep);
+        if (rc < 0)
             lg("game sync stopped with an error");
+        sync_ok = rc >= 0 && !rep.failed;
     }
     card_close(&c);
-    seen = synced = play_game[0] ? game_saves_time(play_sys, play_game) : 0;
+    seen = play_game[0] ? game_saves_time(play_sys, play_game) : 0;
+    synced = sync_ok ? seen : 0;   /* a save that didn't reach the card stays to send (the game poll tries again) */
     smc_sync_hold_card(true);    /* the game has this card's save in memory from now on */
 }
 
@@ -594,7 +635,8 @@ static void game_poll(void) {
         seen = t;
         return;
     }
-    if (!t || t == synced)
+    int need_sync = t && t != synced && time(NULL) >= retry_at, need_core = !core_told && time(NULL) >= retry_at;
+    if (!need_sync && !need_core)
         return;
     struct conn c;
     if (!card_open(&c)) {
@@ -602,11 +644,26 @@ static void game_poll(void) {
         lg("in-game: no card reachable from this core (the save goes after the game)");
         return;
     }
+    if (need_core) {   /* the card wasn't reachable at the game's start (a menu core without the front ports) */
+        int card = smc_core(&c.bus, play_sys, true);
+        core_told = card > 0;
+        lg("%s core (in-game): %s %d", play_sys, card > 0 ? "its card" : "the card didn't answer Core", card);
+        if (!core_told)
+            retry_at = time(NULL) + 30;
+    }
+    if (!need_sync) {
+        card_close(&c);
+        return;
+    }
     struct smc_sync_cfg k = cfg();
     struct smc_sync_report rep;
-    if (smc_sync_game(&c.bus, &k, play_sys, play_game, &rep) < 0)
+    int rc = smc_sync_game(&c.bus, &k, play_sys, play_game, &rep);
+    if (rc < 0)
         lg("in-game sync stopped with an error");
-    else
+    if (rc < 0 || rep.failed) {
+        retry_at = time(NULL) + 30;   /* the save didn't reach the card: again in 30 s, not every pass */
+        lg("in-game: the save didn't reach the card, again in 30 s");
+    } else
         synced = t;
     card_close(&c);
 }

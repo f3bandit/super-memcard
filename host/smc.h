@@ -25,7 +25,10 @@ struct smc_bus {
      * write). A bus with speeds steps down: a bus too fast for a card can corrupt bytes without losing any. */
     void (*bad_data)(void *ctx);
 };
-#define SMC_ACK_TIMEOUT_MS 100
+/* 167: the most the SS1's front ports wait (smc_port's ACK wait). A real card (BitFunX Gen2) took up to ~90 ms to ACK a
+ * write while its SD card wrote, and with frames back to back (smcd) a commit answered past 100 ms: the card had
+ * committed, the host had given up (08). */
+#define SMC_ACK_TIMEOUT_MS 167
 
 enum {
     SMC_OK = 0,
