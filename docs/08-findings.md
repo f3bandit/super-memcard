@@ -496,6 +496,23 @@ Then a real save, end to end (Crystalis on `NES_smc.rbf` under the test Main, th
   ROM-load hook (10), not built yet.
 - Flashing from the SS1: `smcd/flashcard.sh`, about 15 s, no button.
 
+### Icons from cover art on the BitFunX (Nov 12 2026)
+
+Seeded 16 test saves (13 systems, card 1 each, from a separate saves folder so the SS1's own saves weren't
+touched), with the game lists installed (cm_modules' gamedb module, 17 lists):
+
+- 12 got their icon from libretro's cover art, made into a 32x32 icon and put on the card by the sync: NES, SNES,
+  N64, Game Boy, Genesis, Mega Drive, Mega-CD, TurboGrafx-16, Game Gear. 4 kept the system's placeholder (no cover
+  under that name: the GBC name shortened past 64 characters, Saturn's Redump name has its disc, GBA and the SMS
+  revision not found), and are tried again after 30 days or at the next manual card read.
+- **A save whose ROM isn't on the SuperStation was never named**: the lists were searched by CRC and serial only. A
+  save named after its No-Intro/Redump ROM ("Super Mario World (USA)") now matches the list's name too.
+- **Icons waiting for the card were never put on it** (`smc_apply_icons`): its list was read with `%79s`, which stops
+  at the first space, so no game with a space in its name was found. The sync puts a ready icon on the card itself,
+  so the icons did arrive; the list is for icons made after their game's sync.
+- With no game lists installed the downloads wait (`queue.later`) until they are.
+- "The identity check didn't finish (no answer)" now and then between commands on this card: the next command worked.
+
 ### Open
 
 - (Closed: the flaky PC test was the first write after a card switch, see above.)

@@ -235,6 +235,11 @@ const char *smc_gamedb_name(const char *dir, const char *sys, const char *crc, c
 		for (int i = 0; i < nents; i++)
 			if (ents[i].serial[0] && !strcmp(ents[i].serial, s))
 				return ents[i].name;
+		/* a save whose game isn't here to be identified (no ROM to take a CRC from) but whose name is the list's own
+		 * ("Super Mario World (USA)", as No-Intro and Redump name ROMs, so their saves): that game */
+		for (int i = 0; i < nents; i++)
+			if (!strcmp(ents[i].name, serial))
+				return ents[i].name;
 	}
 	return NULL;
 }

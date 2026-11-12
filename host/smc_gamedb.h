@@ -9,5 +9,6 @@ int smc_gamedb_lists(const char *sys, const char *names[3], int *disc);
 /* The official name of a game ("Super Mario 64 (USA)") by its ROM's CRC32 (8 hex digits) or, failing that, its
  * product code, from the lists in `dir` (<dir>/<list>.dat); NULL when not known. Loads one system's lists at a time
  * and keeps them until another system is asked for or smc_gamedb_close(). */
+/* serial: also a game's name exactly as its list has it (a save named after its No-Intro/Redump ROM, the ROM not here) */
 const char *smc_gamedb_name(const char *dir, const char *sys, const char *crc, const char *serial);
 void smc_gamedb_close(void);

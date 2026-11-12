@@ -1273,7 +1273,7 @@ int smc_apply_icons(const struct smc_bus *b, const struct smc_sync_cfg *cfg) {
         line[strcspn(line, "\r\n")] = 0;
         char sys[40], id[80], base[80];
         int card;
-        if (sscanf(line, "%39[^\t]\t%d\t%79[^\t]\t%79s", sys, &card, id, base) != 4)
+        if (sscanf(line, "%39[^\t]\t%d\t%79[^\t]\t%79[^\t]", sys, &card, id, base) != 4)   /* names have spaces */
             continue;
         static uint8_t icon[8 + 32 + 512];
         char bin[1300];
@@ -1297,8 +1297,17 @@ int smc_apply_icons(const struct smc_bus *b, const struct smc_sync_cfg *cfg) {
             size_t dl;
             const uint8_t *def = smc_system_icon(sys, &dl);
             uint8_t cur[256];
-            if (!def || fi.size != dl || smc_read_file(b, at, (uint32_t)dl, cur) != SMC_OK || memcmp(cur, def, dl))
+            if (!def || fi.size != dl) {   /* not the placeholder: this icon already (the sync put it), or the game's own */
+                uint8_t have[sizeof(icon)];
+                if (fi.size != l || smc_read_file(b, at, (uint32_t)l, have) != SMC_OK || memcmp(have, icon, l))
+                    logf_("icon for %s/%s: the card has the game's own, kept", sys, id);
                 continue;
+            }
+            int rc = smc_read_file(b, at, (uint32_t)dl, cur);
+            if (rc != SMC_OK || memcmp(cur, def, dl)) {
+                logf_("icon for %s/%s: %s, kept", sys, id, rc != SMC_OK ? "the card's couldn't be read" : "the card's isn't the placeholder");
+                continue;
+            }
             gen = fi.gen + 1;
         }
         if (smc_select_card(b, sys, id, card, NULL) >= 0 && smc_write_file(b, ICON_BIN, icon, (uint32_t)l, gen) == SMC_OK)
