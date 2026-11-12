@@ -996,6 +996,41 @@ static void t_sync_two_sets_one_save_file(void) {
     CHECK(memcmp(got, sB, 8192) == 0);
 }
 
+static void t_sync_clear_card_only(void) {
+    /* a card cleared from the memory manager: off the card only, no SuperStation loses a save */
+    sync_setup();
+    put_save(0, "SNES/Mine.srm", sA, 8192);
+    CHECK_EQ(run_sync(0).pushed, 1);
+    CHECK_EQ(run_sync(1).pulled, 1); /* the other one has it, in step with the card */
+    CHECK_EQ(smc_hello(&vbus, SMC_HOST_TEST, 0, NULL), 1);
+    CHECK(smc_select_card(&vbus, "SNES", "Test Only", 1, NULL) >= 0); /* a save that is only on the card */
+    CHECK_EQ(smc_write_file_at(&vbus, "save.srm", sB, 8192, 1, 1700000000), SMC_OK);
+    char saves[400], state[400];
+    snprintf(saves, sizeof(saves), "%s/saves", ss[0]);
+    snprintf(state, sizeof(state), "%s/state", ss[0]);
+    struct smc_sync_cfg cfg = {saves, state, smc_console_systems, SMC_HOST_TEST, slog};
+    CHECK(strcmp(vcard_browse(), "SNES=2;") == 0);
+    CHECK_EQ(smc_clear_card(&vbus, &cfg, "SNES", 1), 2);
+    CHECK(strcmp(vcard_browse(), "") == 0); /* the card's Saves on card: nothing left to show */
+    struct smc_game_info gi;
+    CHECK_EQ(smc_game_info(&vbus, "SNES", 1, "Test Only", &gi), SMC_OK);
+    CHECK_EQ(gi.files, 0);
+    /* the other SuperStation keeps its copy and puts it back; the card-only save is gone and comes nowhere */
+    struct smc_sync_report r = run_sync(1);
+    CHECK_EQ(r.deleted, 0);
+    CHECK_EQ(r.pushed, 1);
+    CHECK_EQ(r.pulled, 0);
+    CHECK_EQ(get_save(1, "SNES/Mine.srm", got, sizeof(got)), 8192);
+    CHECK(memcmp(got, sA, 8192) == 0);
+    CHECK_EQ(get_save(1, "SNES/Test Only.srm", got, sizeof(got)), -1);
+    /* and the first, which cleared it, still has its own */
+    r = run_sync(0);
+    CHECK_EQ(r.deleted, 0); /* (the copy the other put back may come in: the same bytes) */
+    CHECK_EQ(get_save(0, "SNES/Mine.srm", got, sizeof(got)), 8192);
+    CHECK(memcmp(got, sA, 8192) == 0);
+    CHECK_EQ(get_save(0, "SNES/Test Only.srm", got, sizeof(got)), -1);
+}
+
 static void t_sync_like_a_ps1(void) {
     /* the card is read or written only when a game's save is loaded or saved */
     sync_setup();
@@ -1066,4 +1101,5 @@ static void t_sync_like_a_ps1(void) {
     {"sync: one save set per game, filed by game ID, with its time", t_sync_by_game_id, true, NULL}, \
     {"sync: two saves here for one game: two sets, both kept", t_sync_two_saves_one_game, true, NULL}, \
     {"sync: two card sets for one save file: the newer comes in", t_sync_two_sets_one_save_file, true, NULL}, \
+    {"sync: a card cleared: off the card only, no SuperStation loses a save", t_sync_clear_card_only, true, NULL}, \
     {"sync: like a PS1: a game's save in at its start, out after it", t_sync_like_a_ps1, true, NULL},

@@ -4,7 +4,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-enum { OP_SELECT, OP_XFER, OP_XFER_CTRL, OP_SETTLE, OP_PATH, OP_STOP, OP_PEEK, OP_KEY, OP_SCREEN };
+enum { OP_SELECT, OP_XFER, OP_XFER_CTRL, OP_SETTLE, OP_PATH, OP_STOP, OP_PEEK, OP_KEY, OP_SCREEN, OP_BROWSE };
 /* OP_KEY: a=0 left/prev, 1 right/next, 2 back, 3 enter: a press of the card's buttons on its main screen; 4-6 an item of
  * its SuperStation menu (vcard.h VMENU_*) */
 /* OP_PEEK: the byte the card has queued for the next transfer (FF: none), for a bit-level bus model */

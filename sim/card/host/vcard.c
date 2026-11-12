@@ -312,6 +312,20 @@ void vcs_stop(void) {
 }
 
 const char *vcs_card_path(void) { return host_sd_card_path(); }
+const char *vcs_browse(void) {
+#if !WITH_SUPERMEMCARD
+    return "";
+#else
+    static char s[256], sys[16][SMC_ID_LEN + 1], ids[32][SMC_ID_LEN + 1], names[32][SMC_BROWSE_NAME];
+    int n = 0, ns = ps1_supermemcard_browse_systems(sys, 16);
+    s[0] = 0;
+    for (int i = 0; i < ns && n < (int)sizeof(s); i++) {
+        int card;
+        n += snprintf(s + n, sizeof(s) - (size_t)n, "%s=%d;", sys[i], ps1_supermemcard_browse_games(sys[i], &card, ids, names, 32));
+    }
+    return s;
+#endif
+}
 const char *vcs_screen(void) {
 #if !WITH_SUPERMEMCARD
     return "";

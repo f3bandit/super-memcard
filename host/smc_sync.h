@@ -136,6 +136,12 @@ int smc_sync_changed(const struct smc_bus *b, const struct smc_sync_cfg *cfg, co
  * since: then it comes back). Nothing is lost: the card keeps the file in <game>/.deleted/, and each
  * SuperStation moves its local file to <state>/<card ID>/deleted/. SMC_OK or <0. */
 int smc_delete_save(const struct smc_bus *b, const struct smc_sync_cfg *cfg, const char *sys, const char *save);
+/* Clear one virtual card of a system: every save on it is removed from the card only. Nothing is deleted on any
+ * SuperStation: the card's tombstones carry SMC_CARD_ONLY (their time), which a sync takes as "not on the card", so a
+ * SuperStation that still has one of these saves puts it back the next time it syncs that card (this one too).
+ * Returns the saves cleared (>=0), or <0. */
+#define SMC_CARD_ONLY 1u
+int smc_clear_card(const struct smc_bus *b, const struct smc_sync_cfg *cfg, const char *sys, int card);
 
 /* Saves whose two copies both changed (the sync keeps both and reports them): calls cb for each, returns how many.
  * card_id: report.card_id. */

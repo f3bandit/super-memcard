@@ -55,7 +55,8 @@ Main Menu
 ├─ Info          >
 ├─ --SuperStation--         (a divider: the cursor skips it)
 ├─ Saves on card >  the systems with saves > a system's games (its current card, by name) > that game's saves,
-│                   each with the date and time it was made (each step a long press)
+│                   each with the date and time it was made (each step a long press); a system or game
+│                   whose saves were all deleted or cleared isn't listed
 ├─ Saving           On / Off   (Off: a plain PS1 card, it doesn't even answer 81 60)
 ├─ Clock            12h / 24h  (the times on the card's screens; 12h by default)
 ├─ Free             Count      (the SD card's free space)

@@ -129,6 +129,12 @@ const char *vcard_screen(void) {
     memcpy(p, r.path, sizeof(p));
     return p;
 }
+const char *vcard_browse(void) {
+    static char p[256];
+    struct vcard_rsp r = call(OP_BROWSE, 0, 0, false);
+    memcpy(p, r.path, sizeof(p));
+    return p;
+}
 const char *vcard_card_path(void) {
     static char p[256];
     struct vcard_rsp r = call(OP_PATH, 0, 0, false);

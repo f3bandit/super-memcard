@@ -880,6 +880,15 @@ static int sync_one_(const struct smc_bus *b, struct entry *e, const char *id, i
     uint32_t lcrc = have_local ? smc_crc32(bufA, (size_t)ln, 0) : 0;
     bool local_changed = have_local && (!e->seen || lcrc != e->crc);
 
+    if (card_idx >= 0 && cf->deleted && cf->time == SMC_CARD_ONLY) {
+        /* cleared from the card only (smc_clear_card): nothing is deleted here; a save this SuperStation has goes back */
+        if (have_local)
+            return push(b, e, id, bufA, ln, cf->gen + 1, rep);
+        e->gen = cf->gen;
+        e->crc = 0;
+        e->seen = true;
+        return 0;
+    }
     if (card_idx >= 0 && cf->deleted) {
         /* deleted on the card (by another SuperStation, or by this one) */
         if (have_local && (local_changed || e->gen >= cf->gen))
@@ -1957,6 +1966,44 @@ static int find_on_card(const struct smc_bus *b, const char *sys, int card, cons
 static int system_card(const struct smc_bus *b, const char *sys) {
     int card = local_card(sys);
     return card ? card : smc_core(b, sys, false);
+}
+
+int smc_clear_card(const struct smc_bus *b, const struct smc_sync_cfg *cfg, const char *sys, int card) {
+    struct smc_sync_report rep;
+    if (card < 1 || card > 99)
+        return SMC_E_BAD;
+    int ok = begin(b, cfg, &rep);
+    if (ok <= 0)
+        return ok < 0 ? ok : SMC_E_NO_REPLY;
+    static char ids[256][65];
+    int nids = 0, cleared = 0, rc = SMC_OK;
+    while (nids < 256 && smc_list_card(b, sys, card, nids, ids[nids]) == SMC_OK)
+        nids++;
+    uint32_t now = SMC_CARD_ONLY;
+    for (int g = 0; g < nids && rc == SMC_OK; g++) {
+        int n = smc_select_card(b, sys, ids[g], card, NULL);
+        if (n < 0) {
+            rc = n;
+            break;
+        }
+        for (int i = 0; i < n; i++) {
+            struct smc_file f;
+            if (smc_info(b, i, &f) != SMC_OK) {
+                rc = SMC_E_NO_REPLY;
+                break;
+            }
+            if (f.deleted || not_a_save(f.name))
+                continue;
+            if ((rc = smc_delete(b, i, f.gen + 1, now)) != SMC_OK)
+                break;
+            cleared++;
+            logf_("cleared from card %d only: %s/%s %s", card, sys, ids[g], f.name);
+        }
+    }
+    int erc = end();
+    if (rc == SMC_OK)
+        logf_("%s card %d cleared: %d save(s) off the card, nothing deleted on any SuperStation", sys, card, cleared);
+    return rc ? rc : (erc ? SMC_E_BAD : cleared);
 }
 
 int smc_delete_save(const struct smc_bus *b, const struct smc_sync_cfg *cfg, const char *sys, const char *save) {

@@ -79,6 +79,7 @@ driver (public builds: f3bandit/super-memcard-cores), the gamedb module (cm_modu
 | Play (a save on a card) | `PLAY` |
 | Rename (Console Mode's on-screen keyboard) | `NAME` |
 | Delete | `DELETE` |
+| Clear a card (its saves off that virtual card only) | `CLEAR` |
 | both changed: keep which | `CONFLICTS`, `KEEP` |
 | the card bus: wait while someone has it | `/tmp/super_memcard.busy` (Shared bus, below) |
 
@@ -194,8 +195,9 @@ that isn't Super MemCard, the answer is `nocard`; a Super MemCard card that isn'
 | `READ` | Read card, everything both ways: `read ok card=<id> pushed= pulled= unchanged= conflicts= skipped= failed= deleted=` |
 | `SECTION` | the whole "other systems" section in one answer (below); `SECTION PSX` adds the PSX core's card images |
 | `SYSTEMS` | `<system>\t<its current virtual card>` per system on the card |
-| `LIST <sys> [<card>]` | per game: `name \t id \t time \t files \t bytes \t icon \t save name \t folder \t label` |
+| `LIST <sys> [<card>]` | per game with a save (not one whose saves were all deleted or cleared): `name \t id \t time \t files \t bytes \t icon \t save name \t folder \t label` |
 | `DELETE <sys>\t<save>` | `delete <rc>`: other SuperStations delete their copy at their next sync; nothing is lost |
+| `CLEAR <sys>\t<card>` | `clear ok <n>` \| `clear busy` (a game of that system is running) \| `clear failed`: every save off that virtual card, **the card only**: no SuperStation deletes its copy (the card's tombstones carry time 1, `SMC_CARD_ONLY`, which a sync reads as "not on the card"), and one that still has a save puts it back the next time it syncs that card. For "empty this card", not "delete these saves" |
 | `CONFLICTS` | saves whose two copies both changed (played on two SuperStations) |
 | `KEEP <local\|card> <sys>\t<save>` | `keep <rc>`: settles one |
 | `CARDS <sys>` | `card \t <n> \t <games> \t <newest save time> \t <in use 0\|1>` per card holding that system's saves (and the one in use), then `new \t <the first blank card>`: the **card picker** (below) |

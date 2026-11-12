@@ -31,6 +31,9 @@
  *                           ROM). play ok <card> | play notfound (no ROM, or a system started only from an MGL) |
  *                           play psx | play failed
  *   DELETE <sys>\t<save>    delete a save (others delete theirs at their next sync)
+ *   CLEAR <sys>\t<card>     take every save off that virtual card, the card only: no SuperStation loses one (one that
+ *                           still has a save puts it back when it next syncs that card). clear ok <n> | clear busy |
+ *                           clear failed
  *   CONFLICTS               saves whose two copies both changed
  *   KEEP <local|card> <sys>\t<save>
  * The card bus is one user's at a time (/tmp/super_memcard.busy, as cm_modules' cmod_mc_lock): smcd holds it while it has
@@ -868,7 +871,7 @@ static void do_command(int fd, char *l) {
         char id[65];
         for (int i = 0; smc_list_card(&c.bus, sys, card, i, id) == SMC_OK; i++) {
             struct smc_game_info gi;
-            if (smc_game_info(&c.bus, sys, card, id, &gi) == SMC_OK)
+            if (smc_game_info(&c.bus, sys, card, id, &gi) == SMC_OK && gi.files) /* not a set whose saves are gone */
                 say(fd, "%s\t%s\t%u\t%d\t%u\t%d\t%s\t%s\t%s\n", gi.name[0] ? gi.name : gi.title[0] ? gi.title : gi.save_name,
                     gi.id, gi.time, gi.files, gi.bytes, gi.has_icon ? 1 : 0, gi.save_name, id, gi.label);
         }
@@ -878,6 +881,18 @@ static void do_command(int fd, char *l) {
             *tab = 0;
             say(fd, "delete %d\n", smc_delete_save(&c.bus, &k, a, tab + 1));
         }
+    } else if (!strncmp(l, "CLEAR ", 6)) {
+        char *tab = strchr(a, '\t');
+        int card = tab ? atoi(tab + 1) : 0, n = -1;
+        if (tab)
+            *tab = 0;
+        if (tab && play_sys[0] && !strcmp(play_sys, a))
+            say(fd, "clear busy\n");
+        else if (tab && strcmp(a, "PSX") && (n = smc_clear_card(&c.bus, &k, a, card)) >= 0) {
+            lg("%s: card %d cleared (the card only): %d save(s)", a, card, n);
+            say(fd, "clear ok %d\n", n);
+        } else
+            say(fd, "clear failed\n");
     } else if (!strcmp(l, "SECTION") || !strcmp(l, "SECTION PSX")) {
         section(fd, &c, &k, l[7] != 0);
     } else if (!strcmp(l, "SAVES")) {

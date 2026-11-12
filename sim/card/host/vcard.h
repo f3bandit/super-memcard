@@ -38,3 +38,4 @@ void vcard_key(int key);
 const char *vcard_card_path(void);
 /* What the card's screen shows for an SS1 core: "<system>|<header>|<game>|<saved>|<status>|<size>", "" : the PS1 card */
 const char *vcard_screen(void);
+const char *vcard_browse(void); /* vcs_browse */

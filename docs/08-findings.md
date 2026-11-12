@@ -488,13 +488,19 @@ Then a real save, end to end (Crystalis on `NES_smc.rbf` under the test Main, th
 - **A user's card switch on the card loads that card's saves.** Switching NES from card 3 to 1 on the card put the
   SS1's NES saves on card 3 first, then card 1's on the SS1: as designed (a different card is a different set of
   saves). Two sets of one game on a card (the old name-filed one beside the game-ID one) were both written into the
-  same save file, the newer last: to fix (one set a save file, the newest).
+  same save file, the newer last. Fixed: smcd loads one set a save file, the newest (by its saves' times); the
+  older stays on the card, logged and counted as skipped.
 - **Launch paths on the BitFunX** (test Main, our NES core): an MGL from the menu, the memory manager's Play, leaving a
   game and a save during the game all worked, the card's screen right each time, once the menu core could reach the
   card. With Main's stock `menu.rbf` the menu side got `nocard`. An MGL started while a core runs restarts Main
   straight into the core and isn't seen (outside Console Mode: not needed). A game picked in the OSD needs the
   ROM-load hook (10), not built yet.
 - Flashing from the SS1: `smcd/flashcard.sh`, about 15 s, no button.
+- **Clearing test saves off a card** (`CLEAR`, Nov 12): the 18 seeded test saves on card 1 of 13 systems were taken
+  off with `CLEAR <sys>\t1`: card-only tombstones (time 1), so no SuperStation's copy is deleted (a normal delete
+  would have reached any SuperStation that had synced them). The card's Saves on card and `LIST` then show nothing
+  for card 1. Firmware `sd2psx_smc_clear_20261112.uf2` hides a set with no saves left; before it, a cleared set was
+  still listed by its name.
 
 ### Icons from cover art on the BitFunX (Nov 12 2026)
 

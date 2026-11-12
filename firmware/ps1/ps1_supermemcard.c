@@ -327,6 +327,12 @@ static bool is_save_name(const char *n) {
     return !(l > 4 && strcmp(n + l - 4, ".new") == 0);
 }
 
+/* a save of the game, not the SuperStation's notes beside it (its name, game, icon, label) */
+static bool is_game_save(const char *n) {
+    return is_save_name(n) && strcmp(n, "name.txt") && strcmp(n, "game.ini") && strcmp(n, "icon.bin") &&
+           strcmp(n, "label.txt");
+}
+
 /* ---- virtual cards, and the system whose core is running ---- */
 
 static char mode_sys[SMC_SYS_LEN + 1]; /* "" : none, the buttons are the PS1 card's */
@@ -507,10 +513,59 @@ static bool names_cb(const char *name, int i, void *ctx) {
     return true;
 }
 
+/* a game's folder with a save in it (a set whose saves were all deleted or cleared keeps only its tombstones) */
+static bool dir_has_save(const char *dir) {
+    int d = sd_open(dir, O_RDONLY);
+    if (d < 0)
+        return false;
+    bool found = false;
+    int it = sd_iterate_dir(d, -1);
+    while (it != -1 && !found) {
+        char name[SMC_NAME_LEN + 2];
+        found = !sd_is_dir(it) && sd_get_name(it, name, sizeof(name)) && is_game_save(name);
+        it = sd_iterate_dir(d, it);
+    }
+    if (it != -1)
+        sd_close(it);
+    sd_close(d);
+    return found;
+}
+
+/* the games on a system's card that have a save, kept in place in ids; returns how many */
+static int only_with_saves(const char *dir, char (*ids)[SMC_ID_LEN + 1], int got) {
+    int k = 0;
+    for (int i = 0; i < got; i++) {
+        char p[200];
+        snprintf(p, sizeof(p), "%s/%s", dir, ids[i]);
+        if (dir_has_save(p)) {
+            if (k != i)
+                memcpy(ids[k], ids[i], SMC_ID_LEN + 1);
+            k++;
+        }
+    }
+    return k;
+}
+
 int ps1_supermemcard_browse_systems(char (*out)[SMC_ID_LEN + 1], int max) {
     struct names n = {out, max};
     int got = each_dir(ROOT, names_cb, &n);
-    return got < max ? got : max;
+    if (got > max)
+        got = max;
+    /* only the systems with a save on their card now */
+    static char games[64][SMC_ID_LEN + 1];
+    int k = 0;
+    for (int i = 0; i < got; i++) {
+        char dir[24 + SMC_SYS_LEN];
+        snprintf(dir, sizeof(dir), ROOT "/%s/Card%d", out[i], current_card(out[i]));
+        struct names g = {games, 64};
+        int ng = each_dir(dir, names_cb, &g);
+        if (only_with_saves(dir, games, ng < 64 ? ng : 64) > 0) {
+            if (k != i)
+                memcpy(out[k], out[i], SMC_ID_LEN + 1);
+            k++;
+        }
+    }
+    return k;
 }
 
 int ps1_supermemcard_browse_games(const char *sys, int *card, char (*ids)[SMC_ID_LEN + 1],
@@ -522,6 +577,7 @@ int ps1_supermemcard_browse_games(const char *sys, int *card, char (*ids)[SMC_ID
     int got = each_dir(dir, names_cb, &n);
     if (got > max)
         got = max;
+    got = only_with_saves(dir, ids, got);
     for (int i = 0; i < got; i++) {
         /* game.ini's official name, else the name in the game's header, else its folder */
         char p[200], ini[320], *v = NULL;
@@ -577,7 +633,7 @@ int ps1_supermemcard_browse_saves(const char *sys, int card, const char *id, cha
     int it = sd_iterate_dir(d, -1);
     while (it != -1 && n < max) {
         char name[SMC_NAME_LEN + 2];
-        if (!sd_is_dir(it) && sd_get_name(it, name, sizeof(name)) && is_save_name(name)) {
+        if (!sd_is_dir(it) && sd_get_name(it, name, sizeof(name)) && is_game_save(name)) {
             uint32_t t = 0;
             meta_gen(meta, name, &t);
             snprintf(names[n], SMC_NAME_LEN + 1, "%s", name);
