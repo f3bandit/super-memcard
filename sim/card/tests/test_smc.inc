@@ -72,7 +72,7 @@ static void t_smc_hello_and_card_id(void) {
     struct smc_card c1, c2;
     /* no bus_wake: Hello itself asks twice, for the dropped first command after power-up */
     CHECK_EQ(smc_hello(&vbus, SMC_HOST_TEST, 0, &c1), 1);
-    CHECK_EQ(c1.version, 2);
+    CHECK_EQ(c1.version, 3);
     CHECK_EQ(strlen(c1.id), 16);
     char ini[64];
     CHECK_EQ(read_file_at("SuperMemCard/card.ini", 0, ini, 20), 0);

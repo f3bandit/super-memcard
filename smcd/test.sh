@@ -52,7 +52,7 @@ while not b.endswith(b'END\n'):
     b+=d
 print(b.decode().split(chr(10))[0])")
 kill $gpid 2>/dev/null || true; wait $gpid 2>/dev/null || true; rm -f /tmp/smcd_g.sock
-echo "$r" | grep -q "^card .* version 2" && ok "-G (test build): a card without its identity used" || bad "-G: $r"
+echo "$r" | grep -q "^card .* version 3" && ok "-G (test build): a card without its identity used" || bad "-G: $r"
 kill $sm; wait $sm 2>/dev/null || true; rm -f /tmp/smcd.sock
 # Retro Remake gives the card its identity (the test key), as at the factory
 chip=$("$B/smccli" -s "$w/vc.sock" chip | sed -n 's/^chip //p')
@@ -69,7 +69,7 @@ for i in $(seq 50); do [ -S /tmp/smcd.sock ] && break; sleep 0.1; done
 # Main (the shim) passes frames from here on
 "$B/shimtest" "$w/vc.sock" serve 300 > "$w/shim.log" 2>&1 & shim=$!; pids="$pids $shim"
 sleep 0.5
-ask HELLO | grep -q "^card .* version 2" && ok "HELLO through the shim" || bad "HELLO through the shim"
+ask HELLO | grep -q "^card .* version 3" && ok "HELLO through the shim" || bad "HELLO through the shim"
 
 # the card bus is someone else's (the memory manager reading the PS1 card): smcd waits, then leaves it alone
 sleep 30 & holder=$!; pids="$pids $holder"

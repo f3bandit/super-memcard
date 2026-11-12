@@ -10,7 +10,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#define SMC_VERSION     2   /* 2: Core; virtual cards in Select and List */
+#define SMC_VERSION     3   /* 2: Core; virtual cards in Select and List. 3: Core carries the screen (SMC_CORE_SCREEN) */
 
 enum {
     SMC_HELLO  = 0x60, /* 'S' 'M' ver host caps                -> 'S' 'M' ver features id[8] free_kb[4] (16) */
@@ -25,7 +25,8 @@ enum {
     SMC_CORE   = 0x69, /* syslen sys flags                     -> status card (2): the system's current card;
                         * flags bit 0: this system's core is running (system mode: screen, buttons); sys "."
                         * with bit 0: no system (back to the PS1 card). Bit 1: one more request byte, the
-                        * system's card to use from now on (a save picked on the SuperStation) */
+                        * system's card to use from now on (a save picked on the SuperStation). Bit 2 (v3): then
+                        * gamelen game, the launched game's name, shown on the screen */
     SMC_DELETE = 0x6A, /* file gen[4] time[4]                  -> end (1): the save is deleted at generation gen; the
                         * card keeps a tombstone (Info answers 44 'D') so other SS1s delete their copy too, and
                         * the file itself in <game>/.deleted/ */
@@ -51,6 +52,16 @@ enum { SMC_HOST_MAIN = 1, SMC_HOST_CONSOLE_MODE = 2, SMC_HOST_CORE = 3, SMC_HOST
 #define SMC_MAX_CARDS   99    /* virtual cards per system */
 #define SMC_CORE_RUNNING 0x01
 #define SMC_CORE_SET_CARD 0x02   /* Core: a byte follows, the system's card to use from now on (1..99) */
+#define SMC_CORE_SCREEN   0x04   /* Core (version 3): then the screen's lines, each len text: header, game, saved,
+                                  * status, size (SMC_SCREEN_LINES; len 0: empty) */
+#define SMC_SCREEN_LINES  5
+#define SMC_SCREEN_HEADER 0      /* the system's name ("Game Boy Color") */
+#define SMC_SCREEN_GAME   1      /* the launched game (scrolls when long) */
+#define SMC_SCREEN_SAVED  2      /* when its save was made ("11/11/26 11:17PM": the whole row) */
+#define SMC_SCREEN_STATUS 3      /* "On SSMC", "New save waiting", "No save yet" */
+#define SMC_SCREEN_SIZE   4      /* "8 KB, 1 file" */
+#define SMC_SCREEN_LEN    48     /* the game line (it scrolls) */
+#define SMC_SCREEN_COLS   16     /* the other lines: the screen's width */
 #define SMC_MAX_REQ     (4 + 128 + 4 + SMC_SYS_LEN + SMC_ID_LEN)
 #define SMC_MAX_ANS     130
 
@@ -86,6 +97,8 @@ const char *ps1_supermemcard_mode_system(void);
 int ps1_supermemcard_mode_card(void);
 /* Changes whenever the system or its card changes (to redraw). */
 uint32_t ps1_supermemcard_mode_seq(void);
+/* a line of the system mode's screen (SMC_SCREEN_*), sent by the SuperStation with Core; "" : not sent */
+const char *ps1_supermemcard_mode_line(int line);
 /* A card button: next (+1) / previous (-1) virtual card of the running system. Returns false when no
  * system is running (the key then does what it always did). The choice is saved after 1.5 s without
  * presses, as PS1 mode waits before switching. */

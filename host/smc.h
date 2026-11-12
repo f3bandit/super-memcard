@@ -69,6 +69,14 @@ int smc_select_card(const struct smc_bus *b, const char *sys, const char *game, 
 int smc_core(const struct smc_bus *b, const char *sys, bool running);
 /* Core, setting the system's virtual card to use from now on (a save picked on the SuperStation). The card, or <0. */
 int smc_core_set_card(const struct smc_bus *b, const char *sys, int card);
+/* Core with the card's screen for the running system (card version 3 on, SMC_PROTOCOL_GAME): its lines are the header
+ * (the system's name), the game, when its save was made, the save's state and its size; NULL or "" : empty. The game
+ * line takes 48 characters (it scrolls), the others 16. The system's current card, or <0. */
+#define SMC_SCREEN_LINES 5
+#define SMC_GAME_NAME_MAX 48
+int smc_core_screen(const struct smc_bus *b, const char *sys, const char *const lines[SMC_SCREEN_LINES]);
+/* "Final Fantasy III (USA).sfc" -> "Final Fantasy III" (no folder, extension or bracketed tags; printable ASCII) */
+void smc_display_name(const char *game, char *out, size_t n);
 /* File `idx` (0..n-1) of the selected game (deleted ones too: f->deleted). */
 int smc_info(const struct smc_bus *b, int idx, struct smc_file *f);
 /* Delete file `idx` of the selected game at generation `gen` (its generation + 1): the card keeps a tombstone so
@@ -92,7 +100,8 @@ int smc_list_card(const struct smc_bus *b, const char *sys, int card, int idx, c
 #define SMC_SYS_MAX 32
 #define SMC_GAME_MAX 64
 #define SMC_CARDS_MAX 99
-#define SMC_PROTOCOL 2 /* 2: Core and virtual cards */
+#define SMC_PROTOCOL 2 /* 2: Core and virtual cards (the least a card needs) */
+#define SMC_PROTOCOL_GAME 3 /* the card takes its screen in Core (smc_core_screen) */
 
 /* ---- the card's identity (docs/12-card-identity.md) ---- */
 #define SMC_FEATURE_IDENTITY 0x10 /* Hello's features: the card has CERT, AUTH and AUTHSIG */

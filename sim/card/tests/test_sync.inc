@@ -278,6 +278,33 @@ static void pick_card(const char *sys, int want) {
     CHECK_EQ(smc_core(&vbus, NULL, true), 0);
 }
 
+/* Core carries the card's screen for the running system; Core again without it keeps it; a new system clears it;
+ * the PS1 card again: none */
+static void t_core_screen(void) {
+    sync_setup();
+    char n[SMC_GAME_NAME_MAX + 1];
+    smc_display_name("SNES/Final Fantasy III (USA) (Rev 1).sfc", n, sizeof(n));
+    CHECK(strcmp(n, "Final Fantasy III") == 0);
+    smc_display_name("Crystalis", n, sizeof(n));
+    CHECK(strcmp(n, "Crystalis") == 0);
+    struct smc_card card;
+    CHECK_EQ(smc_hello(&vbus, SMC_HOST_TEST, 0, &card), 1);
+    CHECK(card.version >= SMC_PROTOCOL_GAME);
+    const char *l[SMC_SCREEN_LINES] = {"SNES", "Final Fantasy III", "11/11/26 09:40PM", "On SSMC", "8 KB, 1 file"};
+    CHECK(smc_core_screen(&vbus, "SNES", l) >= 1);
+    CHECK(strcmp(vcard_screen(), "SNES|SNES|Final Fantasy III|11/11/26 09:40PM|On SSMC|8 KB, 1 file") == 0);
+    CHECK(smc_core(&vbus, "SNES", true) >= 1);   /* Core again in-game, no screen: it stays */
+    CHECK(strcmp(vcard_screen(), "SNES|SNES|Final Fantasy III|11/11/26 09:40PM|On SSMC|8 KB, 1 file") == 0);
+    const char *longer[SMC_SCREEN_LINES] = {"Game Boy Color", "The Legend of Zelda: Link's Awakening DX (USA, Europe) (Rev 2)",
+                                            "", "No save yet", NULL};
+    CHECK(smc_core_screen(&vbus, "GBC", longer) >= 1);   /* a long game name is cut at 48, the rest of the frame still read */
+    CHECK(strcmp(vcard_screen(), "GBC|Game Boy Color|The Legend of Zelda: Link's Awakening DX (USA, E||No save yet|") == 0);
+    CHECK(smc_core(&vbus, "NES", true) >= 1);
+    CHECK(strcmp(vcard_screen(), "NES|||||") == 0);
+    CHECK_EQ(smc_core(&vbus, NULL, true), 0);
+    CHECK(vcard_screen()[0] == 0);
+}
+
 static void t_sync_virtual_card_switch(void) {
     sync_setup();
     char p[700];
@@ -1006,6 +1033,7 @@ static void t_sync_like_a_ps1(void) {
     {"sync: game names over 64 characters", t_sync_long_game_name, true, NULL}, \
     {"sync: another card gets the saves too", t_sync_another_card, true, NULL}, \
     {"sync: no Super MemCard card: nothing changes", t_sync_no_card, true, NULL}, \
+    {"Core carries the card's screen", t_core_screen, true, NULL}, \
     {"sync: another virtual card picked: saves go to the old one first", t_sync_virtual_card_switch, true, NULL}, \
     {"sync: no switch until the old card has every save", t_sync_switch_waits_when_old_card_fails, true, NULL}, \
     {"sync: a core's save folder from its .rbf", t_sync_core_system_names, true, NULL}, \

@@ -458,6 +458,24 @@ Then a real save, end to end (Crystalis on `NES_smc.rbf` under the test Main, th
 - Console Mode itself has none of the hooks yet (its Main's shim calls, its menu core's raw frames): this was the test
   Main with Main's stock menu core, and leaving a game lands in the stock menu, not Console Mode.
 
+### The card's screen for the other systems (Nov 11 2026, BitFunX Gen2, SS1)
+
+- Core now carries the whole screen (`SMC_CORE_SCREEN`, firmware version 3): the system, the virtual card, when the
+  save was made, the game, the save's state and size. smcd sends it after the launch sync, the first time the card is
+  reached during the game, and after each save that reaches the card. Shown on the BitFunX with NES/Crystalis on our
+  NES core.
+- **A scroll bar down the screen's right side** covered the card number and channel: two new rows ran past the
+  64-pixel screen, and LVGL adds a scroll bar when a screen's content is taller than it. The bottom 12 pixels are the
+  button bar (`< Menu >`) too. Fixed: in system mode the rows move up into the space above the button bar (card,
+  saved, game, save line), the save line scrolls like the game's name, and the main screen doesn't scroll.
+- **smcd gave up on the card for the whole game** when its first in-game try came while the core was still starting
+  (1 s after launch): `no_card` was never cleared. Now it tries again every 10 s (30 s after a minute).
+- **`load_core` of an MGL while a core runs** restarts Main straight into the new core: `smc_shim_core_start()` isn't
+  called and smcd never hears of the game. Going to the menu first worked. Needs the core-start call on Main's
+  start-up path (10, "Every way a game starts").
+- Flashing the card from the SS1 needs no button: the firmware's USB serial port (`/dev/ttyACM0`) takes the Pico SDK's
+  1200-baud reset into the bootloader; the `RPI-RP2` drive mounts as `/media/usbN` and the `.uf2` is copied onto it.
+
 ### Open
 
 - (Closed: the flaky PC test was the first write after a card switch, see above.)

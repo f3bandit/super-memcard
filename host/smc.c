@@ -141,6 +141,66 @@ int smc_core(const struct smc_bus *b, const char *sys, bool running) {
     return a[0] == GOOD ? a[1] : SMC_E_BAD;
 }
 
+int smc_core_screen(const struct smc_bus *b, const char *sys, const char *const lines[SMC_SCREEN_LINES]) {
+    uint8_t req[3 + SMC_SYS_MAX + SMC_SCREEN_LINES * (1 + SMC_GAME_NAME_MAX)], a[2];
+    if (!sys)
+        return SMC_E_BAD;
+    int n = put_name(req, sys, SMC_SYS_MAX);
+    if (n < 0)
+        return SMC_E_BAD;
+    req[n++] = 0x01 | 0x04; /* running, SMC_CORE_SCREEN: the screen's lines follow */
+    for (int l = 0; l < SMC_SCREEN_LINES; l++) {
+        const char *t = lines && lines[l] ? lines[l] : "";
+        size_t max = l == 1 ? SMC_GAME_NAME_MAX : 16, len = strlen(t);
+        if (len > max)
+            len = max;
+        req[n++] = (uint8_t)len;
+        for (size_t i = 0; i < len; i++)   /* printable ASCII: the card's font */
+            req[n++] = (unsigned char)t[i] >= 0x20 && (unsigned char)t[i] < 0x7F ? (uint8_t)t[i] : ' ';
+    }
+    int rc = SMC_E_NO_REPLY;
+    for (int i = 0; i < 2 && rc == SMC_E_NO_REPLY; i++) {
+        if (i)
+            usleep(60 * 1000);
+        rc = smc_frame(b, C_CORE, req, n, a, 2);
+    }
+    if (rc)
+        return rc;
+    return a[0] == GOOD ? a[1] : SMC_E_BAD;
+}
+
+void smc_display_name(const char *game, char *out, size_t n) {
+    /* "Final Fantasy III (USA) (Rev 1).sfc" -> "Final Fantasy III": no folder, extension or tags; ASCII only */
+    out[0] = 0;
+    if (!game || n < 2)
+        return;
+    const char *s = strrchr(game, '/');
+    s = s ? s + 1 : game;
+    size_t len = strlen(s);
+    const char *dot = strrchr(s, '.');
+    if (dot && dot != s && strlen(dot) <= 5 && !strchr(dot, ' '))
+        len = (size_t)(dot - s);
+    for (size_t i = 0; i < len; i++)
+        if ((s[i] == '(' || s[i] == '[') && i > 0) {
+            len = i;
+            break;
+        }
+    size_t o = 0;
+    for (size_t i = 0; i < len && o + 1 < n; i++) {
+        unsigned char ch = (unsigned char)s[i];
+        if (ch == '_')
+            ch = ' ';
+        if (ch < 0x20 || ch >= 0x7F)
+            continue;
+        if (ch == ' ' && (o == 0 || out[o - 1] == ' '))
+            continue;
+        out[o++] = (char)ch;
+    }
+    while (o && out[o - 1] == ' ')
+        o--;
+    out[o] = 0;
+}
+
 int smc_info(const struct smc_bus *b, int idx, struct smc_file *f) {
     uint8_t req[1] = {(uint8_t)idx}, a[29];
     int rc = smc_frame(b, C_INFO, req, 1, a, 29);

@@ -123,6 +123,12 @@ uint8_t vcard_xfer_ctrl(uint8_t cmd, uint8_t dat, bool last, bool *ack) {
 }
 void vcard_settle(void) { call(OP_SETTLE, 0, 0, false); }
 void vcard_key(int key) { call(OP_KEY, (uint8_t)key, 0, false); }
+const char *vcard_screen(void) {
+    static char p[256];
+    struct vcard_rsp r = call(OP_SCREEN, 0, 0, false);
+    memcpy(p, r.path, sizeof(p));
+    return p;
+}
 const char *vcard_card_path(void) {
     static char p[256];
     struct vcard_rsp r = call(OP_PATH, 0, 0, false);

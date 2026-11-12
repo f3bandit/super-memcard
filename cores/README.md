@@ -15,10 +15,8 @@ version is moving a pin, never a merge inside a fork.
 | Genesis | Genesis / Mega Drive (older core) |
 | MegaDrive | Mega Drive / Genesis (newer core) |
 | MegaCD | Sega CD / Mega CD |
-| S32X | 32X |
 | Saturn | Saturn |
 | TurboGrafx16 | PC Engine, TurboGrafx-16, CD-ROM², SuperGrafx |
-| Jaguar | Atari Jaguar |
 | NeoGeo | Neo Geo MVS/AES, Neo Geo CD |
 | PSX | PlayStation |
 

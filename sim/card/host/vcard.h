@@ -36,3 +36,5 @@ void vcard_key(int key);
 
 /* The card file the firmware has open, relative to the SD root ("" when none). */
 const char *vcard_card_path(void);
+/* What the card's screen shows for an SS1 core: "<system>|<header>|<game>|<saved>|<status>|<size>", "" : the PS1 card */
+const char *vcard_screen(void);

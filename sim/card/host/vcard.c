@@ -2,6 +2,9 @@
  * state machines as FIFOs, the SEL interrupt, the clock. And the bus the host drives. */
 #define _GNU_SOURCE
 #include "vcard_server.h"
+#if WITH_SUPERMEMCARD
+#include "ps1_supermemcard.h"
+#endif
 #include "pico_host.h"
 #include "ps1_mc_spi.pio.h"
 
@@ -309,3 +312,16 @@ void vcs_stop(void) {
 }
 
 const char *vcs_card_path(void) { return host_sd_card_path(); }
+const char *vcs_screen(void) {
+#if !WITH_SUPERMEMCARD
+    return "";
+#else
+    static char s[256];
+    if (!ps1_supermemcard_mode_system()[0])
+        return "";
+    int n = snprintf(s, sizeof(s), "%s", ps1_supermemcard_mode_system());
+    for (int l = 0; l < SMC_SCREEN_LINES && n < (int)sizeof(s); l++)
+        n += snprintf(s + n, sizeof(s) - (size_t)n, "|%s", ps1_supermemcard_mode_line(l));
+    return s;
+#endif
+}

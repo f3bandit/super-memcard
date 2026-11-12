@@ -73,7 +73,18 @@ int ps1_supermemcard_req_len(uint8_t cmd, const uint8_t *r, int have) {
         if (have < 1) return 1;
         if (r[0] == 0 || r[0] > SMC_SYS_LEN) return -1;
         int base = 1 + r[0] + 1;   /* with SMC_CORE_SET_CARD in its flags, the card's number follows */
-        return have >= base && (r[base - 1] & SMC_CORE_SET_CARD) ? base + 1 : base;
+        if (have < base)
+            return base;
+        int flags = r[base - 1], n = base + (flags & SMC_CORE_SET_CARD ? 1 : 0);
+        if (!(flags & SMC_CORE_SCREEN))
+            return n;
+        for (int i = 0; i < SMC_SCREEN_LINES; i++) {   /* then the screen's lines: each its length, then it */
+            if (have < n + 1)
+                return n + 1;
+            if (r[n] > (i == SMC_SCREEN_GAME ? SMC_SCREEN_LEN : SMC_SCREEN_COLS)) return -1;
+            n += 1 + r[n];
+        }
+        return n;
     }
     default: return -1;
     }
@@ -273,6 +284,7 @@ static uint32_t mode_seq;
 static bool mode_dirty;                /* mode_card changed by the buttons, not yet in card.ini */
 static uint64_t mode_save_at;
 static bool ps1_used;                  /* set by core 1 */
+static char mode_text[SMC_SCREEN_LINES][SMC_SCREEN_LEN + 1]; /* the system mode's screen, from Core */
 
 static int read_current_card(const char *sys) {
     char p[96], buf[32];
@@ -314,6 +326,7 @@ static void set_mode(const char *sys) {
         return;
     save_mode_card();
     snprintf(mode_sys, sizeof(mode_sys), "%s", sys);
+    memset(mode_text, 0, sizeof(mode_text));
     mode_card = sys[0] ? read_current_card(sys) : 0;
     mode_seq++;
 }
@@ -322,6 +335,9 @@ void ps1_supermemcard_ps1_used(void) { __atomic_store_n(&ps1_used, true, __ATOMI
 const char *ps1_supermemcard_mode_system(void) { return mode_sys; }
 int ps1_supermemcard_mode_card(void) { return mode_card; }
 uint32_t ps1_supermemcard_mode_seq(void) { return mode_seq; }
+const char *ps1_supermemcard_mode_line(int line) {
+    return line >= 0 && line < SMC_SCREEN_LINES ? mode_text[line] : "";
+}
 
 bool ps1_supermemcard_card_key(int delta) {
     if (!mode_sys[0])
@@ -525,6 +541,18 @@ static int do_command(uint8_t cmd, const uint8_t *r, int len, uint8_t *a) {
         if (flags & SMC_CORE_RUNNING) {
             set_mode(none ? "" : sys);
             __atomic_store_n(&ps1_used, false, __ATOMIC_RELEASE); /* only PS1 use from now on ends it */
+        }
+        if ((flags & SMC_CORE_SCREEN) && (flags & SMC_CORE_RUNNING) && !none) {
+            /* the screen's lines: printable ASCII only (the font), anything else a space */
+            const uint8_t *g = r + 2 + sl + (flags & SMC_CORE_SET_CARD ? 1 : 0);
+            for (int l = 0; l < SMC_SCREEN_LINES; l++) {
+                int gl = *g++;
+                for (int i = 0; i < gl; i++)
+                    mode_text[l][i] = g[i] >= 0x20 && g[i] < 0x7F ? (char)g[i] : ' ';
+                mode_text[l][gl] = 0;
+                g += gl;
+            }
+            mode_seq++;
         }
         if ((flags & SMC_CORE_SET_CARD) && !none) {
             /* the host picks the system's card (a save chosen on the SuperStation): as the buttons do, saved at once */

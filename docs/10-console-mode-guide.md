@@ -59,7 +59,10 @@ SS1 (Nov 10 2026).
 2. `fpga_load_rbf()`: `smc_shim_core_start(name, xml)` for every core that isn't `menu.rbf`, before it loads.
 3. `main()`, after `user_io_init()`: `smc_shim_menu_start()` (it does nothing unless Main started with the menu core).
 4. Main's loop: `smc_shim_poll()`.
-5. `menu.cpp`, the OSD's Saves page (the table in "The OSD's Saves page" below): two menu states, the " Saves" row on
+5. **To come (designed, not yet in the test Main):** `smc_shim_rom_load(path)` where Main sends a new game into a
+   running core, and `smc_shim_core_start()` on Main's start-up path when it starts straight into a core. See "Every way
+   a game starts" below.
+6. `menu.cpp`, the OSD's Saves page (the table in "The OSD's Saves page" below): two menu states, the " Saves" row on
    the core's first page, its select, and the two states' code (with `smc_osd_scroll()`).
 
 **On the SuperStation:** `smcd` started at boot (it needs nothing else; with no card it waits), the cores with the card
@@ -89,6 +92,8 @@ Copy `main/smc_shim.cpp/.h` and `main/smc_frontport.cpp/.h` into its source (GPL
 | `smc_shim_core_start(rbf, mgl)` | in `fpga_load_rbf()`, before a core that isn't the menu loads. Waits for `smcd` (the game's save from the card, at most 30 s; a second or two normally), passing its card frames meanwhile |
 | `smc_shim_menu_start()` | in `main()`, after `user_io_init()`, when Main starts with the menu core |
 | `smc_shim_poll()` | in Main's loop: passes `smcd`'s frames (also while a game runs, through the core's `sys_top` driver) |
+| `smc_shim_rom_load(path)` *(to come)* | where Main sends a game file into a running core (the OSD's file browser, an MGL's `<file>` after the core is up), before the save is mounted. Waits for `smcd` as `smc_shim_core_start()` does |
+| `smc_shim_core_start(rbf, mgl)` on start-up *(to come)* | when Main starts straight into a core (`load_core` of an MGL or a core while another core runs restarts Main with it), before that core loads |
 
 That is all of it in Main. Sockets (text lines):
 
@@ -102,6 +107,58 @@ That is all of it in Main. Sockets (text lines):
 /tmp/smc_frontport.sock   Main listens.  smcd sends   FRAME <port> <speed> <ack ms> <hex>  -> OK <count> <hex> | ERR <code>
                                                       HOLD <0|1>                           -> OK
 ```
+
+### Every way a game starts
+
+Every core and every game file goes through Main, and Main is the one program running whether the player is in Console
+Mode or in the default MiSTer menu after leaving it (`MiSTer.ini` `main=ConsoleMode/MiSTer_ConsoleMode`). So the hooks
+above, all in Main, see every way a game starts. Main asks `smcd` first each time, while the card can still be reached,
+so the card's save and its screen are right before the game loads:
+
+| how the game starts | the hook | what `smcd` does before Main goes on |
+|---|---|---|
+| Console Mode's game list, the memory manager, any MGL from the menu | core start (MGL known) | the newest save in place, the card's screen: system, game, save |
+| a core from the menu, then a game from the OSD | core start, then ROM load | the system at core start; the game and its save at ROM load |
+| another game from the OSD while one runs | ROM load | the old game's save to the card, then the new game's save in place and on the screen |
+| an MGL or core started while a core runs (a frontend, Zaparoo, a script) | core start on Main's start-up | as the first row |
+| `bootcore=` | core start (on start-up) | as the second row |
+
+**Seen on an SS1 (Nov 11 2026):** `load_core` of an MGL while a core runs restarts Main straight into the new core and
+`smc_shim_core_start()` isn't called, so `smcd` missed that launch. Hence the start-up hook.
+
+**Stock cores and the ROM-load hook.** A stock core has nothing on the front ports, so while it runs the card can't
+be reached at all. At ROM load, Main then:
+
+1. loads the menu core back (the card can be reached again);
+2. lets `smcd` finish: the old game's save to the card, the new game's newest save into its file, the card's screen;
+3. loads the game core again, then the new game, whose save Main now mounts.
+
+That's a second or two longer per game picked in the OSD, and only on stock cores. Cores with the card driver (phase
+2) skip it: `smcd` reaches the card through the running core. The core reloaded here has no game in it yet, so nothing
+is lost.
+
+**The save file Main has open stays the same file.** `smcd` writes a save into the file Main has open (never a new
+file renamed over it): Main keeps writing to the file it opened, and a renamed-over one is a deleted file (seen on the
+SS1, Nov 11 2026: a game's saves went to a deleted file until the game ended).
+
+### The card's screen for the other systems
+
+While a non-PSX game runs, `smcd` sends the card its screen with Core (`SMC_CORE_SCREEN`, card firmware version 3):
+
+```
+ SNES                header: the system
+Card            1    its virtual card on the SSMC
+11/11/26 11:17PM     when the game's save was made (24 h or 12 h: a card setting, to come)
+Final Fantasy III    the game (scrolls when longer than the screen)
+On SSMC  8 KB, 1 file   the save: On SSMC / New save waiting / No save yet, its size and files (scrolls)
+ <    Menu    >      the card's buttons, as on the PS1 screen
+```
+
+No channel: only PS1 cards have channels. While the SuperStation writes to the card the header reads
+`<system>: saving`. A PSX game, or a PS1 game on a PlayStation, gets the PS1 card's screen as it is. Sent at core
+start (or the first time the card is reached during the game) and after each save that reaches the card; with stock
+cores the screen is set before the game starts and catches up at the next menu (or ROM-load bounce). On the BitFunX
+Gen2 on an SS1 (Nov 11 2026): the screen sent and shown, NES/Crystalis on our NES core.
 
 ### `smcd`
 
@@ -329,7 +386,12 @@ Saturn (the saves are standard `<game>.sav`; Saturn's naming is in the card test
 
 - The shipping card's firmware: sd2psXtd-based? Its source (GPL-3.0) to apply `firmware/` to.
 - Raw frames in Console Mode's menu core: the same `SMC_RAW` or its own command; its timing.
-- Where the shim's three calls go in `MiSTer_ConsoleMode`, and starting `smcd` at boot (a start script still to come).
+- Where the shim's calls go in `MiSTer_ConsoleMode` (and `smc_shim_rom_load()` and the start-up core hook once they're
+  built and tested in the test Main), and starting `smcd` at boot (a start script still to come).
+- The card's own menu in a system's mode (pick a card, a new blank card, the game's saves, clock 12 h / 24 h): being
+  designed with f3bandit.
+- Firmware updates through the front port: Retro Remake's cards update this way already (from Taki); the same frames
+  and checks for Super MemCard's firmware, rather than a second updater.
 - On an SS1, one game each of Master System, Game Gear and Saturn (7b).
 - Retro Remake's own signing key in `smcd` and the firmware (12); the test key until then.
 - The SuperStation check (features only on a genuine SS1): how Console Mode recognizes one.

@@ -418,14 +418,20 @@ static char play_sys[65], play_game[256];
 static time_t seen, synced;   /* its saves' newest time: last seen, last on the card */
 static time_t retry_at;       /* a save that didn't reach the card: not tried again before this */
 static int core_told;         /* the card was told this game's system (Core): its screen shows it */
-static int no_card;           /* its core has no front ports, or no card: stop asking until the next game */
+static int no_card;           /* tries that found no card this game (a core without the front ports, the card not in
+                               * yet, or the core still starting): asked again after a while, never given up on */
+static time_t no_card_at;     /* when to try again */
 
-static time_t game_saves_time(const char *sys, const char *game) {
+/* a game's save files in the saves folder: the newest one's time, their bytes and count */
+static void game_saves_stat(const char *sys, const char *game, time_t *newest_out, unsigned long *bytes, int *files) {
     char dir[1024];
     snprintf(dir, sizeof(dir), "%s/%s", saves, sys);
+    *newest_out = 0;
+    *bytes = 0;
+    *files = 0;
     DIR *d = opendir(dir);
     if (!d)
-        return 0;
+        return;
     size_t n = strlen(game);
     time_t newest = 0;
     struct dirent *de;
@@ -436,11 +442,23 @@ static time_t game_saves_time(const char *sys, const char *game) {
         char p[1300];
         struct stat st;
         snprintf(p, sizeof(p), "%s/%s", dir, f);
-        if (!stat(p, &st) && S_ISREG(st.st_mode) && st.st_mtime > newest)
-            newest = st.st_mtime;
+        if (!stat(p, &st) && S_ISREG(st.st_mode)) {
+            if (st.st_mtime > newest)
+                newest = st.st_mtime;
+            *bytes += (unsigned long)st.st_size;
+            (*files)++;
+        }
     }
     closedir(d);
-    return newest;
+    *newest_out = newest;
+}
+
+static time_t game_saves_time(const char *sys, const char *game) {
+    time_t t;
+    unsigned long b;
+    int f;
+    game_saves_stat(sys, game, &t, &b, &f);
+    return t;
 }
 
 /* ---- a game's MGL, kept from its launch for the memory manager's Play: <state>/launch/<sys>/<save name>.mgl ---- */
@@ -557,6 +575,36 @@ static void play(int fd, struct conn *c, const struct smc_sync_cfg *k, char *a, 
     say(fd, "play ok %d\n", card);
 }
 
+/* the card's screen for the game being played (non-PSX; card firmware 3 on): the system, the game, when its save was
+ * made, whether the card has it, its size. on_card: the card has the save on the SD card now. */
+static void show_screen(struct conn *c, const char *sys, const char *game, int on_card) {
+    if (!sys || !sys[0] || !strcmp(sys, "PSX") || c->card.version < SMC_PROTOCOL_GAME)
+        return;
+    char name[SMC_GAME_NAME_MAX + 1], saved[17] = "", status[17], size[17] = "";
+    smc_display_name(game, name, sizeof(name));
+    time_t t = 0;
+    unsigned long bytes = 0;
+    int files = 0;
+    if (game && game[0])
+        game_saves_stat(sys, game, &t, &bytes, &files);
+    if (files) {
+        struct tm now, at;
+        time_t n = time(NULL);
+        localtime_r(&n, &now);
+        localtime_r(&t, &at);
+        (void)now;
+        strftime(saved, sizeof(saved), "%m/%d/%y %I:%M%p", &at);   /* the save's date and time: "11/11/26 11:17PM" */
+        snprintf(status, sizeof(status), "%s", on_card ? "On SSMC" : "New save waiting");
+        unsigned long kb = (bytes + 1023) / 1024;
+        snprintf(size, sizeof(size), "%lu KB, %d file%s", kb ? kb : 1, files, files == 1 ? "" : "s");
+    } else
+        snprintf(status, sizeof(status), "%s", game && game[0] ? "No save yet" : "");
+    const char *lines[SMC_SCREEN_LINES] = {smc_system_title(sys), name, saved, status, size};
+    int rc = smc_core_screen(&c->bus, sys, lines);
+    if (rc < 0)
+        lg("%s: the card didn't take its screen (%d)", sys, rc);
+}
+
 /* ---- the jobs ---- */
 static void do_launch(char *args) {
     smc_sync_hold_card(false);   /* before the core loads: the card picked now is the one it starts with */
@@ -580,6 +628,7 @@ static void do_launch(char *args) {
     if (play_game[0] && strchr(play_game, '/') == NULL && play_game[0] != '.')
         keep_launch(sys, play_game, mgl);   /* for the memory manager's Play: by the save's name */
     no_card = 0;
+    no_card_at = 0;
     struct conn c;
     if (!card_open(&c)) {
         lg("%s: no card reachable (the save is checked again while the game runs)", sys);
@@ -599,6 +648,8 @@ static void do_launch(char *args) {
             lg("game sync stopped with an error");
         sync_ok = rc >= 0 && !rep.failed;
     }
+    if (card > 0)
+        show_screen(&c, sys, play_game, sync_ok);   /* after the sync: the save's state as the game starts */
     card_close(&c);
     seen = play_game[0] ? game_saves_time(play_sys, play_game) : 0;
     synced = sync_ok ? seen : 0;   /* a save that didn't reach the card stays to send (the game poll tries again) */
@@ -628,7 +679,7 @@ static void do_menu(void) {
 
 /* while a game runs: its save to the card once it changed and settled */
 static void game_poll(void) {
-    if (!play_game[0] || no_card || !strcmp(play_sys, "PSX"))   /* PSX uses the front ports itself */
+    if (!play_game[0] || !strcmp(play_sys, "PSX") || (no_card && time(NULL) < no_card_at))   /* PSX: its own card */
         return;
     time_t t = game_saves_time(play_sys, play_game);
     if (t != seen) {
@@ -640,16 +691,22 @@ static void game_poll(void) {
         return;
     struct conn c;
     if (!card_open(&c)) {
-        no_card = 1;
-        lg("in-game: no card reachable from this core (the save goes after the game)");
+        if (!no_card++)
+            lg("in-game: no card reachable from this core yet (asked again every 10 s, 30 s after a minute)");
+        no_card_at = time(NULL) + (no_card < 6 ? 10 : 30);
         return;
     }
+    if (no_card)
+        lg("in-game: the card reached after %d tr%s", no_card, no_card == 1 ? "y" : "ies");
+    no_card = 0;
     if (need_core) {   /* the card wasn't reachable at the game's start (a menu core without the front ports) */
         int card = smc_core(&c.bus, play_sys, true);
         core_told = card > 0;
         lg("%s core (in-game): %s %d", play_sys, card > 0 ? "its card" : "the card didn't answer Core", card);
         if (!core_told)
             retry_at = time(NULL) + 30;
+        else if (!need_sync)
+            show_screen(&c, play_sys, play_game, !t || t == synced);
     }
     if (!need_sync) {
         card_close(&c);
@@ -665,6 +722,7 @@ static void game_poll(void) {
         lg("in-game: the save didn't reach the card, again in 30 s");
     } else
         synced = t;
+    show_screen(&c, play_sys, play_game, rc >= 0 && !rep.failed);   /* the new save on the card (our cores) */
     card_close(&c);
 }
 
