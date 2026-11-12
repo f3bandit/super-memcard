@@ -8,6 +8,7 @@
  * buttons pick that system's card instead of the PS1 card. */
 #pragma once
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #define SMC_VERSION     3   /* 2: Core; virtual cards in Select and List. 3: Core carries the screen (SMC_CORE_SCREEN) */
@@ -54,10 +55,12 @@ enum { SMC_HOST_MAIN = 1, SMC_HOST_CONSOLE_MODE = 2, SMC_HOST_CORE = 3, SMC_HOST
 #define SMC_CORE_SET_CARD 0x02   /* Core: a byte follows, the system's card to use from now on (1..99) */
 #define SMC_CORE_SCREEN   0x04   /* Core (version 3): then the screen's lines, each len text: header, game, saved,
                                   * status, size (SMC_SCREEN_LINES; len 0: empty) */
+#define SMC_CORE_TZ       0x08   /* Core (version 3): then 2 bytes, the SuperStation's UTC offset in minutes (signed,
+                                  * big-endian), after the screen's lines: save times on the card's own screens in local time */
 #define SMC_SCREEN_LINES  5
 #define SMC_SCREEN_HEADER 0      /* the system's name ("Game Boy Color") */
 #define SMC_SCREEN_GAME   1      /* the launched game (scrolls when long) */
-#define SMC_SCREEN_SAVED  2      /* when its save was made ("11/11/26 11:17PM": the whole row) */
+#define SMC_SCREEN_SAVED  2      /* when its save was made, "MM/DD/YY HH:MM" (24 h; shown in the card's clock setting) */
 #define SMC_SCREEN_STATUS 3      /* "On SSMC", "New save waiting", "No save yet" */
 #define SMC_SCREEN_SIZE   4      /* "8 KB, 1 file" */
 #define SMC_SCREEN_LEN    48     /* the game line (it scrolls) */
@@ -108,6 +111,11 @@ bool ps1_supermemcard_card_key(int delta);
  * card, exactly like stock firmware (SuperMemCard/settings.ini, saves=0). */
 bool ps1_supermemcard_enabled(void);
 void ps1_supermemcard_set_enabled(bool on);
+/* the screen's times: 24 h (settings.ini clock=24) or 12 h (the default) */
+bool ps1_supermemcard_clock24(void);
+void ps1_supermemcard_set_clock24(bool on);
+/* "MM/DD/YY HH:MM" as the SuperStation sends it, in the card's clock setting */
+void ps1_supermemcard_format_time(const char *in, char *out, size_t n);
 /* Free space on the SD card in KB: counts it (seconds on a big card: only from the menu, never on the bus) and
  * keeps it for Hello's answer, which says FFFFFFFF until it's been counted. */
 uint32_t ps1_supermemcard_count_free(void);
@@ -119,3 +127,7 @@ bool ps1_supermemcard_busy(void);
 int ps1_supermemcard_browse_systems(char (*out)[SMC_ID_LEN + 1], int max);
 int ps1_supermemcard_browse_games(const char *sys, int *card, char (*ids)[SMC_ID_LEN + 1],
                                   char (*names)[SMC_BROWSE_NAME], int max);
+/* a game's saves on a card (not deleted ones), by name: each one's name and when it was made, as "MM/DD/YY HH:MM" in
+ * the SuperStation's local time and the card's clock setting ("" when not known); how many */
+int ps1_supermemcard_browse_saves(const char *sys, int card, const char *id, char (*names)[SMC_NAME_LEN + 1],
+                                  char (*when)[24], int max);

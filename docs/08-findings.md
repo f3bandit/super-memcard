@@ -476,6 +476,26 @@ Then a real save, end to end (Crystalis on `NES_smc.rbf` under the test Main, th
 - Flashing the card from the SS1 needs no button: the firmware's USB serial port (`/dev/ttyACM0`) takes the Pico SDK's
   1200-baud reset into the bootloader; the `RPI-RP2` drive mounts as `/media/usbN` and the `.uf2` is copied onto it.
 
+### The card's menu, its log, and the launch paths with a menu core that reaches the card (Nov 12 2026)
+
+- One settings menu: the card's own, a `--SuperStation--` divider, then Saves on card, Saving, Clock, Free, Safe to
+  remove (03). Saves on card goes systems > games > saves with their date and time, names only.
+- Games on the card showed as `CRC-1335CB05`: the card took a game's name from `game.ini` only, which needs the game
+  lists (not on this SS1). Now it falls back to the save's own name (`name.txt`). Two Crystalis sets on card 1 were
+  the same game filed two ways: one by its ROM's ID, one by name from before game IDs (an old test).
+- The card's USB serial log (03) showed every command with its time: transfers ran at 3.5-7 KB/s, a Commit 50-130
+  ms, Select ~9 ms.
+- **A user's card switch on the card loads that card's saves.** Switching NES from card 3 to 1 on the card put the
+  SS1's NES saves on card 3 first, then card 1's on the SS1: as designed (a different card is a different set of
+  saves). Two sets of one game on a card (the old name-filed one beside the game-ID one) were both written into the
+  same save file, the newer last: to fix (one set a save file, the newest).
+- **Launch paths on the BitFunX** (test Main, our NES core): an MGL from the menu, the memory manager's Play, leaving a
+  game and a save during the game all worked, the card's screen right each time, once the menu core could reach the
+  card. With Main's stock `menu.rbf` the menu side got `nocard`. An MGL started while a core runs restarts Main
+  straight into the core and isn't seen (outside Console Mode: not needed). A game picked in the OSD needs the
+  ROM-load hook (10), not built yet.
+- Flashing from the SS1: `smcd/flashcard.sh`, about 15 s, no button.
+
 ### Open
 
 - (Closed: the flaky PC test was the first write after a card switch, see above.)

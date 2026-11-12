@@ -290,11 +290,11 @@ static void t_core_screen(void) {
     struct smc_card card;
     CHECK_EQ(smc_hello(&vbus, SMC_HOST_TEST, 0, &card), 1);
     CHECK(card.version >= SMC_PROTOCOL_GAME);
-    const char *l[SMC_SCREEN_LINES] = {"SNES", "Final Fantasy III", "11/11/26 09:40PM", "On SSMC", "8 KB, 1 file"};
+    const char *l[SMC_SCREEN_LINES] = {"SNES", "Final Fantasy III", "11/11/26 21:40", "On SSMC", "8 KB, 1 file"};
     CHECK(smc_core_screen(&vbus, "SNES", l) >= 1);
-    CHECK(strcmp(vcard_screen(), "SNES|SNES|Final Fantasy III|11/11/26 09:40PM|On SSMC|8 KB, 1 file") == 0);
+    CHECK(strcmp(vcard_screen(), "SNES|SNES|Final Fantasy III|11/11/26 21:40|On SSMC|8 KB, 1 file") == 0);
     CHECK(smc_core(&vbus, "SNES", true) >= 1);   /* Core again in-game, no screen: it stays */
-    CHECK(strcmp(vcard_screen(), "SNES|SNES|Final Fantasy III|11/11/26 09:40PM|On SSMC|8 KB, 1 file") == 0);
+    CHECK(strcmp(vcard_screen(), "SNES|SNES|Final Fantasy III|11/11/26 21:40|On SSMC|8 KB, 1 file") == 0);
     const char *longer[SMC_SCREEN_LINES] = {"Game Boy Color", "The Legend of Zelda: Link's Awakening DX (USA, Europe) (Rev 2)",
                                             "", "No save yet", NULL};
     CHECK(smc_core_screen(&vbus, "GBC", longer) >= 1);   /* a long game name is cut at 48, the rest of the frame still read */

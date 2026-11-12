@@ -593,7 +593,8 @@ static void show_screen(struct conn *c, const char *sys, const char *game, int o
         localtime_r(&n, &now);
         localtime_r(&t, &at);
         (void)now;
-        strftime(saved, sizeof(saved), "%m/%d/%y %I:%M%p", &at);   /* the save's date and time: "11/11/26 11:17PM" */
+        strftime(saved, sizeof(saved), "%m/%d/%y %H:%M", &at);   /* the save's date and time, 24 h: the card shows it
+                                                                     * in its own clock setting (12 h: "11/11/26 11:17PM") */
         snprintf(status, sizeof(status), "%s", on_card ? "On SSMC" : "New save waiting");
         unsigned long kb = (bytes + 1023) / 1024;
         snprintf(size, sizeof(size), "%lu KB, %d file%s", kb ? kb : 1, files, files == 1 ? "" : "s");

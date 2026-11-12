@@ -148,13 +148,14 @@ While a non-PSX game runs, `smcd` sends the card its screen with Core (`SMC_CORE
 ```
  SNES                header: the system
 Card            1    its virtual card on the SSMC
-11/11/26 11:17PM     when the game's save was made (24 h or 12 h: a card setting, to come)
+11/11/26 11:17PM     when the game's save was made (sent in 24 h; shown in the card's Clock setting, 12 h or 24 h)
 Final Fantasy III    the game (scrolls when longer than the screen)
 On SSMC  8 KB, 1 file   the save: On SSMC / New save waiting / No save yet, its size and files (scrolls)
  <    Menu    >      the card's buttons, as on the PS1 screen
 ```
 
-No channel: only PS1 cards have channels. While the SuperStation writes to the card the header reads
+No channel: only PS1 cards have channels. Core also carries the SuperStation's UTC offset (`SMC_CORE_TZ`) so the
+card's own "Saves on card" screens show local times. While the SuperStation writes to the card the header reads
 `<system>: saving`. A PSX game, or a PS1 game on a PlayStation, gets the PS1 card's screen as it is. Sent at core
 start (or the first time the card is reached during the game) and after each save that reaches the card; with stock
 cores the screen is set before the game starts and catches up at the next menu (or ROM-load bounce). On the BitFunX
@@ -320,6 +321,15 @@ PS1 card in port 1 through its own driver: a whole sector, the card's ID and its
 
 Not supported: 32X and Jaguar (hardly a game of theirs saves: five 32X carts, a few Jaguar EEPROMs). Their saves stay
 on the SuperStation, as without Super MemCard.
+
+### The menu core needs the card too
+
+Everything `smcd` does in the menu goes through the menu core's raw frames: the sync when a game ends, the memory
+manager's Play and card picker, and the stock-core bounce at ROM load. On an SS1 (Nov 12 2026) with Main's stock
+`menu.rbf` (no front-port driver) none of them reached the card (`nocard`); with a menu core that has the driver
+(`menu_fx.rbf`, the FX menu core, put over `menu.rbf` with a bind mount for the test) all of them worked on the
+BitFunX: leaving the game synced it and put the card back on its PS1 screen, Play started the game with its save
+from card 1, and the card showed the game. Console Mode's `menu_ConsoleMode.rbf` needs the same driver (section 2).
 
 ## 4. Settings
 

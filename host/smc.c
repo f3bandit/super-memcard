@@ -3,6 +3,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 enum { C_HELLO = 0x60, C_SELECT, C_READ, C_WRITE, C_CREATE, C_COMMIT, C_STATUS, C_LIST, C_INFO, C_CORE, C_DELETE,
@@ -148,7 +149,7 @@ int smc_core_screen(const struct smc_bus *b, const char *sys, const char *const 
     int n = put_name(req, sys, SMC_SYS_MAX);
     if (n < 0)
         return SMC_E_BAD;
-    req[n++] = 0x01 | 0x04; /* running, SMC_CORE_SCREEN: the screen's lines follow */
+    req[n++] = 0x01 | 0x04 | 0x08; /* running, SMC_CORE_SCREEN: the screen's lines follow; SMC_CORE_TZ: then the UTC offset */
     for (int l = 0; l < SMC_SCREEN_LINES; l++) {
         const char *t = lines && lines[l] ? lines[l] : "";
         size_t max = l == 1 ? SMC_GAME_NAME_MAX : 16, len = strlen(t);
@@ -158,6 +159,13 @@ int smc_core_screen(const struct smc_bus *b, const char *sys, const char *const 
         for (size_t i = 0; i < len; i++)   /* printable ASCII: the card's font */
             req[n++] = (unsigned char)t[i] >= 0x20 && (unsigned char)t[i] < 0x7F ? (uint8_t)t[i] : ' ';
     }
+    /* this SuperStation's UTC offset in minutes: the card shows its saves' times in local time on its own screens */
+    time_t now = time(NULL);
+    struct tm lt;
+    localtime_r(&now, &lt);
+    int16_t tz = (int16_t)(lt.tm_gmtoff / 60);
+    req[n++] = (uint8_t)((uint16_t)tz >> 8);
+    req[n++] = (uint8_t)tz;
     int rc = SMC_E_NO_REPLY;
     for (int i = 0; i < 2 && rc == SMC_E_NO_REPLY; i++) {
         if (i)

@@ -22,6 +22,9 @@
 #include <string.h>
 
 #include "pico/rand.h"
+#ifndef SMC_SIM
+bool stdio_usb_connected(void);   /* pico_stdio_usb's (linked into the firmware; its header isn't on this library's path) */
+#endif
 #include "pico/time.h"
 #include "sd.h"
 
@@ -34,6 +37,55 @@ static int mb_len, mb_alen;
 static uint32_t posted, done; /* sequence numbers, accessed with __atomic */
 static bool active;           /* a Hello since power-up */
 static int enabled;           /* 0: not read yet, 1: on, 2: off (settings.ini); read by core 1 */
+static bool clock24;          /* settings.ini clock=24: the screen's times in 24 h (12 h otherwise) */
+static int tz_min;            /* the SuperStation's UTC offset in minutes (settings.ini tz=), from Core */
+static bool tz_known;
+
+/* ---- the log on the USB serial port (/dev/ttyACM0 on an SS1), only while something there reads it: with nothing
+ * reading, a full USB buffer would hold the card up. Block transfers are summed, one line per file. ---- */
+#ifndef SMC_SIM
+#define smc_log(...) do { if (stdio_usb_connected()) printf("smc: " __VA_ARGS__); } while (0)
+#else
+#define smc_log(...) do { } while (0)
+#endif
+static void write_settings(void);
+static uint32_t log_rblocks, log_wblocks;
+static uint64_t log_xfer_from, log_xfer_us;
+
+static void log_transfer_end(void) {
+    if (!log_rblocks && !log_wblocks)
+        return;
+    uint32_t ms = (uint32_t)(log_xfer_us / 1000), bytes = (log_rblocks + log_wblocks) * 128;
+    smc_log("%lu blocks read, %lu written (%lu bytes) in %lu ms busy, %lu ms in all: %lu B/s\n",
+            (unsigned long)log_rblocks, (unsigned long)log_wblocks, (unsigned long)bytes, (unsigned long)ms,
+            (unsigned long)((time_us_64() - log_xfer_from) / 1000),
+            (unsigned long)(time_us_64() > log_xfer_from ? bytes * 1000000ull / (time_us_64() - log_xfer_from) : 0));
+    log_rblocks = log_wblocks = 0;
+    log_xfer_us = 0;
+}
+
+static void log_command(uint8_t cmd, const uint8_t *r, int rlen, const uint8_t *a, int alen, uint64_t us) {
+    if (cmd == SMC_READ || cmd == SMC_WRITE) {
+        if (!log_rblocks && !log_wblocks)
+            log_xfer_from = time_us_64() - us;
+        if (cmd == SMC_READ)
+            log_rblocks++;
+        else
+            log_wblocks++;
+        log_xfer_us += us;
+        return;
+    }
+    log_transfer_end();
+    static const char *const names[] = {"Hello", "Select", "Read", "Write", "Create", "Commit", "Status", "List",
+                                        "Info", "Core", "Delete", "Cert", "Auth", "AuthSig"};
+    const char *nm = cmd >= SMC_HELLO && cmd <= SMC_AUTHSIG ? names[cmd - SMC_HELLO] : "?";
+    smc_log("%s (%02x) %d bytes in, %d out, status %02x, %lu us\n", nm, cmd, rlen, alen, alen > 0 ? a[0] : 0,
+            (unsigned long)us);
+    if (cmd == SMC_SELECT && rlen > 1) {
+        int sl = r[0], il = rlen > 1 + sl ? r[1 + sl] : 0;
+        smc_log("  %.*s / %.*s\n", sl, (const char *)r + 1, il, (const char *)r + 2 + sl);
+    }
+}
 static uint32_t free_kb = 0xFFFFFFFFu, written_kb; /* counted in the menu; KB written since */
 static uint64_t last_cmd_at;
 
@@ -76,15 +128,14 @@ int ps1_supermemcard_req_len(uint8_t cmd, const uint8_t *r, int have) {
         if (have < base)
             return base;
         int flags = r[base - 1], n = base + (flags & SMC_CORE_SET_CARD ? 1 : 0);
-        if (!(flags & SMC_CORE_SCREEN))
-            return n;
-        for (int i = 0; i < SMC_SCREEN_LINES; i++) {   /* then the screen's lines: each its length, then it */
-            if (have < n + 1)
-                return n + 1;
-            if (r[n] > (i == SMC_SCREEN_GAME ? SMC_SCREEN_LEN : SMC_SCREEN_COLS)) return -1;
-            n += 1 + r[n];
-        }
-        return n;
+        if (flags & SMC_CORE_SCREEN)
+            for (int i = 0; i < SMC_SCREEN_LINES; i++) {   /* then the screen's lines: each its length, then it */
+                if (have < n + 1)
+                    return n + 1;
+                if (r[n] > (i == SMC_SCREEN_GAME ? SMC_SCREEN_LEN : SMC_SCREEN_COLS)) return -1;
+                n += 1 + r[n];
+            }
+        return flags & SMC_CORE_TZ ? n + 2 : n;   /* then the UTC offset */
     }
     default: return -1;
     }
@@ -327,6 +378,7 @@ static void set_mode(const char *sys) {
     save_mode_card();
     snprintf(mode_sys, sizeof(mode_sys), "%s", sys);
     memset(mode_text, 0, sizeof(mode_text));
+    smc_log("mode: %s\n", sys[0] ? sys : "PS1 card");
     mode_card = sys[0] ? read_current_card(sys) : 0;
     mode_seq++;
 }
@@ -482,10 +534,77 @@ int ps1_supermemcard_browse_games(const char *sys, int *card, char (*ids)[SMC_ID
         }
         if (v)
             snprintf(names[i], SMC_BROWSE_NAME, "%.*s", (int)strcspn(v, "\n"), v);
-        else
-            snprintf(names[i], SMC_BROWSE_NAME, "%s", ids[i]);
+        else {
+            /* no official name: the save's own name, which the SuperStation keeps beside it (name.txt), never the
+             * game's ID (a CRC means nothing to a player: IDs are for the SuperStation's side) */
+            char nm[SMC_BROWSE_NAME];
+            snprintf(p, sizeof(p), "%s/%s/name.txt", dir, ids[i]);
+            int l = read_text(p, nm, sizeof(nm));
+            if (l > 0) {
+                nm[strcspn(nm, "\r\n")] = 0;
+                while (l > 0 && (nm[strlen(nm) - 1] == ' ' || nm[strlen(nm) - 1] == '.'))   /* "Zelda, The " */
+                    nm[strlen(nm) - 1] = 0, l--;
+            }
+            snprintf(names[i], SMC_BROWSE_NAME, "%s", l > 0 && nm[0] ? nm : ids[i]);
+        }
     }
     return got;
+}
+
+/* days from 1970-01-01 to y-m-d (proleptic Gregorian): the date back from a Unix time without the C library's tz */
+static void civil(int64_t days, int *y, int *m, int *d) {
+    days += 719468;
+    int64_t era = (days >= 0 ? days : days - 146096) / 146097;
+    unsigned doe = (unsigned)(days - era * 146097);
+    unsigned yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    unsigned doy = doe - (365 * yoe + yoe / 4 - yoe / 100), mp = (5 * doy + 2) / 153;
+    *d = (int)(doy - (153 * mp + 2) / 5 + 1);
+    *m = (int)(mp < 10 ? mp + 3 : mp - 9);
+    *y = (int)(yoe + era * 400 + (*m <= 2));
+}
+
+int ps1_supermemcard_browse_saves(const char *sys, int card, const char *id, char (*names)[SMC_NAME_LEN + 1],
+                                  char (*when)[24], int max) {
+    char dir[192], p[208];
+    static char meta[SMC_MAX_FILES * (SMC_NAME_LEN + 16)];
+    snprintf(dir, sizeof(dir), ROOT "/%s/Card%d/%s", sys, card, id);
+    snprintf(p, sizeof(p), "%s/meta.ini", dir);
+    if (read_text(p, meta, sizeof(meta)) < 0)
+        meta[0] = 0;
+    int n = 0, d = sd_open(dir, O_RDONLY);
+    if (d < 0)
+        return 0;
+    int it = sd_iterate_dir(d, -1);
+    while (it != -1 && n < max) {
+        char name[SMC_NAME_LEN + 2];
+        if (!sd_is_dir(it) && sd_get_name(it, name, sizeof(name)) && is_save_name(name)) {
+            uint32_t t = 0;
+            meta_gen(meta, name, &t);
+            snprintf(names[n], SMC_NAME_LEN + 1, "%s", name);
+            when[n][0] = 0;
+            if (t) {
+                int64_t lt = (int64_t)t + (int64_t)tz_min * 60;
+                int y, mo, da;
+                civil(lt / 86400, &y, &mo, &da);
+                int s = (int)(lt % 86400);
+                char t24[16];
+                snprintf(t24, sizeof(t24), "%02d/%02d/%02d %02d:%02d", mo, da, y % 100, s / 3600, s / 60 % 60);
+                ps1_supermemcard_format_time(t24, when[n], sizeof(when[n]));
+            }
+            n++;
+        }
+        it = sd_iterate_dir(d, it);
+    }
+    if (it != -1)
+        sd_close(it);
+    sd_close(d);
+    for (int a = 1; a < n; a++)   /* by name */
+        for (int b = a; b > 0 && strcmp(names[b - 1], names[b]) > 0; b--) {
+            char tn[SMC_NAME_LEN + 1], tw[24];
+            memcpy(tn, names[b], sizeof(tn)); memcpy(names[b], names[b - 1], sizeof(tn)); memcpy(names[b - 1], tn, sizeof(tn));
+            memcpy(tw, when[b], sizeof(tw)); memcpy(when[b], when[b - 1], sizeof(tw)); memcpy(when[b - 1], tw, sizeof(tw));
+        }
+    return n;
 }
 
 /* ---- the commands ---- */
@@ -553,6 +672,20 @@ static int do_command(uint8_t cmd, const uint8_t *r, int len, uint8_t *a) {
                 g += gl;
             }
             mode_seq++;
+            smc_log("screen: %s | %s | %s | %s | %s\n", mode_text[0], mode_text[1], mode_text[2], mode_text[3],
+                    mode_text[4]);
+        }
+        if (flags & SMC_CORE_TZ) {
+            const uint8_t *g = r + 2 + sl + (flags & SMC_CORE_SET_CARD ? 1 : 0);
+            if (flags & SMC_CORE_SCREEN)
+                for (int l = 0; l < SMC_SCREEN_LINES; l++)
+                    g += 1 + *g;
+            int tz = (int16_t)((g[0] << 8) | g[1]);
+            if (tz >= -14 * 60 && tz <= 14 * 60 && (!tz_known || tz != tz_min)) {
+                tz_min = tz;
+                tz_known = true;
+                write_settings();   /* kept: the card's screens show local time on their own after */
+            }
         }
         if ((flags & SMC_CORE_SET_CARD) && !none) {
             /* the host picks the system's card (a save chosen on the SuperStation): as the buttons do, saved at once */
@@ -754,16 +887,52 @@ static int do_command(uint8_t cmd, const uint8_t *r, int len, uint8_t *a) {
 
 static void load_settings(void) {
     char buf[64];
-    bool off = read_text(ROOT "/settings.ini", buf, sizeof(buf)) > 0 && strstr(buf, "saves=0") != NULL;
+    bool have = read_text(ROOT "/settings.ini", buf, sizeof(buf)) > 0;
+    bool off = have && strstr(buf, "saves=0") != NULL;
+    clock24 = have && strstr(buf, "clock=24") != NULL;
+    const char *tz = have ? strstr(buf, "tz=") : NULL;
+    tz_known = tz != NULL;
+    tz_min = tz ? atoi(tz + 3) : 0;
     __atomic_store_n(&enabled, off ? 2 : 1, __ATOMIC_RELEASE);
+}
+
+static void write_settings(void) {
+    char buf[64];
+    int l = snprintf(buf, sizeof(buf), "saves=%d\nclock=%d\n", __atomic_load_n(&enabled, __ATOMIC_ACQUIRE) == 2 ? 0 : 1,
+                     clock24 ? 24 : 12);
+    if (tz_known)
+        snprintf(buf + l, sizeof(buf) - (size_t)l, "tz=%d\n", tz_min);
+    sd_mkdir(ROOT);
+    write_text(ROOT "/settings.ini", buf);
+}
+
+bool ps1_supermemcard_clock24(void) { return clock24; }
+void ps1_supermemcard_set_clock24(bool on) {
+    if (!__atomic_load_n(&enabled, __ATOMIC_ACQUIRE))
+        load_settings();
+    clock24 = on;
+    write_settings();
+    mode_seq++;   /* the screen's time again */
+}
+
+void ps1_supermemcard_format_time(const char *in, char *out, size_t n) {
+    /* in: "MM/DD/YY HH:MM" (24 h, as the SuperStation sends it); out: as is, or "MM/DD/YY hh:MMAM" in 12 h */
+    int h, m;
+    if (clock24 || strlen(in) != 14 || sscanf(in + 9, "%2d:%2d", &h, &m) != 2 || h < 0 || h > 23) {
+        snprintf(out, n, "%s", in);
+        return;
+    }
+    snprintf(out, n, "%.9s%02d:%02d%s", in, h % 12 ? h % 12 : 12, m, h < 12 ? "AM" : "PM");
 }
 
 bool ps1_supermemcard_enabled(void) { return __atomic_load_n(&enabled, __ATOMIC_ACQUIRE) != 2; }
 
 void ps1_supermemcard_set_enabled(bool on) {
-    sd_mkdir(ROOT);
-    write_text(ROOT "/settings.ini", on ? "saves=1\n" : "saves=0\n");
+    if (!__atomic_load_n(&enabled, __ATOMIC_ACQUIRE))
+        load_settings();   /* keep the clock setting */
     __atomic_store_n(&enabled, on ? 1 : 2, __ATOMIC_RELEASE);
+    write_settings();
+    smc_log("Super MemCard %s\n", on ? "on" : "off");
     if (!on) {
         __atomic_store_n(&active, false, __ATOMIC_RELEASE); /* until the next Hello, after it's on again */
         set_mode("");
@@ -789,10 +958,13 @@ void ps1_supermemcard_task(void) {
 
     uint32_t seq = __atomic_load_n(&posted, __ATOMIC_ACQUIRE);
     if (seq != __atomic_load_n(&done, __ATOMIC_ACQUIRE)) {
+        uint64_t t0 = time_us_64();
         mb_alen = do_command(mb_cmd, mb_req, mb_len, mb_ans);
         last_cmd_at = time_us_64();
         __atomic_store_n(&done, seq, __ATOMIC_RELEASE);
-    }
+        log_command(mb_cmd, mb_req, mb_len, mb_ans, mb_alen, last_cmd_at - t0);   /* after the answer: never slows it */
+    } else if ((log_rblocks || log_wblocks) && time_us_64() > last_cmd_at + 500 * 1000)
+        log_transfer_end();
     /* the identity: deployed from the SD card at the first pass, a challenge signed once its AUTH is answered */
     if (ps1_supermemcard_enabled())
         ps1_supermemcard_has_identity();

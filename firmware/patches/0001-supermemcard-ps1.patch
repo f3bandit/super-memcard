@@ -53,7 +53,7 @@ index 2a42b2b..4721ec6 100644
      cid_t cid;
      sd_cid_t out_cid;
 diff --git a/src/gui.c b/src/gui.c
-index d9c8dcb..fecc994 100644
+index d9c8dcb..4e2f6ae 100644
 --- a/src/gui.c
 +++ b/src/gui.c
 @@ -34,6 +34,9 @@
@@ -85,25 +85,69 @@ index d9c8dcb..fecc994 100644
                      switch (key) {
                          case INPUT_KEY_PREV: ps1_mmce_prev_ch(true); break;
                          case INPUT_KEY_NEXT: ps1_mmce_next_ch(true); break;
-@@ -489,6 +497,87 @@ static void evt_ps1_gameid(lv_event_t *event) {
+@@ -404,7 +412,7 @@ void evt_menu_page(lv_event_t *event) {
+             lv_coord_t obj_h = lv_obj_get_height(next);
+             lv_coord_t view_y1 = lv_obj_get_scroll_y(page);
+             lv_coord_t view_y2 = view_y1 + page_h;
+-            lv_coord_t obj_y1 = obj_h * (lv_coord_t)next_idx;
++            lv_coord_t obj_y1 = obj_h * (lv_coord_t)lv_obj_get_index(next);  /* where it is: a divider row may be skipped */
+             lv_coord_t obj_y2 = obj_y1 + obj_h;
+             if (obj_y2 > view_y2)
+                 lv_obj_scroll_to_y(page, obj_y2 - page_h, false);  // scroll down
+@@ -420,7 +428,7 @@ void evt_menu_page(lv_event_t *event) {
+             lv_coord_t obj_h = lv_obj_get_height(prev);
+             lv_coord_t view_y1 = lv_obj_get_scroll_y(page);
+             lv_coord_t view_y2 = view_y1 + page_h;
+-            lv_coord_t obj_y1 = obj_h * (lv_coord_t)prev_idx;
++            lv_coord_t obj_y1 = obj_h * (lv_coord_t)lv_obj_get_index(prev);  /* where it is: a divider row may be skipped */
+             lv_coord_t obj_y2 = obj_y1 + obj_h;
+             if (obj_y1 < view_y1)
+                 lv_obj_scroll_to_y(page, obj_y1, false);  // scroll up
+@@ -489,6 +497,142 @@ static void evt_ps1_gameid(lv_event_t *event) {
      lv_event_stop_bubbling(event);
  }
  
 +#if WITH_SUPERMEMCARD
-+static lv_obj_t *lbl_smc_saves, *lbl_smc_space, *lbl_smc_safe, *lbl_smc_info;
++static lv_obj_t *lbl_smc_saves, *lbl_smc_space, *lbl_smc_safe, *lbl_smc_info, *lbl_smc_clock;
 +
 +static void evt_smc_saves(lv_event_t *event) {
 +    bool on = !ps1_supermemcard_enabled();
 +    ps1_supermemcard_set_enabled(on);
-+    lv_label_set_text(lbl_smc_saves, on ? "Yes" : "No");
++    lv_label_set_text(lbl_smc_saves, on ? " On" : " Off");
 +    lv_event_stop_bubbling(event);
 +}
 +
-+/* Browse: SuperStation > Browse > a system > its games (on its current virtual card), by name */
++static void evt_smc_clock(lv_event_t *event) {
++    bool h24 = !ps1_supermemcard_clock24();
++    ps1_supermemcard_set_clock24(h24);
++    lv_label_set_text(lbl_smc_clock, h24 ? " 24h" : " 12h");
++    lv_event_stop_bubbling(event);
++}
++
++/* Saves on card: the systems with saves > a system's games (on its current virtual card), by name > a game's saves
++ * and when each was made (each step a long press, as the card's menus are) */
 +#define SMC_BROWSE_SYSTEMS 32
 +#define SMC_BROWSE_GAMES 40
-+static lv_obj_t *smc_browse_page, *smc_games_page, *smc_games_header;
++#define SMC_BROWSE_SAVES 16
++static lv_obj_t *smc_browse_page, *smc_games_page, *smc_games_header, *smc_saves_page, *smc_saves_header;
 +static char smc_systems[SMC_BROWSE_SYSTEMS][SMC_ID_LEN + 1];
++static char smc_game_ids[SMC_BROWSE_GAMES][SMC_ID_LEN + 1], smc_game_names[SMC_BROWSE_GAMES][SMC_BROWSE_NAME];
++static const char *smc_browse_sys;
++static int smc_browse_card;
++
++/* a save folder's name for the screen (as smcd's smc_system_title) */
++static const char *smc_system_title(const char *sys) {
++    static const char *const t[][2] = {
++        {"NES", "NES"}, {"SNES", "SNES"}, {"N64", "Nintendo 64"}, {"GAMEBOY", "Game Boy"}, {"GBC", "Game Boy Color"},
++        {"GBA", "Game Boy Advance"}, {"SMS", "Master System"}, {"GameGear", "Game Gear"}, {"Genesis", "Genesis"},
++        {"MegaDrive", "Mega Drive"}, {"MegaCD", "Mega-CD"}, {"Saturn", "Saturn"}, {"TGFX16", "TurboGrafx-16"},
++        {"NEOGEO", "Neo Geo"}, {"PSX", "PlayStation"},
++    };
++    for (size_t i = 0; i < sizeof(t) / sizeof(t[0]); i++)
++        if (!strcmp(t[i][0], sys))
++            return t[i][1];
++    return sys;
++}
 +
 +static void smc_page_clear(lv_obj_t *page) {
 +    while (lv_obj_get_child_cnt(page) > 1) /* child 0 is the header */
@@ -117,18 +161,47 @@ index d9c8dcb..fecc994 100644
 +        lv_group_focus_obj(first);
 +}
 +
++static void evt_smc_browse_game(lv_event_t *event) {
++    static char names[SMC_BROWSE_SAVES][SMC_NAME_LEN + 1], when[SMC_BROWSE_SAVES][24];
++    int g = (int)(intptr_t)lv_event_get_user_data(event);
++    int n = ps1_supermemcard_browse_saves(smc_browse_sys, smc_browse_card, smc_game_ids[g], names, when,
++                                          SMC_BROWSE_SAVES);
++    lv_label_set_text(smc_saves_header, smc_game_names[g]);
++    smc_page_clear(smc_saves_page);
++    /* names only on the card: the game's ID (its CRC) is for the SuperStation's side (game IDs, icons) */
++    for (int i = 0; i < n; i++) {
++        /* when it was made first (it fits the screen), then the file when there are several (the line scrolls) */
++        char text[64];
++        if (n == 1)
++            snprintf(text, sizeof(text), "%s", when[i][0] ? when[i] : names[i]);
++        else
++            snprintf(text, sizeof(text), "%s %s", when[i][0] ? when[i] : "-", names[i]);
++        lv_obj_t *cont = ui_menu_cont_create_nav(smc_saves_page);
++        ui_label_create_grow_scroll(cont, text);
++    }
++    if (!n) {
++        lv_obj_t *cont = ui_menu_cont_create_nav(smc_saves_page);
++        ui_label_create_grow_scroll(cont, "No saves");
++    }
++    smc_page_show(smc_saves_page);
++    lv_event_stop_bubbling(event);
++}
++
 +static void evt_smc_browse_system(lv_event_t *event) {
-+    static char ids[SMC_BROWSE_GAMES][SMC_ID_LEN + 1], names[SMC_BROWSE_GAMES][SMC_BROWSE_NAME];
 +    const char *sys = lv_event_get_user_data(event);
 +    char text[64];
 +    int card = 1;
-+    int n = ps1_supermemcard_browse_games(sys, &card, ids, names, SMC_BROWSE_GAMES);
-+    snprintf(text, sizeof(text), "%s Card %d", sys, card);
++    int n = ps1_supermemcard_browse_games(sys, &card, smc_game_ids, smc_game_names, SMC_BROWSE_GAMES);
++    smc_browse_sys = sys;
++    smc_browse_card = card;
++    snprintf(text, sizeof(text), "%s Card %d", smc_system_title(sys), card);
 +    lv_label_set_text(smc_games_header, text);
 +    smc_page_clear(smc_games_page);
 +    for (int i = 0; i < n; i++) {
 +        lv_obj_t *cont = ui_menu_cont_create_nav(smc_games_page);
-+        ui_label_create_grow_scroll(cont, names[i]);
++        ui_label_create_grow_scroll(cont, smc_game_names[i]);
++        ui_label_create(cont, ">");
++        lv_obj_add_event_cb(cont, evt_smc_browse_game, LV_EVENT_CLICKED, (void *)(intptr_t)i);
 +    }
 +    if (!n) {
 +        lv_obj_t *cont = ui_menu_cont_create_nav(smc_games_page);
@@ -143,7 +216,7 @@ index d9c8dcb..fecc994 100644
 +    smc_page_clear(smc_browse_page);
 +    for (int i = 0; i < n; i++) {
 +        lv_obj_t *cont = ui_menu_cont_create_nav(smc_browse_page);
-+        ui_label_create_grow_scroll(cont, smc_systems[i]);
++        ui_label_create_grow_scroll(cont, smc_system_title(smc_systems[i]));
 +        ui_label_create(cont, ">");
 +        lv_obj_add_event_cb(cont, evt_smc_browse_system, LV_EVENT_CLICKED, smc_systems[i]);
 +    }
@@ -173,7 +246,7 @@ index d9c8dcb..fecc994 100644
  static void evt_ps1_controllercombo(lv_event_t *event) {
      bool current = settings_get_ps1_controllercombo();
      settings_set_ps1_controllercombo(!current);
-@@ -617,7 +706,7 @@ static void create_main_screen(void) {
+@@ -617,7 +761,7 @@ static void create_main_screen(void) {
      main_header = ui_header_create(scr_main, "", true);
      update_main_header();
  
@@ -182,7 +255,7 @@ index d9c8dcb..fecc994 100644
  
      scr_main_idx_lbl = ui_label_create_at(scr_main, 0, 24, "");
      lv_obj_set_align(scr_main_idx_lbl, LV_ALIGN_TOP_RIGHT);
-@@ -658,6 +747,20 @@ static void create_main_screen(void) {
+@@ -658,6 +802,20 @@ static void create_main_screen(void) {
          lv_obj_add_style(src_main_title_lbl, &src_main_label_style, LV_STATE_DEFAULT);
      }
  
@@ -203,58 +276,62 @@ index d9c8dcb..fecc994 100644
      lbl = lv_label_create(scr_main);
      lv_obj_set_align(lbl, LV_ALIGN_BOTTOM_LEFT);
      lv_obj_set_pos(lbl, 0, -2);
-@@ -976,6 +1079,36 @@ static void create_menu_screen(void) {
+@@ -976,6 +1134,16 @@ static void create_menu_screen(void) {
          }
      }
  
 +#if WITH_SUPERMEMCARD
-+    /* SuperStation submenu: Super MemCard (github.com/f3bandit/super-memcard docs/05-design.md §4) */
++    /* Super MemCard's pages (github.com/f3bandit/super-memcard docs/05-design.md §4); its settings are on the main
++     * menu, under the card's own */
 +    smc_browse_page = ui_menu_subpage_create(menu, NULL);
 +    ui_header_create(smc_browse_page, "Saves on card", false);
 +    smc_games_page = ui_menu_subpage_create(menu, NULL);
 +    smc_games_header = ui_header_create(smc_games_page, "", false);
-+    lv_obj_t *smc_page = ui_menu_subpage_create(menu, NULL);
-+    ui_header_create(smc_page, "SuperStation", false);
-+    {
-+        cont = ui_menu_cont_create_nav(smc_page);
-+        ui_label_create_grow_scroll(cont, "Browse");
-+        ui_label_create(cont, ">");
-+        lv_obj_add_event_cb(cont, evt_smc_browse, LV_EVENT_CLICKED, NULL); /* filled when opened */
-+
-+        cont = ui_menu_cont_create_nav(smc_page);
-+        ui_label_create_grow_scroll(cont, "Saves");
-+        lbl_smc_saves = ui_label_create(cont, ps1_supermemcard_enabled() ? " Yes" : " No");
-+        lv_obj_add_event_cb(cont, evt_smc_saves, LV_EVENT_CLICKED, NULL);
-+
-+        cont = ui_menu_cont_create_nav(smc_page);
-+        ui_label_create_grow_scroll(cont, "Free");
-+        lbl_smc_space = ui_label_create(cont, " Count");
-+        lv_obj_add_event_cb(cont, evt_smc_space, LV_EVENT_CLICKED, NULL);
-+
-+        cont = ui_menu_cont_create_nav(smc_page);
-+        ui_label_create_grow_scroll(cont, "Safe to remove");
-+        lbl_smc_safe = ui_label_create(cont, " Yes");
-+    }
-+
++    smc_saves_page = ui_menu_subpage_create(menu, NULL);
++    smc_saves_header = ui_header_create(smc_saves_page, "", false);
 +#endif
      /* Info submenu */
      lv_obj_t *info_page = ui_menu_subpage_create(menu, NULL);
      ui_header_create(info_page, "Info", false);
-@@ -1041,6 +1174,13 @@ static void create_menu_screen(void) {
-         ui_label_create(cont, ">");
-         ui_menu_set_load_page_event(menu, cont, display_page);
- 
-+#if WITH_SUPERMEMCARD
-+        cont = ui_menu_cont_create_nav(main_page);
-+        ui_label_create_grow(cont, "SuperStation");
-+        ui_label_create(cont, ">");
-+        ui_menu_set_load_page_event(menu, cont, smc_page);
-+
-+#endif
-         cont = ui_menu_cont_create_nav(main_page);
+@@ -1045,6 +1213,37 @@ static void create_menu_screen(void) {
          ui_label_create_grow_scroll(cont, "Info");
          ui_label_create(cont, ">");
-@@ -1238,11 +1378,80 @@ void gui_task(void) {
+         ui_menu_set_load_page_event(menu, cont, info_page);
++#if WITH_SUPERMEMCARD
++
++        /* the SuperStation's settings, under the card's own after a divider (one menu, f3bandit Nov 11 2026) */
++        cont = ui_menu_cont_create(main_page);   /* not a menu item: the cursor skips it */
++        lv_obj_t *div = ui_label_create_grow(cont, "--SuperStation--");
++        lv_obj_set_style_text_align(div, LV_TEXT_ALIGN_CENTER, 0);
++
++        cont = ui_menu_cont_create_nav(main_page);
++        ui_label_create_grow_scroll(cont, "Saves on card");
++        ui_label_create(cont, ">");
++        lv_obj_add_event_cb(cont, evt_smc_browse, LV_EVENT_CLICKED, NULL); /* filled when opened */
++
++        cont = ui_menu_cont_create_nav(main_page);
++        ui_label_create_grow_scroll(cont, "Saving");
++        lbl_smc_saves = ui_label_create(cont, ps1_supermemcard_enabled() ? " On" : " Off");
++        lv_obj_add_event_cb(cont, evt_smc_saves, LV_EVENT_CLICKED, NULL);
++
++        cont = ui_menu_cont_create_nav(main_page);
++        ui_label_create_grow_scroll(cont, "Clock");
++        lbl_smc_clock = ui_label_create(cont, ps1_supermemcard_clock24() ? " 24h" : " 12h");
++        lv_obj_add_event_cb(cont, evt_smc_clock, LV_EVENT_CLICKED, NULL);
++
++        cont = ui_menu_cont_create_nav(main_page);
++        ui_label_create_grow_scroll(cont, "Free");
++        lbl_smc_space = ui_label_create(cont, " Count");
++        lv_obj_add_event_cb(cont, evt_smc_space, LV_EVENT_CLICKED, NULL);
++
++        cont = ui_menu_cont_create_nav(main_page);
++        ui_label_create_grow_scroll(cont, "Safe to remove");
++        lbl_smc_safe = ui_label_create(cont, " Yes");
++#endif
+     }
+ 
+     ui_menu_set_page(menu, main_page);
+@@ -1238,11 +1437,81 @@ void gui_task(void) {
              static ps1_cardman_state_t cardman_state = PS1_CM_STATE_NORMAL;
              static char card_idx_s[8];
              static char card_channel_s[8];
@@ -293,7 +370,8 @@ index d9c8dcb..fecc994 100644
 +                    snprintf(card_idx_s, sizeof(card_idx_s), "%d", ps1_supermemcard_mode_card());
 +                    lv_label_set_text(scr_main_idx_lbl, card_idx_s);
 +                    lv_label_set_text(lbl_channel, "");   /* the save's date and time takes the whole row: "11/11/26 11:17PM" */
-+                    const char *saved = ps1_supermemcard_mode_line(SMC_SCREEN_SAVED);
++                    static char saved[24];
++                    ps1_supermemcard_format_time(ps1_supermemcard_mode_line(SMC_SCREEN_SAVED), saved, sizeof(saved));
 +                    lv_label_set_text(scr_main_channel_lbl, saved[0] ? saved : "-");
 +                    if (game[0])
 +                        snprintf(card_name, sizeof(card_name), "%s", game);
