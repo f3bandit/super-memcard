@@ -9,6 +9,8 @@ and when they were saved. It shows on the TV what Console Mode's memory manager 
 smcview [-T <smcd state dir>]... [-f <file>] [-s <file>] [seconds]
 ```
 
+- `smcview.sh [seconds]` runs it over Console Mode: the frontend paused meanwhile, the controllers its own (up and
+  down move, any other button leaves, left alone it moves on every 3 s), the screen put back as it was after;
 - live: reads `SECTION` from smcd (`/tmp/smcd.sock`), so the card must be reachable (the test Main and a menu core
   with the front-port driver);
 - `-s file 0`: only saves the section to a file; `-f file`: shows a saved section, for a Main that can't reach the card

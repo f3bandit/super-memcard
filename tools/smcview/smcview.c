@@ -10,8 +10,10 @@
  * the icons are still read from the state dir.
  *
  * Run in a folder with Outfit-Medium.ttf (the theme's font) and cmrec/ (cmprep.py's button glyphs), as cmscreens. The
- * framebuffer is Console Mode's 1280 x 720. The selection moves down the games every 1.5 s, the list scrolling with
- * it; at the end the screen is left as it is.
+ * framebuffer is Console Mode's 1280 x 720. Up and down (keyboard or controller) move the selection, the list scrolling
+ * with it; left alone it moves down every 3 s. Any other button, or [seconds] (0: none), ends it, and the screen is put
+ * back as it was. The controllers are its own while it runs (grabbed), so nothing reaches Console Mode meanwhile;
+ * smcview.sh pauses Console Mode's frontend around it, so the two don't draw over each other.
  * Drawing code from fpga_offload_module's cmscreens (f3bandit). Copyright (C) 2026 f3bandit. All rights reserved.
  */
 #define STB_TRUETYPE_IMPLEMENTATION
@@ -24,6 +26,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <dirent.h>
+#include <linux/input.h>
+#include <poll.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/resource.h>
@@ -224,8 +229,12 @@ static pic game_icon(const char *sys, const char *id)
 {
 	char path[600];
 	static uint8_t buf[2048];
+	char base[100];
+	snprintf(base, sizeof base, "%s", id);
+	char *tl = strchr(base, '~');           /* a long ID ends ~<CRC of the whole name>; smcd keeps its icon by the rest */
+	if(tl) *tl = 0;
 	for(int i = 0; i < nstate; i++) {   /* the icon the card has: made by smcd from cover art, kept in its state */
-		snprintf(path, sizeof path, "%s/icons/%s/%s.bin", state_dirs[i], sys, id);
+		snprintf(path, sizeof path, "%s/icons/%s/%s.bin", state_dirs[i], sys, base);
 		FILE *f = fopen(path, "rb");
 		if(f) { size_t n = fread(buf, 1, sizeof buf, f); fclose(f); pic p = icon_pic(buf, n); if(p.px) return p; }
 	}
@@ -324,6 +333,42 @@ static void draw_ui(void)
 static void present(void) { for(int y = 0; y < H; y++) memcpy(fbm + (size_t)y * stride, &bb[y * W], W * 4); }
 static int next_game(int from) { for(int i = from + 1; i < nr; i++) if(!R[i].head) return i; for(int i = 0; i < nr; i++) if(!R[i].head) return i; return 0; }
 
+/* ------------------------------------------------------------------ the controllers, its own while it runs */
+static struct pollfd in_fd[32];
+static int n_in;
+static void input_open(void)
+{
+	DIR *d = opendir("/dev/input");
+	struct dirent *e;
+	while(d && (e = readdir(d)) && n_in < 32) {
+		if(strncmp(e->d_name, "event", 5)) continue;
+		char p[300]; snprintf(p, sizeof p, "/dev/input/%s", e->d_name);
+		int fd = open(p, O_RDONLY | O_NONBLOCK);
+		if(fd < 0) continue;
+		ioctl(fd, EVIOCGRAB, 1);
+		in_fd[n_in].fd = fd; in_fd[n_in].events = POLLIN; n_in++;
+	}
+	if(d) closedir(d);
+}
+static void input_close(void) { for(int i = 0; i < n_in; i++) { ioctl(in_fd[i].fd, EVIOCGRAB, 0); close(in_fd[i].fd); } n_in = 0; }
+/* waits up to ms for a press: -1 up, 1 down, 2 another button (leave), 0 none */
+static int input_wait(int ms)
+{
+	if(!n_in) { usleep(ms * 1000); return 0; }
+	if(poll(in_fd, n_in, ms) <= 0) return 0;
+	struct input_event ev;
+	for(int i = 0; i < n_in; i++)
+		while(read(in_fd[i].fd, &ev, sizeof ev) == sizeof ev) {
+			if(ev.type == EV_KEY && ev.value == 1) {
+				if(ev.code == KEY_UP || ev.code == BTN_DPAD_UP) return -1;
+				if(ev.code == KEY_DOWN || ev.code == BTN_DPAD_DOWN) return 1;
+				return 2;
+			}
+			if(ev.type == EV_ABS && (ev.code == ABS_HAT0Y) && ev.value) return ev.value < 0 ? -1 : 1;
+		}
+	return 0;
+}
+
 int main(int argc, char **argv)
 {
 	int a = 1;
@@ -352,19 +397,30 @@ int main(int argc, char **argv)
 	btn_a = load("cmrec/btn_a.raw"); btn_b = load("cmrec/btn_b.raw");
 	gradient_init();
 	ribbon_texture(rtex, 512, 1024);
+	static uint32_t saved[W * H];          /* the screen as it was, put back at the end */
+	for(int y = 0; y < H; y++) memcpy(&saved[y * W], fbm + (size_t)y * stride, W * 4);
+	input_open();
 	sel = next_game(-1); top = 0;
 	double t0 = now(), tsel = t0;
 	for(;;) {
-		draw_bg((float)(now() - t0) * 0);   /* still: the ribbons where Console Mode has them at rest */
+		draw_bg(0);                         /* still: the ribbons where Console Mode has them at rest */
 		draw_ui(); present();
-		if(now() - t0 >= secs) break;
-		while(now() - tsel < 1.5) usleep(50000);
+		int k = 0;
+		while(!k) {
+			if(secs > 0 && now() - t0 >= secs) { k = 2; break; }
+			k = input_wait(100);
+			if(!k && now() - tsel >= 3) k = 3;   /* left alone: the next one */
+		}
+		if(k == 2) break;
 		tsel = now();
-		sel = next_game(sel);
-		if(sel < top + 1) top = sel - 1 < 0 ? 0 : sel - 1;
-		if(sel >= top + VIS) top = sel - VIS + 1;
+		if(k < 0) { int p = sel; for(int i = sel - 1; i >= 0; i--) if(!R[i].head) { p = i; break; } sel = p; }
+		else sel = next_game(sel);
 		if(sel == next_game(-1)) top = 0;
+		if(sel - 1 < top) top = sel - 1 < 0 ? 0 : sel - 1;   /* its system's heading in view too */
+		if(sel >= top + VIS) top = sel - VIS + 1;
 	}
+	input_close();
+	for(int y = 0; y < H; y++) memcpy(fbm + (size_t)y * stride, &saved[y * W], W * 4);
 	printf("smcview: %d rows\n", nr);
 	return 0;
 }
