@@ -246,8 +246,11 @@ static void draw_title(const unsigned char *p)
 }
 
 // write a null-terminated string <s> to the OSD buffer starting at line <n>
+// the OSD's rows as text, for the test bench (phosphor-main.sock "osdtext"): what the OSD shows, read from the SS1
+char osd_text[32][40];
 void OsdWriteOffset(unsigned char n, const char *s, unsigned char invert, unsigned char stipple, char offset, char leftchar, char usebg, int maxinv, int mininv)
 {
+	if (n < 32) snprintf(osd_text[n], sizeof(osd_text[n]), "%c%s", invert ? '>' : ' ', s ? s : "");
 	//printf("OsdWriteOffset(%d)\n", n);
 	unsigned short i;
 	unsigned char b;

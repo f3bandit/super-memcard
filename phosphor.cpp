@@ -869,6 +869,20 @@ static void command(int i, char *line)
 	if (!strcmp(line, "hello"))
 		send_line(i, "{\"ok\":true,\"api\":7,\"name\":\"phosphor-main\",\"pads\":true,\"scripts\":true,\"mapping\":true,\"disc\":true,\"ingame\":true,\"ra\":true,\"crt\":true}");   // api 3: scripts, 4: mapping, 5: disc, ingame, 6: ra, 7: crt
 	else if (!strncmp(line, "script ", 7)) script_start(i, line + 7);
+	else if (!strcmp(line, "osdtext"))   // the test bench: the OSD's rows, as text
+	{
+		extern char osd_text[32][40];
+		char t[2400];
+		int k = snprintf(t, sizeof(t), "{\"ok\":true,\"osd\":%s,\"rows\":\"", user_io_osd_is_visible() ? "true" : "false");
+		for (int r = 0; r < 16 && k < (int)sizeof(t) - 50; r++)
+			for (const char *c = osd_text[r]; ; c++)
+			{
+				if (!*c) { k += snprintf(t + k, sizeof(t) - k, "|"); break; }
+				if (*c >= 32 && *c < 127 && *c != '"' && *c != '\\') t[k++] = *c;
+			}
+		snprintf(t + k, sizeof(t) - k, "\"}");
+		send_line(i, t);
+	}
 	else if (!strcmp(line, "status"))
 	{
 		char st[2600];
