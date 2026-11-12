@@ -2,9 +2,9 @@
 # Super MemCard on an SS1: one game a system, Play on card 2 (no save), then Play on card 1 (its save back, byte for
 # byte), the core checked each time. Needs the test Main in the menu, vcardd (the simulated card, with an identity) and
 # smcd on the real saves folder (ss1test.sh start, then smcd -S /media/fat/saves). Backs the saves up first.
-#   sh sweep.sh [<system>...]   all, or only these (NES MegaCD ...); log: /media/fat/phosphor/tmp-test/sweep.log
+#   sh sweep.sh [<system>...]   all, or only these (NES MegaCD ...); log: /media/fat/supermemcard_test/sweep.log
 # Copyright (C) 2026 f3bandit. All rights reserved.
-T=/media/fat/phosphor/tmp-test
+T=/media/fat/supermemcard_test
 DL=$T/dl
 S=/media/fat/saves
 BK=$T/saves_backup_sweep

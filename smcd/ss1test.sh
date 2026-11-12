@@ -1,6 +1,6 @@
 #!/bin/sh
 # Copyright (C) 2026 f3bandit. All rights reserved.
-# Super MemCard on the SS1 (copy to /media/fat/phosphor/tmp-test with smcd, vcardd and a test-bench Main with the shim): the test-bench Main with the shim (main/smc_shim.cpp) and smcd.
+# Super MemCard on the SS1 (copy to /media/fat/supermemcard_test with smcd, vcardd and a test-bench Main with the shim): the test-bench Main with the shim (main/smc_shim.cpp) and smcd.
 #   sh ss1test.sh start   stop Console Mode's Main, start vcardd, smcd (simulated card) and the test Main
 #   sh ss1test.sh b       B: smcd with the simulated card: READ, then a NES game launched by Main (LAUNCH), then menu (MENU)
 #   sh ss1test.sh c       C: the OSD Saves page's side: a game launched by MGL, the shim keeps it, SAVES, USE a new
@@ -8,7 +8,7 @@
 #   sh ss1test.sh a       A: the shim's frames to the real front port (NES core with the card driver)
 #   sh ss1test.sh stop    everything off, Console Mode's Main back as it ran
 # Copies of the saves in /tmp: the real ones aren't touched.
-T=/media/fat/phosphor/tmp-test
+T=/media/fat/supermemcard_test
 ask() { python3 - "$1" <<'EOF'
 import socket, sys
 s = socket.socket(socket.AF_UNIX); s.connect("/tmp/smcd.sock"); s.settimeout(120)

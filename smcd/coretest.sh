@@ -3,9 +3,9 @@
 # in front port 1 read through that core's driver (sector 0, as a PS1 does it). Needs a PS1 card in port 1.
 #   sh coretest.sh <folder of .rbf>      then the SS1 restarts (Console Mode back as it boots)
 # Copyright (C) 2026 f3bandit. All rights reserved.
-T=/media/fat/phosphor/tmp-test
+T=/media/fat/supermemcard_test
 dir=${1:?usage: coretest.sh <folder of .rbf>}
-out=/media/fat/phosphor/tmp-test/smc_cores.txt   # on the SD card: the restart at the end clears /tmp
+out=/media/fat/supermemcard_test/smc_cores.txt   # on the SD card: the restart at the end clears /tmp
 : > $out
 
 grep -v '^main=ConsoleMode/MiSTer_ConsoleMode' /media/fat/MiSTer.ini > /tmp/MiSTer_smctest.ini

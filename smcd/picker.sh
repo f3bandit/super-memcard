@@ -1,7 +1,7 @@
 #!/bin/sh
 # The memory manager's card picker on an SS1 (smcd on the real saves folder, the simulated card): SNES to a blank card,
 # a game started there (no save), then back to card 1 (every SNES save back, byte for byte). Log: picker.log
-T=/media/fat/phosphor/tmp-test; S=/media/fat/saves; LOG=$T/picker.log; : > $LOG
+T=/media/fat/supermemcard_test; S=/media/fat/saves; LOG=$T/picker.log; : > $LOG
 say() { echo "$*" | tee -a $LOG; }
 two() { python3 - "$1" "$2" <<'PY'
 import socket, sys
