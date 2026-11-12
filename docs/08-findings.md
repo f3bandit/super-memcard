@@ -412,6 +412,27 @@ own (it's in ColecoVision_MiSTer), not included.
 - PRs opened by Actions' own token don't start workflows, so the upstream watcher starts the build itself
   (`gh workflow run`) on the new branch.
 
+### The first real Super MemCard card: a BitFunX PSxMemCard Gen2 (Nov 11 2026)
+
+On the SS1, through the test Main's shim with the NES core's front-port driver (`supermemcard_test/realcard.sh`), the
+BitFunX Gen2 with this firmware in front port 2 and the original Sony card (with the user's saves) in port 1:
+
+- The Sony card was read whole first (PS1 sector reads only) and was identical to its Nov 7 backup; it refused
+  every Super MemCard frame (2 bytes, as before) and smcd said `nocard` for its port.
+- The BitFunX answered Hello (protocol 2, features 1F) and CERT: chip `e46560f6cf512326`, no identity (4F).
+  `smcd -G` used it. `smccert issue` (the test key) made its `smc_key.bin`; on the card's SD card it was taken at
+  the next start (CERT 47, the certificate equal to the file's signature).
+- **A fast bus corrupts bytes on this card without losing any.** smcd then said it "isn't signed by Retro Remake":
+  at speed 1 (500 kHz) one CERT in three came back whole with one wrong byte; speeds 2 and 3 got no answer at all;
+  speed 0 (PS1 speed) was always right. smcd steps down only when a frame isn't answered whole, so it stayed at
+  speed 1 and checked a damaged certificate. With every frame at speed 0 the same card was genuine (no `-G`).
+  Fixed: the identity's frames (CERT, AUTH, AUTHSIG: no checksum) always go at PS1 speed, like Hello, in smcd and in
+  Main; and a save frame that fails its checksum (a read's, or the card's 4E for a write) steps the speed down too
+  (`smc_bus.bad_data`), as a short frame does. (The Sony card had never shown wrong data at speed: it isn't a
+  software card.)
+- The first frame after the ports are switched on still gets no answer (as before): a plain read first.
+- A frame needs smcd's ACK wait (100 ms): with 2 ms, Super MemCard frames to this card weren't answered.
+
 ### Open
 
 - (Closed: the flaky PC test was the first write after a card switch, see above.)

@@ -178,7 +178,10 @@ static int front_raw(struct front *f, const uint8_t *out, uint8_t *in, int len, 
 
 static int front_frame(void *ctx, const uint8_t *out, uint8_t *in, int len) {
     struct front *f = ctx;
-    int speed = (len > 1 && out[1] == 0x60) ? 0 : frame_speed;   /* Hello as a PS1 does it */
+    /* Hello as a PS1 does it; the identity's frames (CERT, AUTH, AUTHSIG) too: they have no checksum, and a bus
+     * too fast for a card can corrupt a byte without losing any (seen on the SS1 with a BitFunX Gen2 at speed 1:
+     * one CERT in three wrong, so a genuine card was refused) */
+    int speed = (len > 1 && (out[1] == 0x60 || (out[1] >= 0x6B && out[1] <= 0x6D))) ? 0 : frame_speed;
     int n = front_raw(f, out, in, len, speed);
     while (speed && n >= 0 && n < len) {
         frame_speed = --speed;
@@ -187,6 +190,16 @@ static int front_frame(void *ctx, const uint8_t *out, uint8_t *in, int len) {
         n = front_raw(f, out, in, len, speed);
     }
     return n;
+}
+
+/* a whole frame whose data failed its checksum: one speed down from now on (as for a frame not answered whole) */
+static void front_bad_data(void *ctx) {
+    (void)ctx;
+    if (frame_speed > 0) {
+        frame_speed--;
+        lg("a fast frame's data failed its checksum: speed %d from now on", frame_speed);
+        usleep(60000);
+    }
 }
 
 struct conn {
@@ -329,6 +342,7 @@ static int card_open_bus(struct conn *c) {
         return 0;   /* Main isn't passing frames (no shim, or not running) */
     hold(c, 1);
     c->bus.frame = front_frame;
+    c->bus.bad_data = front_bad_data;
     c->bus.ctx = &c->front;
     for (int p = want_port ? want_port : 1; p <= (want_port ? want_port : 2); p++) {
         c->front.port = p;

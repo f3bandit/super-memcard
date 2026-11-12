@@ -21,6 +21,9 @@ struct smc_bus {
      * each into in[k], stops after the first byte that isn't ACKed (the last one never is). Returns
      * the bytes exchanged (0: nothing answered), <0 on a transport error. */
     int (*frame)(void *ctx, const uint8_t *out, uint8_t *in, int len);
+    /* Optional: a frame came back whole but its data failed its checksum (a read's, or the card's 4E for a
+     * write). A bus with speeds steps down: a bus too fast for a card can corrupt bytes without losing any. */
+    void (*bad_data)(void *ctx);
 };
 #define SMC_ACK_TIMEOUT_MS 100
 

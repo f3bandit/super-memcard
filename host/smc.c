@@ -180,6 +180,8 @@ int smc_read_file(const struct smc_bus *b, int idx, uint32_t size, uint8_t *buf)
                 break;
             if (rc == SMC_OK && a[129] != GOOD)
                 return SMC_E_BAD;
+            if (rc == SMC_OK && b->bad_data)
+                b->bad_data(b->ctx);
             if (++tries == RETRIES)
                 return rc ? rc : SMC_E_CHECKSUM;
         }
@@ -228,6 +230,8 @@ int smc_write_file_at(const struct smc_bus *b, const char *name, const uint8_t *
             if (rc == SMC_OK && a[0] != BAD_CHECKSUM)
                 return SMC_E_BAD;
             /* 4E or no reply: send it again (never read back to check, 08 finding 3) */
+            if (rc == SMC_OK && b->bad_data)
+                b->bad_data(b->ctx);
             if (++tries == RETRIES)
                 return rc ? rc : SMC_E_CHECKSUM;
         }

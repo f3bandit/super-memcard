@@ -54,7 +54,9 @@ static void smc_log(const char *line)
 // Super MemCard frames faster than a PS1 clocks the card (each byte is still ACK-paced, so the card sets the pace);
 // Hello always at PS1 speed: it's what a plain card hears. A fast frame that isn't answered whole is sent again one
 // speed lower, which then stays for the rest of the session (on the SS1 a Sony card read cleanly at 500 kHz and lost
-// ~3 frames in 100 at 1 MHz, never with wrong data: super-memcard 08). SMC_SPEED (0..3) is the speed tried first.
+// ~3 frames in 100 at 1 MHz, never with wrong data: super-memcard 08; a BitFunX Gen2 at 500 kHz did corrupt bytes in
+// whole frames, so the identity's frames, which have no checksum, go at PS1 speed too, and a save frame that fails its
+// checksum steps down as well). SMC_SPEED (0..3) is the speed tried first.
 #ifndef SMC_SPEED
 #define SMC_SPEED 2
 #endif
@@ -64,7 +66,7 @@ static int frame_speed = SMC_SPEED;
 static int front_frame(void *ctx, const uint8_t *out, uint8_t *in, int len)
 {
 	int port = *(int *)ctx;
-	int speed = (len > 1 && out[1] == 0x60) ? 0 : frame_speed;
+	int speed = (len > 1 && (out[1] == 0x60 || (out[1] >= 0x6B && out[1] <= 0x6D))) ? 0 : frame_speed;   // Hello, CERT/AUTH/AUTHSIG
 	int n = smc_frontport_raw(port, out, in, len, SMC_ACK_TIMEOUT_MS, speed);
 	while (speed && n >= 0 && n < len)
 	{
@@ -77,6 +79,18 @@ static int front_frame(void *ctx, const uint8_t *out, uint8_t *in, int len)
 		n = smc_frontport_raw(port, out, in, len, SMC_ACK_TIMEOUT_MS, speed);
 	}
 	return n;
+}
+
+// a whole frame whose data failed its checksum: one speed down from now on
+static void front_bad_data(void *)
+{
+	if (frame_speed <= 0) return;
+	frame_speed--;
+	static const char *const names[] = { "250 kHz", "500 kHz", "1 MHz" };
+	char l[80];
+	snprintf(l, sizeof(l), "a fast frame's data failed its checksum: %s from now on", names[frame_speed]);
+	smc_log(l);
+	usleep(60000);
 }
 
 // The card: vcardd when it runs, else the first front port whose card answers Hello. Leaves the ports held
@@ -96,6 +110,7 @@ static int smc_open(struct smc_conn *c)
 	if (smc_frontport_raw(1, NULL, NULL, 0, 0, 0) < 0) return 0;    // no raw frames in this menu core
 	smc_frontport_hold(1);
 	c->bus.frame = front_frame;
+	c->bus.bad_data = front_bad_data;
 	for (int p = 1; p <= 2 && !port; p++)
 	{
 		int q = p;
