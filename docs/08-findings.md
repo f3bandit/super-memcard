@@ -511,6 +511,12 @@ touched), with the game lists installed (cm_modules' gamedb module, 17 lists):
   at the first space, so no game with a space in its name was found. The sync puts a ready icon on the card itself,
   so the icons did arrive; the list is for icons made after their game's sync.
 - With no game lists installed the downloads wait (`queue.later`) until they are.
+- **The last 4 got covers too** after smcd looked harder: the game lists are searched by close name as well (the same
+  title, the most brackets alike, the region counting most: "Metroid - Zero Mission (USA)" is "(USA, Australia)" in
+  the list), and each name is tried at libretro as listed, as the save names it, without its revision, with only its
+  region, and for CD systems as Disc 1; box art first, then title screens. All 16 seeded saves have cover icons on the
+  card. (A set's ID is cut at 64 characters; the save's whole name now goes with the download so it can be found.)
+- `tools/smcview` shows the section with the card's icons on the TV, as Console Mode's Memory Cards screen.
 - "The identity check didn't finish (no answer)" now and then between commands on this card: the next command worked.
 
 ### Open

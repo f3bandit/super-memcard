@@ -1048,7 +1048,9 @@ static size_t db_icon(const char *sys, int card, const char *id, const char *bas
     const char *name = C->gamedb_dir ? smc_gamedb_name(C->gamedb_dir, sys, crc, crc ? NULL : base) : NULL;
     struct rom *r = rom_for(sys, game);
     char line[2600];
-    snprintf(line, sizeof(line), "%s\t%d\t%s\t%s\t%s\t%s\n", sys, card, id, base, name ? name : "", r ? r->path : "");
+    /* the save's own full name last: a set's ID is cut at 64 characters, the name isn't */
+    snprintf(line, sizeof(line), "%s\t%d\t%s\t%s\t%s\t%s\t%s\n", sys, card, id, base, name ? name : "", r ? r->path : "",
+             game ? game : "");
     icons_line("queue.txt", line);
     return 0;
 }
@@ -1066,6 +1068,32 @@ static void url_name(char *out, size_t n, const char *name) {
             o += (size_t)snprintf(out + o, n - o, "%%%02X", c);
     }
     out[o] = 0;
+}
+
+/* "Phantasy Star (USA, Europe) (Rev 1)" -> "Phantasy Star (USA, Europe)": a revision's cover is the game's */
+static void name_variant_norev(const char *in, char *out, size_t n) {
+    snprintf(out, n, "%s", in);
+    char *r = strstr(out, " (Rev ");
+    if (r) {
+        char *e = strchr(r + 1, ')');
+        if (e)
+            memmove(r, e + 1, strlen(e + 1) + 1);
+    }
+}
+
+/* "Link's Awakening DX (USA, Europe) (Rev 2) (SGB Enhanced)" -> "Link's Awakening DX (USA, Europe)": the name and its
+ * first bracket (the region) only */
+static void name_variant_region(const char *in, char *out, size_t n) {
+    snprintf(out, n, "%s", in);
+    char *p = strchr(out, '(');
+    char *e = p ? strchr(p, ')') : NULL;
+    if (e)
+        e[1] = 0;
+}
+
+/* systems whose games are discs (libretro's covers are named per disc) */
+static bool smc_system_is_cd(const char *sys) {
+    return !strcmp(sys, "Saturn") || !strcmp(sys, "MegaCD") || !strcmp(sys, "PSX");
 }
 
 /* one picture, downloaded and made into an icon */
@@ -1108,9 +1136,9 @@ int smc_fetch_icons(const struct smc_sync_cfg *cfg, int (*fetch)(const char *url
     int nd = 0;
     while (f && fgets(line, sizeof(line), f)) {
         line[strcspn(line, "\r\n")] = 0;
-        char *v[6];
+        char *v[7] = {0};
         int k = 0;
-        for (char *p = line; k < 6; k++) {
+        for (char *p = line; k < 7; k++) {
             v[k] = p;
             char *t = strchr(p, '\t');
             if (!t) {
@@ -1123,6 +1151,7 @@ int smc_fetch_icons(const struct smc_sync_cfg *cfg, int (*fetch)(const char *url
         if (k < 6)
             continue;
         const char *sys = v[0], *card = v[1], *id = v[2], *base = v[3], *name = v[4], *rom = v[5];
+        const char *full = k > 6 && v[6] ? v[6] : "";   /* the save's own name (older queues: none) */
         char key[100], bin[1300], none[1300], tmp[1300], ready[1200];
         snprintf(key, sizeof(key), "%s/%s", sys, base);
         bool seen = false;
@@ -1160,6 +1189,8 @@ int smc_fetch_icons(const struct smc_sync_cfg *cfg, int (*fetch)(const char *url
             else if (dash && strlen(dash + 1) == 8 && strspn(dash + 1, "0123456789ABCDEF") == 8)
                 crc = dash + 1;
             const char *nm = smc_gamedb_name(C->gamedb_dir, sys, crc, crc ? NULL : base);
+            if (!nm && *full)
+                nm = smc_gamedb_name(C->gamedb_dir, sys, NULL, full);   /* the ID cut short: the whole name */
             if (nm)
                 snprintf(fresh_name, sizeof(fresh_name), "%s", nm);
             const char *lists[3];
@@ -1173,15 +1204,47 @@ int smc_fetch_icons(const struct smc_sync_cfg *cfg, int (*fetch)(const char *url
             if (*fresh_name)
                 name = fresh_name;
         }
-        if (!l && *name) {
+        /* the names to look for: the official one, else the save's own (as No-Intro/Redump name ROMs, so their
+         * saves), each also without a revision and with only its region, and a CD game as its first disc; covers
+         * first, then title screens */
+        if (!l) {
+            char cand[8][400];
+            int nc = 0;
+            const char *roots[3] = {name, full, base};
+            for (int ri = 0; ri < 3; ri++) {
+                if (!roots[ri] || !*roots[ri] || strchr(roots[ri], '~'))
+                    continue;
+                char v1[400], v2[400];
+                snprintf(v1, sizeof(v1), "%s", roots[ri]);
+                name_variant_norev(v1, v2, sizeof(v2));
+                const char *vs[4] = {v1, v2, NULL, NULL};
+                char v3[400], v4[400];
+                name_variant_region(v1, v3, sizeof(v3));
+                vs[2] = v3;
+                snprintf(v4, sizeof(v4), "%s (Disc 1)", v1);
+                vs[3] = smc_system_is_cd(sys) && !strstr(v1, "(Disc") ? v4 : NULL;
+                for (int vi = 0; vi < 4 && nc < 8; vi++) {
+                    if (!vs[vi] || !*vs[vi])
+                        continue;
+                    bool dup = false;
+                    for (int ci = 0; ci < nc; ci++)
+                        dup |= !strcmp(cand[ci], vs[vi]);
+                    if (!dup)
+                        snprintf(cand[nc++], sizeof(cand[0]), "%s", vs[vi]);
+                }
+            }
             const char *lists[3];
             int disc, nl = smc_gamedb_lists(sys, lists, &disc);
-            url_name(en, sizeof(en), name);
-            for (int li = 0; li < nl && !l; li++) {
-                url_name(el, sizeof(el), lists[li]);
-                snprintf(url, sizeof(url), "%s/%s/Named_Boxarts/%s.png", SMC_LIBRETRO_THUMBS, el, en);
-                l = fetch_icon(fetch, url, tmp, icon, sizeof(icon));
-            }
+            static const char *const kinds[] = {"Named_Boxarts", "Named_Titles"};
+            for (int ki = 0; ki < 2 && !l; ki++)
+                for (int ci = 0; ci < nc && !l; ci++) {
+                    url_name(en, sizeof(en), cand[ci]);
+                    for (int li = 0; li < nl && !l; li++) {
+                        url_name(el, sizeof(el), lists[li]);
+                        snprintf(url, sizeof(url), "%s/%s/%s/%s.png", SMC_LIBRETRO_THUMBS, el, kinds[ki], en);
+                        l = fetch_icon(fetch, url, tmp, icon, sizeof(icon));
+                    }
+                }
         }
         /* 3. Console Mode's art beside the game: media/<game>.png in its folder or one above */
         if (!l && *rom) {

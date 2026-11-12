@@ -240,6 +240,47 @@ const char *smc_gamedb_name(const char *dir, const char *sys, const char *crc, c
 		for (int i = 0; i < nents; i++)
 			if (!strcmp(ents[i].name, serial))
 				return ents[i].name;
+		/* a name close to the list's (a renamed ROM, a tag left off): the same title, the most of its brackets the
+		 * same, its region first ("Phantasy Star (USA, Europe) (Rev 1)" -> "Phantasy Star (USA, Europe) (Rev 1)"
+		 * as listed, "Metroid - Zero Mission (USA)" -> "Metroid - Zero Mission (USA, Australia)") */
+		const char *paren = strstr(serial, " (");
+		size_t tl = paren ? (size_t)(paren - serial) : strlen(serial);
+		int best = -1, best_score = -1;
+		for (int i = 0; i < nents; i++) {
+			const char *nm = ents[i].name;
+			if (strncmp(nm, serial, tl) || (nm[tl] && strncmp(nm + tl, " (", 2)))
+				continue;
+			int score = 0;
+			for (const char *b = strchr(serial + tl, '('); b; b = strchr(b + 1, '(')) {
+				const char *e = strchr(b, ')');
+				if (!e)
+					break;
+				char tag[96];
+				snprintf(tag, sizeof(tag), "%.*s", (int)(e - b + 1), b);
+				if (strstr(nm + tl, tag))
+					score += b == strchr(serial + tl, '(') ? 4 : 1;   /* the region counts most */
+				else if (b == strchr(serial + tl, '(')) {   /* a region inside a wider one: (USA) in (USA, Australia) */
+					char reg[96];
+					snprintf(reg, sizeof(reg), "%.*s", (int)(e - b - 1), b + 1);
+					const char *nb = strchr(nm + tl, '(');
+					const char *ne = nb ? strchr(nb, ')') : NULL;
+					if (nb && ne && reg[0]) {
+						char nreg[128];
+						snprintf(nreg, sizeof(nreg), "%.*s", (int)(ne - nb - 1), nb + 1);
+						if (strstr(nreg, reg))
+							score += 3;
+					}
+				}
+			}
+			if (strstr(nm, "(Virtual Console)") || strstr(nm, "(Beta") || strstr(nm, "(Proto") || strstr(nm, "(Demo"))
+				score -= 2;   /* the cartridge's own first */
+			if (score > best_score) {
+				best = i;
+				best_score = score;
+			}
+		}
+		if (best >= 0 && best_score >= 3)
+			return ents[best].name;
 	}
 	return NULL;
 }
