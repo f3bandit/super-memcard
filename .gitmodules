@@ -43,11 +43,6 @@
 	url = https://github.com/MiSTer-devel/MegaCD_MiSTer
 	branch = master
 	shallow = true
-[submodule "cores/S32X"]
-	path = cores/S32X
-	url = https://github.com/MiSTer-devel/S32X_MiSTer
-	branch = main
-	shallow = true
 [submodule "cores/Saturn"]
 	path = cores/Saturn
 	url = https://github.com/MiSTer-devel/Saturn_MiSTer
@@ -56,11 +51,6 @@
 [submodule "cores/TurboGrafx16"]
 	path = cores/TurboGrafx16
 	url = https://github.com/MiSTer-devel/TurboGrafx16_MiSTer
-	branch = master
-	shallow = true
-[submodule "cores/Jaguar"]
-	path = cores/Jaguar
-	url = https://github.com/MiSTer-devel/Jaguar_MiSTer
 	branch = master
 	shallow = true
 [submodule "cores/NeoGeo"]

@@ -561,6 +561,8 @@ static void t_sync_core_system_names(void) {
     CHECK(strcmp(smc_core_system("Gameboy.rbf"), "GAMEBOY") == 0);
     CHECK(strcmp(smc_core_system("_Console/NeoGeo_20250301.rbf"), "NEOGEO") == 0);
     CHECK(strcmp(smc_core_system("_Console/PSX_20250101.rbf"), "PSX") == 0); /* every console core */
+    CHECK(strcmp(smc_core_system("/media/fat/_SuperMemCard/SNES_SMC_20261112.rbf"), "SNES") == 0); /* our builds */
+    CHECK(strcmp(smc_core_system("_SuperMemCard/MegaDrive_SMC_20261112.rbf"), "MegaDrive") == 0);
     CHECK(smc_core_system("_Console/NESticle_1.rbf") == NULL);
     CHECK(smc_core_system("menu.rbf") == NULL);
     CHECK(smc_core_system("_Computer/ao486_20250101.rbf") == NULL);

@@ -70,6 +70,14 @@ SS1 (Nov 10 2026).
 **On the SuperStation:** `smcd` started at boot (it needs nothing else; with no card it waits), the cores with the card
 driver (public builds: f3bandit/super-memcard-cores), the gamedb module (cm_modules) for game names and icons.
 
+**Our cores' names and folder.** Our builds are named `<core>_SMC_<date>.rbf` (`SNES_SMC_20261112.rbf`) and go in
+`/media/fat/_SuperMemCard/`, never `_Console/`: an MGL names its core by prefix (`<rbf>_Console/SNES</rbf>` takes the
+newest `_Console/SNES*.rbf`), so in `_Console/` ours would stand in for the standard core in every MGL. Console Mode
+points a system at ours by name (`<rbf>_SuperMemCard/SNES_SMC</rbf>`) when the user has a Super MemCard card. The OSD
+title and the save folder stay the standard core's (`SNES`, `saves/SNES/`), so a game's saves are the same whichever
+core runs it; smcd reads the system from the name before the first `_`. The OSD's last row credits the driver
+("Super MemCard by f3bandit"), below the core's own lines.
+
 **In the frontend's memory manager (the commands below, on `/tmp/smcd.sock`):**
 
 | button / screen | command |

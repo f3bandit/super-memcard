@@ -47,7 +47,7 @@ version in use. At the pinned commits the 15 cores have 7:
 
 | sys/ | cores |
 |---|---|
-| A | GBA, Gameboy, Jaguar, MegaCD, MegaDrive, NeoGeo, S32X, TurboGrafx16 |
+| A | GBA, Gameboy, MegaCD, MegaDrive, NeoGeo, TurboGrafx16 |
 | B | NES, SMS |
 | C | SNES |
 | D | N64 |
