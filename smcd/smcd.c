@@ -13,11 +13,14 @@
  *   ROM <rbf>\t<file>\t<0|1> (Main) a game file picked in the running core's OSD (1: the core has the card driver):
  *                           DONE same (that game runs already) | DONE bounce (no driver: Main goes through the menu
  *                           core and starts the core again with the game, LAUNCH) | DONE saves | DONE (as LAUNCH)
+ *   PROBE                   what each front port holds: port <n> smc <card id> <free kb> | port <n> ps1 | port <n> empty
  *   HELLO                   the card: id, version, free space
  *   READ                    the memory manager's Read card: everything both ways
  *   SYSTEMS                 the systems with saves on the card
  *   LIST <sys> [<card>]     a system's games: name \t id \t time \t files \t bytes \t icon \t save name \t folder
- *   SECTION [PSX]           every other system's saves at once, for the memory manager's screen (section() below)
+ *                           (files 0: a game folder with no save yet); partial \t <n> last when n reads kept failing
+ *   SECTION [PSX]           every other system's saves at once, for the memory manager's screen (section() below);
+ *                           each game's icon on the card is kept in <state>/card_icons/<sys>/<id>.bin to show it
  *   SAVES                   (Main's OSD) the running game's saves: save \t card \t files \t time \t playing \t label, one per
  *                           virtual card that has it, then game \t sys \t name and new \t <the first free card>
  *   USE <card>              (Main's OSD) play the running game with its save on that card: this SuperStation's saves go
@@ -33,6 +36,13 @@
  *                           USE, then Main loads the game (the MGL of its last launch here, else one made from its
  *                           ROM). play ok <card> | play notfound (no ROM, or a system started only from an MGL) |
  *                           play psx | play failed
+ *   IMAGE <sys>\t<card>\t<folder>  a game's save file as it is on the card (PSX: its 128 KB card image), to open it
+ *                           save by save: image <bytes>, then its bytes in hex, 128 a line | image failed
+ *   EXPORT <sys>\t<card>\t<id|*>\t<dir>   a game's files on that card (or every game's) into <dir>/<id>/: export ok
+ *                           <games> <files> | export failed
+ *   IMPORT <sys>\t<card>\t<id|*>\t<dir>   <dir>/<id>/ (or every game folder there) onto that card: import ok
+ *                           <games> <files> | import failed
+ *   DELGAME <sys>\t<card>\t<id>   that game's saves off that card only: delgame ok <files> | delgame failed
  *   DELETE <sys>\t<save>    delete a save (others delete theirs at their next sync)
  *   CLEAR <sys>\t<card>     take every save off that virtual card, the card only: no SuperStation loses one (one that
  *                           still has a save puts it back when it next syncs that card). clear ok <n> | clear busy |
@@ -156,6 +166,7 @@ struct front {
     int fd, port;
 };
 static int frame_speed = SMC_SPEED;
+static int frame_errs;   /* frames a card never answered whole, logged (the first 200) */
 
 static int front_raw(struct front *f, const uint8_t *out, uint8_t *in, int len, int speed) {
     char l[600];
@@ -195,6 +206,25 @@ static int front_frame(void *ctx, const uint8_t *out, uint8_t *in, int len) {
         usleep(60000);
         n = front_raw(f, out, in, len, speed);
     }
+    /* not answered at all (not even its first byte: the card never took it): once more after a moment. A card misses
+     * a frame that comes just after another now and then (08; on the SS1 a BitFunX card in port 1 misses the frame
+     * after Hello every time, so the identity check never finished) */
+    if (n == 0) {
+        usleep(60000);
+        n = front_raw(f, out, in, len, speed);
+    }
+    /* still nothing, or cut short at the slowest speed: once more after a longer moment (a pad poll or a card busy
+     * writing its flash can take that long); then log it, so a card that "stops reading" says where (frame_errs) */
+    if (n >= 0 && n < len && !speed) {
+        usleep(150000);
+        n = front_raw(f, out, in, len, speed);
+    }
+    if (n < len) {
+        frame_errs++;
+        if (frame_errs <= 200)
+            lg("frame %02x (%d bytes) on port %d: %d answered%s (speed %d)", len > 1 ? out[1] : 0, len, f->port, n,
+               n == -3 ? ": Main's relay didn't answer" : n < 0 ? ": Main refused it" : "", speed);
+    }
     return n;
 }
 
@@ -219,7 +249,12 @@ static void front_calibrate(struct front *f, const char *card_id) {
         return;   /* this card's speed is known (it can only have gone down since) */
     snprintf(speed_card, sizeof(speed_card), "%s", card_id);
     uint8_t out[107] = {0x81, 0x6B}, ref[107], in[107];
-    if (front_raw(f, out, ref, sizeof(out), 0) != (int)sizeof(out)) {
+    int r = front_raw(f, out, ref, sizeof(out), 0);
+    if (r == 0) {   /* (missed, as a frame just after another can be: once more, as front_frame) */
+        usleep(60000);
+        r = front_raw(f, out, ref, sizeof(out), 0);
+    }
+    if (r != (int)sizeof(out)) {
         frame_speed = 0;
         lg("card %s: speed 0 (no CERT to measure with)", card_id);
         return;
@@ -263,6 +298,10 @@ static int allow_no_identity;
 static int genuine(struct conn *c) {
     char why[96];
     int g = smc_genuine(&c->bus, &c->card, why, sizeof(why));
+    for (int t = 0; g < 0 && t < 2; t++) {   /* a frame missed mid-check (the BFMC misses one now and then): again */
+        usleep(200000);
+        g = smc_genuine(&c->bus, &c->card, why, sizeof(why));
+    }
     if (g == 1) {
         not_genuine_id[0] = 0;
         return 1;
@@ -401,6 +440,49 @@ static int card_open_bus(struct conn *c) {
     hold(c, 0);
     close(c->front.fd);
     return 0;
+}
+
+/* PROBE: what each front port holds, for a memory manager's status: port <n> smc <card id> | ps1 (a memory card that
+ * isn't a Super MemCard one: a PS1 card, or one without its identity) | empty. Through Main, as card_open_bus. */
+static void probe(int fd) {
+    char who[120];
+    if (mc_lock(10000, who, sizeof(who))) {
+        say(fd, "busy %s\n", who);
+        return;
+    }
+    struct conn c;
+    memset(&c, 0, sizeof(c));
+    c.front.fd = unix_connect(FRONT_SOCK);
+    if (c.front.fd < 0) {
+        say(fd, "noports\n");
+        mc_unlock();
+        return;
+    }
+    hold(&c, 1);
+    c.bus.frame = front_frame;
+    c.bus.bad_data = front_bad_data;
+    c.bus.ctx = &c.front;
+    for (int p = 1; p <= 2; p++) {
+        c.front.port = p;
+        int h = smc_hello(&c.bus, SMC_HOST_MAIN, 0, &c.card);
+        if (h == 1 && genuine(&c)) {
+            say(fd, "port %d smc %s %u\n", p, c.card.id, c.card.free_kb);
+            continue;
+        }
+        if (h == 1) {
+            say(fd, "port %d ps1\n", p);
+            continue;
+        }
+        /* a PS1 card ACKs a read's first bytes (its ID); nothing in the port ACKs none */
+        usleep(60000);
+        uint8_t o[4] = {0x81, 0x52, 0x00, 0x00}, i[4];
+        int n = front_raw(&c.front, o, i, 4, 0);
+        say(fd, n >= 2 ? "port %d ps1\n" : "port %d empty\n", p);
+        usleep(60000);
+    }
+    hold(&c, 0);
+    close(c.front.fd);
+    mc_unlock();
 }
 
 static void card_close(struct conn *c) {
@@ -817,8 +899,81 @@ static void conflict_add(const char *sys, int card, const char *save, uint32_t g
     if (cs->n < 64)
         snprintf(cs->keys[cs->n++], sizeof(cs->keys[0]), "%s\t%d\t%s", sys, card, save);
 }
+/* a game's icon as it is on the card (icon.bin, SMIC), kept in <state>/card_icons/<sys>/<id>.bin for frontends to show:
+ * a game this SuperStation hasn't synced has no icon in the icon database (that's for icons made here, and a copy of
+ * the card's there would stop the real one being looked for), but the card has one. Once per game: kept until it's
+ * gone from the card's list. */
+static void card_icon(struct conn *c, const char *sys, int card, const char *id) {
+    char base[65], dir[1100], path[1300];
+    snprintf(base, sizeof(base), "%s", id);
+    if (strchr(base, '~'))
+        *strchr(base, '~') = 0;   /* a second save set shows the game's icon */
+    if (strchr(base, '/'))
+        return;
+    snprintf(dir, sizeof(dir), "%s/card_icons/%s", state, sys);
+    snprintf(path, sizeof(path), "%s/%s.bin", dir, base);
+    if (access(path, F_OK) == 0)
+        return;
+    int n = smc_select_card(&c->bus, sys, id, card, NULL);
+    struct smc_file fi;
+    for (int i = 0; i < n; i++) {
+        if (smc_info(&c->bus, i, &fi) != SMC_OK)
+            return;
+        if (fi.deleted || strcmp(fi.name, "icon.bin"))
+            continue;
+        static uint8_t icon[2048];
+        if (fi.size < 8 || fi.size > sizeof(icon) || smc_read_file(&c->bus, i, fi.size, icon) != SMC_OK || memcmp(icon, "SMIC", 4))
+            return;
+        char d1[1100];
+        snprintf(d1, sizeof(d1), "%s/card_icons", state);
+        mkdir(d1, 0755);
+        mkdir(dir, 0755);
+        char tmp[1310];
+        snprintf(tmp, sizeof(tmp), "%s.tmp", path);
+        FILE *f = fopen(tmp, "wb");
+        if (!f)
+            return;
+        int ok = fwrite(icon, 1, fi.size, f) == fi.size;
+        ok &= fclose(f) == 0;
+        if (ok)
+            rename(tmp, path);
+        else
+            unlink(tmp);
+        return;
+    }
+}
+
+/* A list or a game's details off the card, tried again when a frame went missing (the BFMC misses one now and then):
+ * only "no more" (NOT_FOUND) or a refusal (BAD) ends it at once. Before this a missed frame read as the end of the list,
+ * and a system's games after it, or one game, silently weren't there. read_errs counts the reads that still failed, so
+ * the answer can say it isn't whole ("partial") instead of looking like a card with fewer saves. */
+static int read_errs;
+static int list_card_r(const struct smc_bus *b, const char *sys, int card, int idx, char id[65]) {
+    int rc = SMC_E_NO_REPLY;
+    for (int t = 0; t < 4; t++) {
+        rc = smc_list_card(b, sys, card, idx, id);
+        if (rc == SMC_OK || rc == SMC_E_NOT_FOUND || rc == SMC_E_BAD)
+            return rc;
+        usleep(60000);
+    }
+    read_errs++;
+    return rc;
+}
+static int game_info_r(const struct smc_bus *b, const char *sys, int card, const char *id, struct smc_game_info *gi) {
+    int rc = SMC_E_NO_REPLY;
+    for (int t = 0; t < 4; t++) {
+        rc = smc_game_info(b, sys, card, id, gi);
+        if (rc == SMC_OK || rc == SMC_E_NOT_FOUND || rc == SMC_E_BAD)
+            return rc;
+        usleep(60000);
+    }
+    read_errs++;
+    return rc;
+}
+
 static void section(int fd, struct conn *c, const struct smc_sync_cfg *k, int with_psx) {
     static struct conflict_set cs;
+    read_errs = 0;
     cs.n = 0;
     smc_conflicts(k, c->card.id, conflict_add, &cs);
     int games = 0, systems = 0;
@@ -833,10 +988,14 @@ static void section(int fd, struct conn *c, const struct smc_sync_cfg *k, int wi
         char *lines = NULL, id[65];
         size_t ll = 0, cap = 0;
         int n = 0;
-        for (int i = 0; smc_list_card(&c->bus, sys, card, i, id) == SMC_OK; i++) {
+        for (int i = 0; list_card_r(&c->bus, sys, card, i, id) == SMC_OK; i++) {
             struct smc_game_info gi;
-            if (smc_game_info(&c->bus, sys, card, id, &gi) != SMC_OK)
+            if (game_info_r(&c->bus, sys, card, id, &gi) != SMC_OK)
                 continue;
+            if (!gi.files && !gi.has_icon && !gi.name[0])
+                continue;   /* a deleted game (DELGAME, CLEAR): nothing of it left */
+            if (gi.has_icon)
+                card_icon(c, sys, card, id);
             char key[200], line[1024];
             snprintf(key, sizeof(key), "%s\t%d\t%s", sys, card, gi.save_name);
             int both = 0;
@@ -869,6 +1028,8 @@ static void section(int fd, struct conn *c, const struct smc_sync_cfg *k, int wi
         }
         free(lines);
     }
+    if (read_errs)
+        say(fd, "partial\t%d\n", read_errs);
     say(fd, "section\t%d\t%d\n", games, systems);
 }
 
@@ -892,6 +1053,165 @@ static void saves_cb(int card, int files, uint32_t time, bool playing, const cha
     if (card >= 1 && card <= 99)
         sl->used[card] = true;
     say(sl->fd, "save\t%d\t%d\t%u\t%d\t%s\n", card, files, time, playing ? 1 : 0, label ? label : "");
+}
+
+/* ---- moving saves around (the memory manager): a game's files on a virtual card to a folder and back ----
+ * A folder per game (its ID), holding the game's files as they are on the card (its save files, name.txt, icon.bin,
+ * game.ini, label.txt) and times.txt (each file's time on the card). EXPORT writes them, IMPORT writes them onto a card
+ * (a new generation of each file, so other SuperStations take them at their next sync), DELGAME deletes one game's
+ * files on one card (tombstones, as DELETE). Copy, move, back up and restore are made of these. */
+static int mkdir_p(const char *d) {
+    char t[1100];
+    snprintf(t, sizeof(t), "%s", d);
+    for (char *p = t + 1; *p; p++)
+        if (*p == '/') {
+            *p = 0;
+            mkdir(t, 0755);
+            *p = '/';
+        }
+    return mkdir(t, 0755) == 0 || errno == EEXIST ? 0 : -1;
+}
+static int safe_part(const char *s) { return s[0] && s[0] != '.' && !strchr(s, '/') && !strstr(s, ".."); }
+
+/* one game: its files into <dir>/<id>/. The files written, or <0 */
+static int export_game(struct conn *c, const char *sys, int card, const char *id, const char *dir) {
+    if (!safe_part(id))
+        return -1;
+    int n = smc_select_card(&c->bus, sys, id, card, NULL);
+    if (n < 0)
+        return n;
+    char gd[1200], path[1300];
+    snprintf(gd, sizeof(gd), "%s/%s", dir, id);
+    if (mkdir_p(gd))
+        return -1;
+    snprintf(path, sizeof(path), "%s/times.txt", gd);
+    FILE *tf = fopen(path, "w");
+    if (!tf)
+        return -1;
+    int done = 0;
+    for (int i = 0; i < n; i++) {
+        struct smc_file fi;
+        if (smc_info(&c->bus, i, &fi) != SMC_OK) {
+            fclose(tf);
+            return -1;
+        }
+        if (fi.deleted || !safe_part(fi.name) || !strcmp(fi.name, "times.txt"))
+            continue;
+        uint8_t *buf = malloc(fi.size ? fi.size : 1);
+        if (!buf || smc_read_file(&c->bus, i, fi.size, buf) != SMC_OK) {
+            free(buf);
+            fclose(tf);
+            return -1;
+        }
+        snprintf(path, sizeof(path), "%s/%s", gd, fi.name);
+        FILE *f = fopen(path, "wb");
+        int ok = f && fwrite(buf, 1, fi.size, f) == fi.size;
+        if (f)
+            ok &= fclose(f) == 0;
+        free(buf);
+        if (!ok) {
+            fclose(tf);
+            return -1;
+        }
+        fprintf(tf, "%s\t%u\n", fi.name, fi.time);
+        done++;
+    }
+    fclose(tf);
+    return done ? done : -1;   /* (nothing of that game on that card) */
+}
+
+/* <dir>/<id>/ onto a virtual card. The files written, or <0 */
+static int import_game(struct conn *c, const char *sys, int card, const char *dir, const char *id) {
+    if (!safe_part(id))
+        return -1;
+    char gd[1200], path[1300];
+    snprintf(gd, sizeof(gd), "%s/%s", dir, id);
+    DIR *d = opendir(gd);
+    if (!d)
+        return -1;
+    int n = smc_select_card(&c->bus, sys, id, card, NULL);
+    if (n < 0) {
+        closedir(d);
+        return n;
+    }
+    struct { char name[17]; uint32_t gen; } have[20];
+    int nh = 0;
+    for (int i = 0; i < n && nh < 20; i++) {
+        struct smc_file fi;
+        if (smc_info(&c->bus, i, &fi) == SMC_OK) {
+            snprintf(have[nh].name, sizeof(have[nh].name), "%s", fi.name);
+            have[nh++].gen = fi.gen;
+        }
+    }
+    int done = 0;
+    struct dirent *e;
+    while ((e = readdir(d))) {
+        if (e->d_name[0] == '.' || !strcmp(e->d_name, "times.txt") || strlen(e->d_name) > 16)
+            continue;
+        snprintf(path, sizeof(path), "%s/%s", gd, e->d_name);
+        struct stat st;
+        if (stat(path, &st) || !S_ISREG(st.st_mode) || st.st_size > 2 * 1024 * 1024)
+            continue;
+        uint8_t *buf = malloc(st.st_size ? (size_t)st.st_size : 1);
+        FILE *f = fopen(path, "rb");
+        int ok = buf && f && fread(buf, 1, (size_t)st.st_size, f) == (size_t)st.st_size;
+        if (f)
+            fclose(f);
+        uint32_t t = (uint32_t)st.st_mtime, gen = 1;
+        char tp[1300], line[200];
+        snprintf(tp, sizeof(tp), "%s/times.txt", gd);
+        FILE *tf = fopen(tp, "r");
+        while (tf && fgets(line, sizeof(line), tf)) {
+            char *tab = strchr(line, '\t');
+            if (tab && (size_t)(tab - line) == strlen(e->d_name) && !strncmp(line, e->d_name, (size_t)(tab - line)))
+                t = (uint32_t)strtoul(tab + 1, NULL, 10);
+        }
+        if (tf)
+            fclose(tf);
+        for (int i = 0; i < nh; i++)
+            if (!strcmp(have[i].name, e->d_name))
+                gen = have[i].gen + 1;
+        if (ok && smc_select_card(&c->bus, sys, id, card, NULL) >= 0 &&
+            smc_write_file_at(&c->bus, e->d_name, buf, (uint32_t)st.st_size, gen, t) == SMC_OK)
+            done++;
+        else
+            done = -1000;
+        free(buf);
+    }
+    closedir(d);
+    return done < 0 ? -1 : done;
+}
+
+/* one game's files off one virtual card (tombstones). The files deleted, or <0 */
+static int delete_game(struct conn *c, const char *sys, int card, const char *id) {
+    int n = smc_select_card(&c->bus, sys, id, card, NULL), done = 0;
+    if (n < 0)
+        return n;
+    for (int i = 0; i < n; i++) {
+        struct smc_file fi;
+        if (smc_info(&c->bus, i, &fi) != SMC_OK)
+            return -1;
+        if (fi.deleted)
+            continue;
+        if (smc_delete(&c->bus, i, fi.gen + 1, (uint32_t)time(NULL)) != SMC_OK)
+            return -1;
+        done++;
+    }
+    return done;
+}
+
+/* "<sys>\t<card>\t<id or *>\t<dir>" and the like: split on tabs */
+static int split_tabs(char *a, char **f, int max) {
+    int n = 0;
+    while (n < max) {
+        f[n++] = a;
+        char *t = strchr(a, '\t');
+        if (!t)
+            break;
+        *t = 0;
+        a = t + 1;
+    }
+    return n;
 }
 
 /* a frontend's command; the answer ends with END */
@@ -932,12 +1252,19 @@ static void do_command(int fd, char *l) {
         int card = 0;
         sscanf(a, "%64s %d", sys, &card);
         char id[65];
-        for (int i = 0; smc_list_card(&c.bus, sys, card, i, id) == SMC_OK; i++) {
+        read_errs = 0;
+        for (int i = 0; list_card_r(&c.bus, sys, card, i, id) == SMC_OK; i++) {
             struct smc_game_info gi;
-            if (smc_game_info(&c.bus, sys, card, id, &gi) == SMC_OK && gi.files) /* not a set whose saves are gone */
+            if (game_info_r(&c.bus, sys, card, id, &gi) != SMC_OK)
+                continue;
+            if (gi.has_icon)
+                card_icon(&c, sys, card, id);
+            if (gi.files || gi.has_icon || gi.name[0]) /* as SECTION: a game folder with no save yet too, not a deleted one */
                 say(fd, "%s\t%s\t%u\t%d\t%u\t%d\t%s\t%s\t%s\n", gi.name[0] ? gi.name : gi.title[0] ? gi.title : gi.save_name,
                     gi.id, gi.time, gi.files, gi.bytes, gi.has_icon ? 1 : 0, gi.save_name, id, gi.label);
         }
+        if (read_errs)
+            say(fd, "partial\t%d\n", read_errs);
     } else if (!strncmp(l, "DELETE ", 7)) {
         char *tab = strchr(a, '\t');
         if (tab) {
@@ -956,6 +1283,112 @@ static void do_command(int fd, char *l) {
             say(fd, "clear ok %d\n", n);
         } else
             say(fd, "clear failed\n");
+    } else if (!strncmp(l, "EXPORT ", 7) || !strncmp(l, "IMPORT ", 7)) {
+        /* EXPORT <sys>\t<card>\t<id | *>\t<dir>: a game (or every game on that card) into <dir>/<id>/
+         * IMPORT <sys>\t<card>\t<id | *>\t<dir>: <dir>/<id>/ (or every game folder in <dir>) onto that card
+         * answer: export ok <games> <files> | import ok <games> <files> | ... failed */
+        char *f[4];
+        int imp = l[0] == 'I', games = 0, files = 0, bad = 0;
+        if (split_tabs(a, f, 4) != 4 || f[3][0] != '/' || strstr(f[3], "..") || atoi(f[1]) < 1 || atoi(f[1]) > 99) {
+            say(fd, "%s failed\n", imp ? "import" : "export");
+        } else {
+            int card = atoi(f[1]);
+            if (!imp && mkdir_p(f[3]))
+                bad = 1;
+            if (strcmp(f[2], "*")) {
+                int r = bad ? -1 : imp ? import_game(&c, f[0], card, f[3], f[2]) : export_game(&c, f[0], card, f[2], f[3]);
+                if (r < 0)
+                    bad = 1;
+                else {
+                    games++;
+                    files += r;
+                }
+            } else if (!imp) {
+                char id[65];
+                read_errs = 0;
+                for (int i = 0; !bad && list_card_r(&c.bus, f[0], card, i, id) == SMC_OK; i++) {
+                    struct smc_game_info gi;
+                    if (game_info_r(&c.bus, f[0], card, id, &gi) != SMC_OK || !gi.files)
+                        continue;   /* (a game whose saves are gone) */
+                    int r = export_game(&c, f[0], card, id, f[3]);
+                    if (r < 0)
+                        bad = 1;
+                    else {
+                        games++;
+                        files += r;
+                    }
+                }
+                if (read_errs)
+                    bad = 1;   /* a backup that missed a game isn't one */
+            } else {
+                DIR *d = opendir(f[3]);
+                struct dirent *e;
+                while (d && !bad && (e = readdir(d))) {
+                    if (e->d_name[0] == '.')
+                        continue;
+                    int r = import_game(&c, f[0], card, f[3], e->d_name);
+                    if (r < 0)
+                        bad = 1;
+                    else {
+                        games++;
+                        files += r;
+                    }
+                }
+                if (d)
+                    closedir(d);
+                else
+                    bad = 1;
+            }
+            if (!bad)
+                lg("%s: %s card %d: %d game(s), %d file(s) %s %s", imp ? "import" : "export", f[0], card, games, files,
+                   imp ? "from" : "to", f[3]);
+            say(fd, bad ? "%s failed\n" : "%s ok %d %d\n", imp ? "import" : "export", games, files);
+        }
+    } else if (!strncmp(l, "DELGAME ", 8)) {
+        /* DELGAME <sys>\t<card>\t<id>: that game's saves off that card only: delgame ok <files> | delgame failed */
+        char *f[3];
+        int r = split_tabs(a, f, 3) == 3 && !(play_sys[0] && !strcmp(play_sys, f[0])) ? delete_game(&c, f[0], atoi(f[1]), f[2]) : -1;
+        if (r >= 0)
+            lg("%s card %s: %s deleted (%d file(s))", f[0], f[1], f[2], r);
+        say(fd, r >= 0 ? "delgame ok %d\n" : "delgame failed\n", r);
+    } else if (!strncmp(l, "IMAGE ", 6)) {
+        /* a save's file as it is on the card (PSX: its 128 KB card image), for a frontend to open save by save */
+        char *f1 = strchr(a, '\t'), *f2 = f1 ? strchr(f1 + 1, '\t') : NULL;
+        if (!f2) {
+            say(fd, "image failed\n");
+        } else {
+            *f1 = *f2 = 0;
+            int card = atoi(f1 + 1), n = smc_select_card(&c.bus, a, f2 + 1, card, NULL), best = -1;
+            struct smc_file fi;
+            uint32_t size = 0;
+            for (int i = 0; i < n; i++) {
+                if (smc_info(&c.bus, i, &fi) != SMC_OK) {
+                    best = -1;
+                    break;
+                }
+                bool meta = !strcmp(fi.name, "name.txt") || !strcmp(fi.name, "icon.bin") || !strcmp(fi.name, "game.ini") ||
+                            !strcmp(fi.name, "label.txt");
+                if (!fi.deleted && !meta && fi.size > size && fi.size <= 1024 * 1024) {
+                    best = i;
+                    size = fi.size;
+                }
+            }
+            uint8_t *buf = best >= 0 ? malloc(size) : NULL;
+            if (!buf || smc_read_file(&c.bus, best, size, buf) != SMC_OK) {
+                say(fd, "image failed\n");
+            } else {
+                say(fd, "image %u\n", size);
+                char line[300];
+                for (uint32_t o = 0; o < size; o += 128) {
+                    int k = 0;
+                    for (uint32_t j = o; j < o + 128 && j < size; j++)
+                        k += snprintf(line + k, sizeof(line) - k, "%02x", buf[j]);
+                    line[k++] = '\n';
+                    send_all(fd, line, (size_t)k);
+                }
+            }
+            free(buf);
+        }
     } else if (!strcmp(l, "SECTION") || !strcmp(l, "SECTION PSX")) {
         section(fd, &c, &k, l[7] != 0);
     } else if (!strcmp(l, "SAVES")) {
@@ -1056,6 +1489,11 @@ static void handle(int fd) {
             want_port = p == 1 || p == 2 ? p : 0;
             say(fd, want_port ? "port %d\nEND\n" : "port any\nEND\n", want_port);
             continue;
+        }
+        if (!strcmp(l, "PROBE")) {
+            probe(fd);
+            say(fd, "END\n");
+            return;
         }
         if (!strncmp(l, "LAUNCH ", 7)) {
             lg("launch %s", l + 7);

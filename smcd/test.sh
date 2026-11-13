@@ -223,6 +223,24 @@ echo "$r" | grep -q "^card	1	1	[0-9]*	0$" && echo "$r" | grep -q "^card	2	0	0	1$
     && ok "CARDS: card 1 kept its save, card 2 in use, the blank one offered is 3 (never the one in use)" || bad "CARDS after: $r"
 [ "$(ask "CARD NES	1" | head -1)" = "card ok 1" ] && cmp -s "$w/saves/NES/Test Game.sav" "$w/first.sav" && ok "CARD NES 1: its save back" || bad "CARD 1"
 [ "$(ask "CARD PSX	2" | head -1)" = "card failed" ] && [ "$(ask "CARD NES	0" | head -1)" = "card failed" ] && ok "CARD PSX or card 0: refused" || bad "CARD refusals"
+# moving saves around: EXPORT a game, IMPORT it onto another card, DELGAME it there
+x="$w/xfer"
+gid=$(ask "LIST NES 1" | grep "^Test Game	" | head -1 | cut -f8)
+r=$(ask "EXPORT NES	1	$gid	$x/one" | head -1)
+[ "${r%% *}" = "export" ] && [ "$(echo "$r" | cut -d' ' -f2)" = ok ] && ls "$x/one/$gid/" | grep -q times.txt \
+    && [ "$(ls "$x/one/$gid" | grep -vc times.txt)" -ge 1 ] && ok "EXPORT: a game's files and their times in a folder" || bad "EXPORT: $r $(ls -R "$x" 2>&1)"
+r=$(ask "IMPORT NES	5	$gid	$x/one" | head -1)
+case "$r" in "import ok 1 "*) ask "LIST NES 5" | grep -q "^Test Game	" && ok "IMPORT: the game on card 5 too" || bad "IMPORT list: $(ask "LIST NES 5")";; *) bad "IMPORT: $r";; esac
+r=$(ask "IMPORT NES	5	$gid	$x/one" | head -1)
+case "$r" in "import ok 1 "*) ok "IMPORT over the same game already on the card (a copy onto a card that has it)";; *) bad "IMPORT over itself: $r";; esac
+r=$(ask "EXPORT NES	5	*	$x/all" | head -1)
+case "$r" in "export ok 1 "*) ok "EXPORT *: every game on a card";; *) bad "EXPORT *: $r";; esac
+r=$(ask "DELGAME NES	5	$gid" | head -1)
+case "$r" in "delgame ok "*) [ -z "$(ask "LIST NES 5" | grep -v END)" ] && ask "LIST NES 1" | grep -q "^Test Game	" && ok "DELGAME: off card 5 only" || bad "DELGAME lists";; *) bad "DELGAME: $r";; esac
+r=$(ask "IMPORT NES	6	*	$x/all" | head -1)
+case "$r" in "import ok 1 "*) ask "LIST NES 6" | grep -q "^Test Game	" && ok "IMPORT *: a whole card's backup onto card 6" || bad "IMPORT * list";; *) bad "IMPORT *: $r";; esac
+[ "$(ask "EXPORT NES	1	../x	$x/bad" | head -1)" = "export failed" ] && [ "$(ask "EXPORT NES	1	No Such Game	$x/bad" | head -1)" = "export failed" ] && [ "$(ask "IMPORT NES	1	*	relative" | head -1)" = "import failed" ] \
+    && ok "EXPORT/IMPORT: no .. in an ID, only absolute folders" || bad "EXPORT/IMPORT refusals"
 
 # 5. a long list on the OSD page (a stand-in smcd with 30 saves): it scrolls, no row cut off or past the page
 kill $(pgrep -f "$B/smcd") 2>/dev/null || true; sleep 0.5; rm -f /tmp/smcd.sock
