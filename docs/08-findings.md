@@ -550,6 +550,43 @@ seed 2 met it (+0.022 ns), 84 % of the ALMs. On the SS1 in `/media/fat/_SuperMem
 (`<rbf>_SuperMemCard/SNES_SMC</rbf>`), `smcd` took it as SNES (card 1, `saves/SNES/`), the OSD ends with "Super MemCard
 by f3bandit" above Saves and exit, and a ROM picked in its OSD went through the running core (no bounce).
 
+### One save per system on the BitFunX (Nov 13 2026, SS1, Phosphor)
+
+`smcd/systest.sh` on the SS1 (Phosphor's Main and smcd, the BitFunX in port 1, each system's card 1): a game that
+saves, with no save of the user's; the core started once (to see what save files it makes), a test save (random
+bytes, the file's size) put there, the game started again (to the card), the local files moved away and the game
+started a third time (from the card), the bytes compared; then the test files to backups and the set off the card
+(`DELGAME`). The user's saves folder ended as it started.
+
+| system | game | files | result |
+|---|---|---|---|
+| NES | Dragon Warrior | `.sav` | same bytes |
+| SNES | EarthBound | `.sav` | same bytes |
+| N64 | Mario Kart 64 | `.eep` + `_1.cpk`..`_4.cpk` (five files, one set) | same bytes, all five |
+| Game Boy | Link's Awakening | `.sav` (`saves/GAMEBOY`) | same bytes |
+| Game Boy Color | Pokemon Crystal | `.sav` (`saves/GAMEBOY`, the same core) | same bytes |
+| GBA | Advance Wars | `.sav` | same bytes |
+| Genesis | Phantasy Star IV | `.sav` (`saves/MegaDrive`), the set filed by its serial | same bytes |
+| TurboGrafx-16 | Neutopia | `.sav` | same bytes |
+| TurboGrafx-CD | Ys Book I & II | `.sav` (`saves/TGFX16`, the same core) | same bytes |
+| Mega-CD | Sonic CD | `.sav` | same bytes |
+| Saturn | Macross (Disc 1) | `.sav` named without the disc (every disc shares it) | same bytes |
+| PSX | Alundra 2 | `.sav` (the core's card image) | same bytes |
+| Neo Geo | 2020 Super Baseball | `.sav` | same bytes |
+
+- Master System not run: no game on this SS1 saves (a homebrew and `smb.sms`).
+- Main makes a game's save file only when the game first saves, so every save here was put there by the test, at
+  Main's own name for it: for Saturn that's the name without `(Disc n)` (smcd uses Main's rule, `smc_saturn_save_name`),
+  so a test file named after Disc 1 was never looked at (the test's mistake, fixed).
+- `LIST`'s second field is the game's serial (`NKTE`, `AWRE`); the set's own ID, what `DELGAME`/`EXPORT` take, is the
+  eighth (`NKTE-434389C1`). `DELGAME` with the serial answered `delgame ok 0`.
+- `PROBE` showed a card's free space as `4294967295` before the card has counted it (it counts in its own menu: too
+  slow for a frame): now `?`.
+- With the stock Game Boy core just started, smcd tried Hello on both ports through Main's relay and got no answer
+  (logged, 4 lines a launch); harmless (the card belongs to the core then), not seen with the other cores.
+- To decide: the launch path syncs the PSX core's card image (`saves/PSX/<game>.sav`) like any other save, but the
+  ROM-load hook (a game picked in the OSD) leaves PSX out ("PSX: its own card").
+
 ### Open
 
 - (Closed: the flaky PC test was the first write after a card switch, see above.)

@@ -13,7 +13,7 @@
  *   ROM <rbf>\t<file>\t<0|1> (Main) a game file picked in the running core's OSD (1: the core has the card driver):
  *                           DONE same (that game runs already) | DONE bounce (no driver: Main goes through the menu
  *                           core and starts the core again with the game, LAUNCH) | DONE saves | DONE (as LAUNCH)
- *   PROBE                   what each front port holds: port <n> smc <card id> <free kb> | port <n> ps1 | port <n> empty
+ *   PROBE                   what each front port holds: port <n> smc <card id> <free kb, ? not counted yet> | port <n> ps1 | port <n> empty
  *   HELLO                   the card: id, version, free space
  *   READ                    the memory manager's Read card: everything both ways
  *   SYSTEMS                 the systems with saves on the card
@@ -466,7 +466,9 @@ static void probe(int fd) {
         c.front.port = p;
         int h = smc_hello(&c.bus, SMC_HOST_MAIN, 0, &c.card);
         if (h == 1 && genuine(&c)) {
-            say(fd, "port %d smc %s %u\n", p, c.card.id, c.card.free_kb);
+            if (c.card.free_kb == 0xFFFFFFFFu) say(fd, "port %d smc %s ?\n", p, c.card.id);   /* (not counted yet: the card
+                                                                                 counts it in its own menu, too slow for a frame) */
+            else say(fd, "port %d smc %s %u\n", p, c.card.id, c.card.free_kb);
             continue;
         }
         if (h == 1) {
