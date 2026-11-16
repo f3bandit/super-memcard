@@ -19,3 +19,10 @@ cd Main_MiSTer && git apply main-mister-super-memcard.patch && make
 A Main this differs from: apply what fits, then the rest by hand from the table (docs/10, section 3, has why each
 call is where it is). With no `smcd` running, nothing changes: Main works as without it. The same hooks run on the
 SS1 in the `test-main` branch's Main (tested Nov 12 2026: every launch path, docs/08).
+
+## Who builds with it
+
+- **Coreshell** (f3bandit/core_shell, `shim_mains.yml`): every Main fork it knows, built with this patch daily.
+- **corehost** (f3bandit/corehost, `build.sh`): this patch first, then corehost.patch. Its daily Main watch
+  (`main-watch.yml`) tries both on each new Main_MiSTer commit and opens an issue there, saying "the shim conflicts
+  in: ..." or "the shim doesn't apply" when this patch needs updating for the new Main.
