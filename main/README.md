@@ -13,7 +13,13 @@ starts and when the menu is back. Copy into the Main's source (GPL-3.0, as Main)
 Where they're called in Main:
 - `smc_shim_core_start(name, xml)`: in `fpga_load_rbf()`, before a core that isn't the menu is loaded.
 - `smc_shim_menu_start()`: in `main()`, after `user_io_init()`, when Main starts with the menu core.
-- `smc_shim_poll()`: in Main's loop.
+- `smc_shim_leave_game()`: first thing in `fpga_load_rbf()`. A game running with its OSD closed (a core loaded by a
+  frontend, an add-on or `/dev/MiSTer_cmd`, not from the OSD): the OSD shows "Saving the game..." for a moment, so the
+  core writes its save as when a player opens the OSD (cores with Autosave save only then), and Main writes it
+  (`user_io_disk_busy()`, a one-line getter added to `user_io.cpp`); back once nothing has been written for 300 ms, at
+  most 5 s. Without it, a game left that way lost what it hadn't saved through the OSD (Nov 2026, Zelda on the SS1).
+- `smc_shim_poll()`: in Main's loop (the poll loop, where `user_io_poll()` runs). A Main that calls it from its UI loop
+  instead calls `smc_shim_poll_ui()` there and `smc_shim_mark_poll()` in the poll loop (Phosphor's Main).
 - `smc_shim_busy()`: in `input.cpp`'s input poll, where a Main waits for input in the menu (Main_MiSTer: 25 ms with
   the framebuffer up): 1 ms instead while it's true, so smcd's card frames pass at once (a 128 KB PS1 card: seconds,
   not a minute).

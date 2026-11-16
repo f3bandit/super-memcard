@@ -1,5 +1,5 @@
 diff --git a/fpga_io.cpp b/fpga_io.cpp
-index b64cfe5..7196271 100644
+index b64cfe5..9e42672 100644
 --- a/fpga_io.cpp
 +++ b/fpga_io.cpp
 @@ -22,6 +22,7 @@
@@ -10,8 +10,11 @@ index b64cfe5..7196271 100644
  
  #define FPGA_REG_BASE 0xFF000000
  #define FPGA_REG_SIZE 0x01000000
-@@ -427,6 +428,7 @@ int fpga_load_rbf(const char *name, const char *cfg, const char *xml)
+@@ -425,8 +426,10 @@ static int make_env(const char *name, const char *cfg)
+ 
+ int fpga_load_rbf(const char *name, const char *cfg, const char *xml)
  {
++	smc_shim_leave_game();   // Super MemCard: the game's own save written first (its core saves when the OSD opens)
  	OsdDisable();
  	static char path[1024];
 +	if (strcasecmp(name, "menu.rbf")) smc_shim_core_start(name, xml);   // Super MemCard: the game about to run
@@ -548,10 +551,10 @@ index 0000000..efa9df2
 +int smc_osd_key(int up, int down, int key, int select);
 diff --git a/smc_shim.cpp b/smc_shim.cpp
 new file mode 100644
-index 0000000..366841c
+index 0000000..8860285
 --- /dev/null
 +++ b/smc_shim.cpp
-@@ -0,0 +1,590 @@
+@@ -0,0 +1,641 @@
 +// Super MemCard: the shim between a MiSTer Main and smcd (smc_shim.h). Copyright (C) 2026 f3bandit.
 +// GPL-3.0-or-later, as Main_MiSTer.
 +#include "smc_shim.h"
@@ -573,6 +576,11 @@ index 0000000..366841c
 +#include "smc_frontport.h"
 +#include "file_io.h"   // getRootDir
 +#include "user_io.h"   // user_io_get_core_name, is_menu
++#include "osd.h"       // the OSD "Saving" shows while a game's save is written (smc_shim_leave_game)
++#include "hardware.h"  // GetTimer, CheckTimer
++#include "lib/libco/libco.h"   // co_active: which of Main's loops called (smc_shim_leave_game)
++
++static cothread_t poll_thread;   // the loop smc_shim_poll() runs in (Main's poll loop, with user_io_poll())
 +
 +#define SMCD_SOCK  "/tmp/smcd.sock"
 +#define FRONT_SOCK "/tmp/smc_frontport.sock"
@@ -784,7 +792,25 @@ index 0000000..366841c
 +	}
 +}
 +
++void smc_shim_mark_poll()
++{
++	poll_thread = co_active();
++}
++
++static void shim_poll();
++
 +void smc_shim_poll()
++{
++	poll_thread = co_active();
++	shim_poll();
++}
++
++void smc_shim_poll_ui()
++{
++	shim_poll();
++}
++
++static void shim_poll()
 +{
 +	reap_inherited();
 +	static char core[64];
@@ -956,6 +982,34 @@ index 0000000..366841c
 +{
 +	const char *b = strrchr(rbf, '/');
 +	return !strncasecmp(b ? b + 1 : rbf, "menu", 4);
++}
++
++int user_io_disk_busy();   // user_io.cpp (Super MemCard patch): Main writing a core's file now
++void scheduler_yield();    // scheduler.cpp
++
++void smc_shim_leave_game()
++{
++	static int busy;
++	if (busy || is_menu() || user_io_osd_is_visible()) return;
++	busy = 1;
++	OsdSetTitle("Saving", 0);
++	int rows = OsdGetSize();
++	for (int i = 0; i < rows; i++) OsdWrite(i, i == rows / 2 - 1 ? "     Saving the game..." : "", 0, 0);
++	OsdUpdate();
++	OsdEnable(DISABLE_KEYBOARD);
++	unsigned long hard = GetTimer(5000), quiet = GetTimer(500);
++	while (!CheckTimer(hard))
++	{
++		// Main writes the save in user_io_poll(): called here from the poll loop (a command, an add-on's load_core),
++		// or that loop let run from the UI's (a frontend's launch), never user_io_poll() inside itself
++		if (!poll_thread || co_active() == poll_thread) user_io_poll();
++		else scheduler_yield();
++		if (user_io_disk_busy()) quiet = GetTimer(300);
++		else if (CheckTimer(quiet)) break;
++		usleep(1000);
++	}
++	OsdDisable();
++	busy = 0;
 +}
 +
 +void smc_shim_core_start(const char *rbf, const char *mgl)
@@ -1144,10 +1198,10 @@ index 0000000..366841c
 +}
 diff --git a/smc_shim.h b/smc_shim.h
 new file mode 100644
-index 0000000..e39d591
+index 0000000..0413173
 --- /dev/null
 +++ b/smc_shim.h
-@@ -0,0 +1,46 @@
+@@ -0,0 +1,56 @@
 +// Super MemCard in a MiSTer Main: the shim between Main and smcd (the Super MemCard program, a separate program on the
 +// SuperStation). Copyright (C) 2026 f3bandit. GPL-3.0-or-later, as Main_MiSTer.
 +//
@@ -1169,6 +1223,12 @@ index 0000000..e39d591
 +// card. Waits for smcd (at most 30 s), passing its card frames meanwhile.
 +void smc_shim_core_start(const char *rbf, const char *mgl);
 +
++// At the start of fpga_load_rbf(), a game running and its OSD closed (a core loaded by a frontend, an add-on or the
++// command pipe, not from the OSD): the OSD shown for a moment ("Saving"), so the core writes its save as when a player
++// opens it (cores with Autosave save then), Main writing it meanwhile; back once nothing has been written for 300 ms
++// (at most 5 s). Without it, a game left that way loses what wasn't saved by opening the OSD.
++void smc_shim_leave_game();
++
 +// Main has started with the menu core (after user_io_init()): smcd saves the game just played to the card.
 +void smc_shim_menu_start();
 +// In place of smc_shim_menu_start(), with Main's arguments (the core and MGL it started with): the menu as above; a
@@ -1184,6 +1244,10 @@ index 0000000..e39d591
 +
 +// From Main's loop: passes smcd's card frames (also while a game runs, through the core's sys_top driver).
 +void smc_shim_poll();
++// The same from a Main's UI loop (Phosphor's phosphor_poll()), and the poll loop marked by itself (where user_io_poll()
++// runs: smc_shim_leave_game() lets that loop write a save, never calls user_io_poll() inside itself)
++void smc_shim_poll_ui();
++void smc_shim_mark_poll();
 +
 +// The OSD's Saves page (smc_osd.cpp): a game whose saves are on the card is running (smcd said so at its LAUNCH)
 +bool smc_shim_saves_available();
@@ -1194,3 +1258,19 @@ index 0000000..e39d591
 +int smc_shim_ask(const char *cmd, char *out, size_t n, int timeout_ms = 20000);
 +// starts the running game again from its MGL (or MRA), so its core loads the save smcd just put in place
 +void smc_shim_restart();
+diff --git a/user_io.cpp b/user_io.cpp
+index 014fef0..b0c8819 100644
+--- a/user_io.cpp
++++ b/user_io.cpp
+@@ -3272,6 +3272,11 @@ void diskled_on()
+ 	diskled_is_on = 1;
+ }
+ 
++int user_io_disk_busy()   // (Super MemCard shim: a save still being written, smc_shim_leave_game())
++{
++	return diskled_is_on;
++}
++
+ static void kbd_reply(char code)
+ {
+ 	printf("kbd_reply = 0x%02X\n", code);

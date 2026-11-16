@@ -19,6 +19,11 @@
 #include "smc_frontport.h"
 #include "file_io.h"   // getRootDir
 #include "user_io.h"   // user_io_get_core_name, is_menu
+#include "osd.h"       // the OSD "Saving" shows while a game's save is written (smc_shim_leave_game)
+#include "hardware.h"  // GetTimer, CheckTimer
+#include "lib/libco/libco.h"   // co_active: which of Main's loops called (smc_shim_leave_game)
+
+static cothread_t poll_thread;   // the loop smc_shim_poll() runs in (Main's poll loop, with user_io_poll())
 
 #define SMCD_SOCK  "/tmp/smcd.sock"
 #define FRONT_SOCK "/tmp/smc_frontport.sock"
@@ -230,7 +235,25 @@ static void reap_inherited()
 	}
 }
 
+void smc_shim_mark_poll()
+{
+	poll_thread = co_active();
+}
+
+static void shim_poll();
+
 void smc_shim_poll()
+{
+	poll_thread = co_active();
+	shim_poll();
+}
+
+void smc_shim_poll_ui()
+{
+	shim_poll();
+}
+
+static void shim_poll()
 {
 	reap_inherited();
 	static char core[64];
@@ -402,6 +425,34 @@ static int is_menu_rbf(const char *rbf)
 {
 	const char *b = strrchr(rbf, '/');
 	return !strncasecmp(b ? b + 1 : rbf, "menu", 4);
+}
+
+int user_io_disk_busy();   // user_io.cpp (Super MemCard patch): Main writing a core's file now
+void scheduler_yield();    // scheduler.cpp
+
+void smc_shim_leave_game()
+{
+	static int busy;
+	if (busy || is_menu() || user_io_osd_is_visible()) return;
+	busy = 1;
+	OsdSetTitle("Saving", 0);
+	int rows = OsdGetSize();
+	for (int i = 0; i < rows; i++) OsdWrite(i, i == rows / 2 - 1 ? "     Saving the game..." : "", 0, 0);
+	OsdUpdate();
+	OsdEnable(DISABLE_KEYBOARD);
+	unsigned long hard = GetTimer(5000), quiet = GetTimer(500);
+	while (!CheckTimer(hard))
+	{
+		// Main writes the save in user_io_poll(): called here from the poll loop (a command, an add-on's load_core),
+		// or that loop let run from the UI's (a frontend's launch), never user_io_poll() inside itself
+		if (!poll_thread || co_active() == poll_thread) user_io_poll();
+		else scheduler_yield();
+		if (user_io_disk_busy()) quiet = GetTimer(300);
+		else if (CheckTimer(quiet)) break;
+		usleep(1000);
+	}
+	OsdDisable();
+	busy = 0;
 }
 
 void smc_shim_core_start(const char *rbf, const char *mgl)

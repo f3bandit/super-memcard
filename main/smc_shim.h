@@ -19,6 +19,12 @@
 // card. Waits for smcd (at most 30 s), passing its card frames meanwhile.
 void smc_shim_core_start(const char *rbf, const char *mgl);
 
+// At the start of fpga_load_rbf(), a game running and its OSD closed (a core loaded by a frontend, an add-on or the
+// command pipe, not from the OSD): the OSD shown for a moment ("Saving"), so the core writes its save as when a player
+// opens it (cores with Autosave save then), Main writing it meanwhile; back once nothing has been written for 300 ms
+// (at most 5 s). Without it, a game left that way loses what wasn't saved by opening the OSD.
+void smc_shim_leave_game();
+
 // Main has started with the menu core (after user_io_init()): smcd saves the game just played to the card.
 void smc_shim_menu_start();
 // In place of smc_shim_menu_start(), with Main's arguments (the core and MGL it started with): the menu as above; a
@@ -34,6 +40,10 @@ bool smc_shim_rom_load(const char *path, char type, int index);
 
 // From Main's loop: passes smcd's card frames (also while a game runs, through the core's sys_top driver).
 void smc_shim_poll();
+// The same from a Main's UI loop (Phosphor's phosphor_poll()), and the poll loop marked by itself (where user_io_poll()
+// runs: smc_shim_leave_game() lets that loop write a save, never calls user_io_poll() inside itself)
+void smc_shim_poll_ui();
+void smc_shim_mark_poll();
 
 // The OSD's Saves page (smc_osd.cpp): a game whose saves are on the card is running (smcd said so at its LAUNCH)
 bool smc_shim_saves_available();
