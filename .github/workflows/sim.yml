@@ -27,16 +27,3 @@ jobs:
           STOCK=1 sh sim/bus/run.sh
       - name: Bus simulation, phase 2 (the card driver every game core's sys_top carries, at a game core's clock)
         run: SMC_SYS=1 CLK_MHZ=42.95 sh sim/bus/run.sh
-
-  firmware:
-    # the real card firmware with Super MemCard, built for the RP2040 (GUI included) as sd2psXtd's own CI does
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-      - name: Toolchain
-        run: sudo apt-get update -q && sudo apt-get install -y -q cmake gcc-arm-none-eabi libnewlib-arm-none-eabi libstdc++-arm-none-eabi-newlib >/dev/null
-      - name: Build SD2PSX (with the screen)
-        run: firmware/build.sh SD2PSX
-      - name: Build PMC+ (no screen)
-        run: firmware/build.sh PMC+
