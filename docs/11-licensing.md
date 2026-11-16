@@ -20,6 +20,9 @@ LICENSE.md lists what is f3bandit's and what isn't):
   tester, the drive repair, cmjobd, the app link (cmremote), the modules and CM Link.
 - **phosphor_os** and **phosphor-modules**: Phosphor's TV interface, phosphord, apps, tools and modules,
   including the dock IR remote upgrade and the safe shutdown.
+- **core_shell** (Coreshell): the unified core menu over stock cores, its launcher, API, Super MemCard
+  page, INI check and profile tools, its core menu dumps and profiles: all closed, none of it GPL
+  (its LICENSE). Console Mode uses it over its socket, as a separate program.
 
 Not included: the GPL forks (phosphor-main, phosphor-menu, the cores), which stay GPL like Super
 MemCard's own GPL parts; and SS1 Tool, f3bandit's support tool for users, which keeps its own licence

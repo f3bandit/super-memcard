@@ -15,6 +15,8 @@
  *                           core and starts the core again with the game, LAUNCH) | DONE saves | DONE (as LAUNCH)
  *   PROBE                   what each front port holds: port <n> smc <card id> <free kb, ? not counted yet> | port <n> ps1 | port <n> empty
  *   HELLO                   the card: id, version, free space
+ *   SELECT <sys>\t<game ID>  (Coreshell, before a game's core loads) the game being started: PSX, that game's own PS1
+ *                           card on the bus; others, the card in that system's mode. select ok [card] | select failed
  *   READ                    the memory manager's Read card: everything both ways
  *   SYSTEMS                 the systems with saves on the card
  *   LIST <sys> [<card>]     a system's games: name \t id \t time \t files \t bytes \t icon \t save name \t folder
@@ -36,6 +38,10 @@
  *                           USE, then Main loads the game (the MGL of its last launch here, else one made from its
  *                           ROM). play ok <card> | play notfound (no ROM, or a system started only from an MGL) |
  *                           play psx | play failed
+ *   PSXMERGE <backup dir>   Super MemCard's PSX copies into each game's own PS1 card (the PSX store from now on): backed
+ *                           up into <backup dir> first; a line a game, then psxmerge ok <games> | psxmerge failed
+ *   PLAYPREP <sys>\t<card>\t<save>   (Coreshell, for the memory manager's Play) PLAY's card switch only: play ok
+ *                           <card>\t<the game's MGL> (Coreshell starts it) | play notfound | play psx | play failed
  *   IMAGE <sys>\t<card>\t<folder>  a game's save file as it is on the card (PSX: its 128 KB card image), to open it
  *                           save by save: image <bytes>, then its bytes in hex, 128 a line | image failed
  *   EXPORT <sys>\t<card>\t<id|*>\t<dir>   a game's files on that card (or every game's) into <dir>/<id>/: export ok
@@ -54,6 +60,7 @@
  * While a game runs, its save goes to the card as soon as the game saves (its save files changed and settled). */
 #define _GNU_SOURCE
 #include "smc.h"
+#include "smc_mcformat.h"
 #include "smc_sync.h"
 #include "smc_vcard.h"
 
@@ -161,6 +168,39 @@ static int read_line(int fd, char *buf, size_t n, int ms) {
     }
 }
 
+/* read_line for Main's frame socket: a line of ~270 characters a frame, read a chunk at a time rather than a byte at
+ * a time (two system calls a character took ~20 ms a frame on the SS1, more than the frame on the bus) */
+static char fbuf[2048];
+static size_t flen;
+static int fbuf_fd = -1;
+static int read_line_front(int fd, char *buf, size_t n, int ms) {
+    if (fd != fbuf_fd) {   /* a new connection: nothing kept from the last one */
+        fbuf_fd = fd;
+        flen = 0;
+    }
+    for (;;) {
+        char *nl = memchr(fbuf, '\n', flen);
+        if (nl) {
+            size_t l = (size_t)(nl - fbuf), k = l < n ? l : n - 1;
+            memcpy(buf, fbuf, k);
+            buf[k] = 0;
+            memmove(fbuf, nl + 1, flen - l - 1);
+            flen -= l + 1;
+            return 1;
+        }
+        if (flen == sizeof(fbuf))
+            flen = 0;   /* a line too long: dropped */
+        struct pollfd p = {fd, POLLIN, 0};
+        int r = poll(&p, 1, ms);
+        if (r <= 0)
+            return r < 0 && errno == EINTR ? 0 : r;
+        ssize_t g = recv(fd, fbuf + flen, sizeof(fbuf) - flen, 0);
+        if (g <= 0)
+            return -1;
+        flen += (size_t)g;
+    }
+}
+
 /* ---- the card: through Main's front ports (smc_shim) or, for testing, vcardd ---- */
 struct front {
     int fd, port;
@@ -168,7 +208,23 @@ struct front {
 static int frame_speed = SMC_SPEED;
 static int frame_errs;   /* frames a card never answered whole, logged (the first 200) */
 
+/* time on the bus, for the log: frames, and the milliseconds they took (Main's relay and the card) */
+static unsigned long raw_frames, raw_retries;
+static double raw_ms;
+static double now_ms(void) {
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    return t.tv_sec * 1000.0 + t.tv_nsec / 1e6;
+}
+static int front_raw_(struct front *f, const uint8_t *out, uint8_t *in, int len, int speed);
 static int front_raw(struct front *f, const uint8_t *out, uint8_t *in, int len, int speed) {
+    double t0 = now_ms();
+    int n = front_raw_(f, out, in, len, speed);
+    raw_ms += now_ms() - t0;
+    raw_frames++;
+    return n;
+}
+static int front_raw_(struct front *f, const uint8_t *out, uint8_t *in, int len, int speed) {
     char l[600];
     int k = snprintf(l, sizeof(l), "FRAME %d %d %d ", f->port, speed, SMC_ACK_TIMEOUT_MS);
     for (int i = 0; i < len; i++)
@@ -176,7 +232,7 @@ static int front_raw(struct front *f, const uint8_t *out, uint8_t *in, int len, 
     l[k++] = '\n';
     if (send_all(f->fd, l, (size_t)k))
         return -3;
-    if (read_line(f->fd, l, sizeof(l), 2000 + SMC_ACK_TIMEOUT_MS * 4) != 1)
+    if (read_line_front(f->fd, l, sizeof(l), 2000 + SMC_ACK_TIMEOUT_MS * 4) != 1)
         return -3;
     if (strncmp(l, "OK ", 3))
         return atoi(l + 4) ? atoi(l + 4) : -1;
@@ -210,6 +266,7 @@ static int front_frame(void *ctx, const uint8_t *out, uint8_t *in, int len) {
      * a frame that comes just after another now and then (08; on the SS1 a BitFunX card in port 1 misses the frame
      * after Hello every time, so the identity check never finished) */
     if (n == 0) {
+        raw_retries++;
         usleep(60000);
         n = front_raw(f, out, in, len, speed);
     }
@@ -285,7 +342,7 @@ static void hold(struct conn *c, int on) {
     char l[32];
     snprintf(l, sizeof(l), "HOLD %d\n", on);
     send_all(c->front.fd, l, strlen(l));
-    read_line(c->front.fd, l, sizeof(l), 2000);
+    read_line_front(c->front.fd, l, sizeof(l), 2000);
 }
 
 /* the last card that answered Hello but isn't a genuine Retro Remake card: the frontend's HELLO says so */
@@ -385,10 +442,29 @@ static int fetch(const char *url, const char *to);
 static int want_port;   /* 0: whichever answers; 1 or 2: the memory manager's port (PORT), for its connection */
 static int card_open_bus(struct conn *c);
 
+static int files_card;   /* the card open is version 4 (set by card_open): PSX is each game's own PS1 card */
+/* the frontend's "PSX": on a version 4 card each game's own PS1 card (what the game reads), Super MemCard's own PSX
+ * folder before (PSXMERGE moves what's there) */
+static const char *store_of(const char *sys) { return files_card && !strcmp(sys, "PSX") ? SMC_PS1CARD : sys; }
+/* a game's card folder, not PS1 mode's own (Card1, Card2..., BOOT) */
+static int ps1_game_folder(const char *id) {
+    if (!strcmp(id, "BOOT"))
+        return 0;
+    if (!strncmp(id, "Card", 4) && id[4]) {
+        for (const char *p = id + 4; *p; p++)
+            if (*p < '0' || *p > '9')
+                return 1;
+        return 0;
+    }
+    return 1;
+}
+
+static int ps1card_drop_empty(struct conn *c, const char *id);
 static int card_open(struct conn *c) {
     char who[120];
     memset(c, 0, sizeof(*c));
     c->front.fd = -1;
+    files_card = 0;
     if (mc_lock(10000, who, sizeof(who))) {
         static char said[120];
         if (strcmp(said, who))
@@ -396,8 +472,10 @@ static int card_open(struct conn *c) {
         snprintf(said, sizeof(said), "%s", who);
         return 0;
     }
-    if (card_open_bus(c))
+    if (card_open_bus(c)) {
+        files_card = c->card.version >= SMC_PROTOCOL_FILES;
         return 1;
+    }
     mc_unlock();
     return 0;
 }
@@ -439,6 +517,7 @@ static int card_open_bus(struct conn *c) {
     usleep(100000);   /* a card that refused Hello can miss the next frame for a moment: leave it alone */
     hold(c, 0);
     close(c->front.fd);
+    fbuf_fd = -1;
     return 0;
 }
 
@@ -484,15 +563,39 @@ static void probe(int fd) {
     }
     hold(&c, 0);
     close(c.front.fd);
+    fbuf_fd = -1;
     mc_unlock();
 }
 
+/* the card's progress bar while this connection reads or writes files on it (a version 4 card): "Saving Zelda"... The bar
+ * goes at card_close */
+static char xfer_text[SMC_PROGRESS_TEXT + 1];
+static void xfer_begin(struct conn *c, const char *what, const char *name) {
+    if (c->card.version < SMC_PROTOCOL_FILES)
+        return;
+    char nm[SMC_GAME_NAME_MAX + 1];
+    smc_display_name(name ? name : "", nm, sizeof(nm));
+    snprintf(xfer_text, sizeof(xfer_text), "%s%s%s", what, nm[0] ? " " : "", nm);
+    smc_xfer_text = xfer_text;
+    smc_progress(&c->bus, 0, xfer_text);
+}
+
 static void card_close(struct conn *c) {
+    if (raw_frames > 50)
+        lg("bus: %lu frames, %.0f ms on the bus (%.2f ms each), %lu tried again after a miss", raw_frames, raw_ms,
+           raw_ms / raw_frames, raw_retries);
+    raw_frames = raw_retries = 0;
+    raw_ms = 0;
+    if (smc_xfer_text) {
+        smc_progress(&c->bus, -1, NULL);   /* done: the card's own screen again */
+        smc_xfer_text = NULL;
+    }
     if (c->vcard)
         smc_vcard_close(&c->bus);
     else if (c->front.fd >= 0) {
         hold(c, 0);
         close(c->front.fd);
+        fbuf_fd = -1;   /* (the next connection can get the same fd: nothing of this one kept) */
     }
     mc_unlock();
 }
@@ -617,7 +720,9 @@ static const char *mister_cmd(void) {
     return e && *e ? e : "/dev/MiSTer_cmd";
 }
 
-static void play(int fd, struct conn *c, const struct smc_sync_cfg *k, char *a, struct smc_sync_report *rep) {
+/* load: Main loads the game (PLAY); else (PLAYPREP, Coreshell's) only the card switch, the game's MGL in the answer:
+ * Coreshell starts it, with its settings */
+static void play(int fd, struct conn *c, const struct smc_sync_cfg *k, char *a, struct smc_sync_report *rep, int load) {
     char *t1 = strchr(a, '\t'), *t2 = t1 ? strchr(t1 + 1, '\t') : NULL;
     if (!t1 || !t2) {
         say(fd, "play failed\n");
@@ -650,6 +755,11 @@ static void play(int fd, struct conn *c, const struct smc_sync_cfg *k, char *a, 
     }
     if (smc_use_card(&c->bus, k, sys, game, card, rep) != 0) {
         say(fd, "play failed\n");
+        return;
+    }
+    if (!load) {
+        lg("%s: %s's save on card %d picked, for Coreshell to start it (%s)", sys, game, card, mgl);
+        say(fd, "play ok %d\t%s\n", card, mgl);
         return;
     }
     FILE *m = fopen(mister_cmd(), "w");
@@ -705,6 +815,7 @@ static void leave_game(void) {
     struct conn c;
     if (!card_open(&c))
         return;
+    xfer_begin(&c, "Saving", play_game);
     struct smc_sync_cfg k = cfg();
     struct smc_sync_report rep;
     memset(&rep, 0, sizeof(rep));
@@ -794,6 +905,7 @@ static void launch_game(const char *sys, const char *game, const char *mgl) {
     if (card > 0 && play_game[0]) {
         struct smc_sync_cfg k = cfg();
         struct smc_sync_report rep;
+        xfer_begin(&c, "Loading", play_game);
         int rc = smc_sync_game(&c.bus, &k, sys, play_game, &rep);
         if (rc < 0)
             lg("game sync stopped with an error");
@@ -818,6 +930,7 @@ static void do_menu(void) {
     struct conn c;
     if (!card_open(&c))
         return;
+    xfer_begin(&c, "Saving", game);
     struct smc_sync_cfg k = cfg();
     struct smc_sync_report rep;
     memset(&rep, 0, sizeof(rep));
@@ -865,6 +978,7 @@ static void game_poll(void) {
     }
     struct smc_sync_cfg k = cfg();
     struct smc_sync_report rep;
+    xfer_begin(&c, "Saving", play_game);
     int rc = smc_push_game(&c.bus, &k, play_sys, play_game, &rep);   /* push only: the game has its save open */
     if (rc < 0)
         lg("in-game sync stopped with an error");
@@ -990,14 +1104,21 @@ static void section(int fd, struct conn *c, const struct smc_sync_cfg *k, int wi
         char *lines = NULL, id[65];
         size_t ll = 0, cap = 0;
         int n = 0;
-        for (int i = 0; list_card_r(&c->bus, sys, card, i, id) == SMC_OK; i++) {
+        const char *st = store_of(sys);   /* (PSX: each game's own PS1 card) */
+        for (int i = 0; list_card_r(&c->bus, st, card, i, id) == SMC_OK; i++) {
             struct smc_game_info gi;
-            if (game_info_r(&c->bus, sys, card, id, &gi) != SMC_OK)
+            if (st != sys && !ps1_game_folder(id))
+                continue;   /* (PSX: not PS1 mode's own cards) */
+            if (st != sys && ps1card_drop_empty(c, id) == 1) {
+                i--;   /* a game's card with no save: deleted (the next one is at this place now) */
+                continue;
+            }
+            if (game_info_r(&c->bus, st, card, id, &gi) != SMC_OK)
                 continue;
             if (!gi.files && !gi.has_icon && !gi.name[0])
                 continue;   /* a deleted game (DELGAME, CLEAR): nothing of it left */
             if (gi.has_icon)
-                card_icon(c, sys, card, id);
+                card_icon(c, st, card, id);
             char key[200], line[1024];
             snprintf(key, sizeof(key), "%s\t%d\t%s", sys, card, gi.save_name);
             int both = 0;
@@ -1122,6 +1243,266 @@ static int export_game(struct conn *c, const char *sys, int card, const char *id
     return done ? done : -1;   /* (nothing of that game on that card) */
 }
 
+/* ---- PSX: each game's own PS1 card is the store (card version 4: PS1CARD) ---- */
+
+static int read_whole(const char *path, uint8_t *buf, size_t n) {
+    FILE *f = fopen(path, "rb");
+    if (!f)
+        return -1;
+    size_t got = fread(buf, 1, n, f);
+    int more = fgetc(f) != EOF;
+    fclose(f);
+    return more ? -1 : (int)got;
+}
+static int write_whole(const char *path, const uint8_t *buf, size_t n) {
+    FILE *f = fopen(path, "wb");
+    if (!f)
+        return -1;
+    int ok = fwrite(buf, 1, n, f) == n;
+    ok &= fclose(f) == 0;
+    return ok ? 0 : -1;
+}
+
+static int export_game(struct conn *c, const char *sys, int card, const char *id, const char *dir);
+static int import_game(struct conn *c, const char *sys, int card, const char *dir, const char *id);
+static int delete_game(struct conn *c, const char *sys, int card, const char *id);
+
+/* PS1 mode's default card back on the bus (it lets go of a game's own card it had open): 0 */
+static int psx_free;   /* EXPORT/IMPORT PSX with no PSX game running: a busy game card may be let go */
+static int psx_let_go(struct conn *c) {
+    smc_ps1_default_card(&c->bus);
+    usleep(500000);
+    return 0;
+}
+
+/* a game's own PS1 card (MemoryCards/PS1/<id>/<id>-1.mcd) into img: 1 read, 0 there's none yet, <0 failed. The card
+ * PS1 mode has open can't be read (its copy in memory is the newer one): the card goes back to its default card first */
+
+static int ps1card_read(struct conn *c, const char *id, const char *tmp, uint8_t img[MC_SIZE]) {
+    char path[1300];
+    for (int tries = 0; tries < 2; tries++) {
+        int n = smc_select_card(&c->bus, SMC_PS1CARD, id, 1, NULL);
+        if (n == 0)
+            return 0;   /* no card for that game yet */
+        if (n < 0)
+            return n;
+        int r = export_game(c, SMC_PS1CARD, 1, id, tmp);
+        snprintf(path, sizeof(path), "%s/%s/%s-1.mcd", tmp, id, id);
+        if (r > 0 && read_whole(path, img, MC_SIZE) == MC_SIZE)
+            return 1;
+        if (r > 0)
+            return 0;   /* (other files there, no channel 1 card) */
+        smc_ps1_default_card(&c->bus);   /* busy: PS1 mode has it open */
+        usleep(500000);
+    }
+    return -1;
+}
+
+/* a game's own PS1 card, from smcd's copy (<state>/ps1cards/<id>-1.mcd and .crc) while the card's CRC of it is the
+ * same, else read and kept: 1, or <0 (no card for that game: <0 too) */
+static int ps1card_cached(struct conn *c, const char *id, uint8_t img[MC_SIZE]) {
+    if (!safe_part(id))
+        return -1;
+    char kd[1200], kp[1300], kc[1300], line[32] = "";
+    snprintf(kd, sizeof(kd), "%s/ps1cards", state);
+    snprintf(kp, sizeof(kp), "%s/%s-1.mcd", kd, id);
+    snprintf(kc, sizeof(kc), "%s/%s-1.crc", kd, id);
+    int n = smc_select_card(&c->bus, SMC_PS1CARD, id, 1, NULL);
+    uint32_t crc = 0;
+    int have = 0;
+    for (int i = 0; i < n; i++) {
+        struct smc_file fi;
+        char want[40];
+        snprintf(want, sizeof(want), "%s-1.mcd", id);
+        if (smc_info(&c->bus, i, &fi) == SMC_OK && !fi.deleted && !strcasecmp(fi.name, want)) {
+            crc = fi.gen;
+            have = 1;
+        }
+    }
+    if (!have)
+        return -1;
+    FILE *f = fopen(kc, "r");
+    if (f) {
+        if (!fgets(line, sizeof(line), f))
+            line[0] = 0;
+        fclose(f);
+    }
+    if (line[0] && strtoul(line, NULL, 16) == crc && read_whole(kp, img, MC_SIZE) == MC_SIZE)
+        return 1;   /* unchanged since smcd read it */
+    if (ps1card_read(c, id, "/tmp/smc_ps1card", img) != 1)
+        return -1;
+    if (!mkdir_p(kd) && !write_whole(kp, img, MC_SIZE) && (f = fopen(kc, "w"))) {
+        fprintf(f, "%08x\n", crc);
+        fclose(f);
+    }
+    return 1;
+}
+
+/* smcd's copy of a game's own PS1 card dropped (the card itself deleted) */
+static void ps1card_forget(const char *id) {
+    if (!safe_part(id))
+        return;
+    char kp[1300];
+    snprintf(kp, sizeof(kp), "%s/ps1cards/%s-1.mcd", state, id);
+    unlink(kp);
+    snprintf(kp, sizeof(kp), "%s/ps1cards/%s-1.crc", state, id);
+    unlink(kp);
+}
+
+/* a game's own PS1 card with no save on it (PS1 mode makes a blank one the first time a game is started, saves or
+ * not): deleted, so the memory manager doesn't list it. 1 deleted, 0 kept (it has saves), <0 couldn't tell */
+static int ps1card_drop_empty(struct conn *c, const char *id) {
+    static uint8_t img[MC_SIZE];
+    if (ps1card_cached(c, id, img) != 1)
+        return -1;
+    mc_card_t k;
+    if (mc_formatted(img) && (mc_parse(img, &k), k.nsaves > 0))
+        return 0;
+    for (size_t i = 0; i < MC_SIZE && !mc_formatted(img); i++)
+        if (img[i] != 0xFF && img[i] != 0x00)
+            return 0;   /* not formatted, and not blank either: something's there, kept */
+    char want[40];
+    snprintf(want, sizeof(want), "%s-1.mcd", id);
+    for (int tries = 0; tries < 2; tries++) {
+        int n = smc_select_card(&c->bus, SMC_PS1CARD, id, 1, NULL);
+        for (int i = 0; i < n; i++) {
+            struct smc_file fi;
+            if (smc_info(&c->bus, i, &fi) == SMC_OK && !fi.deleted && !strcasecmp(fi.name, want) &&
+                smc_delete(&c->bus, i, fi.gen + 1, (uint32_t)time(NULL)) == SMC_OK) {
+                lg("PSX: %s's card had no saves: deleted", id);
+                ps1card_forget(id);
+                return 1;
+            }
+        }
+        smc_ps1_default_card(&c->bus);   /* (PS1 mode had it open: the default card, then once more) */
+        usleep(500000);
+    }
+    return -1;
+}
+
+/* PSXMERGE <backup dir>: Super MemCard's own PSX copies (SuperMemCard/PSX/Card1/<id>/) into each game's own PS1 card,
+ * which is the PSX store from now on (what the game reads is what the memory manager shows). Every copy goes to
+ * <backup dir> first (EXPORT's layout: the memory manager's library backup). Then, game by game: the saves the game's
+ * card doesn't have are added to it (where both have a save of the same name, the game's card's is kept: it's what the
+ * game last read); the card written back and read again to check; only then is the copy taken off the card.
+ * Answers a line a game: "merge <id> added <n> kept <n> noroom <n> <ok|failed>", then psxmerge ok <games> | failed */
+static void psx_merge(int fd, struct conn *c, const char *dir) {
+    char id[65];
+    int games = 0, bad = 0;
+    if (c->card.version < SMC_PROTOCOL_FILES) {
+        say(fd, "psxmerge failed (card firmware %u: version 4 needed)\n", c->card.version);
+        return;
+    }
+    if (dir[0] != '/' || strstr(dir, "..") || mkdir_p(dir)) {
+        say(fd, "psxmerge failed\n");
+        return;
+    }
+    /* the copies, all of them, before anything changes */
+    char ids[64][65];
+    int nid = 0;
+    read_errs = 0;
+    for (int i = 0; nid < 64 && list_card_r(&c->bus, "PSX", 1, i, id) == SMC_OK; i++) {
+        struct smc_game_info gi;
+        if (game_info_r(&c->bus, "PSX", 1, id, &gi) != SMC_OK || !gi.files)
+            continue;
+        if (export_game(c, "PSX", 1, id, dir) < 0) {
+            lg("PSX merge: %s couldn't be backed up: nothing changed", id);
+            say(fd, "psxmerge failed (backup of %s)\n", id);
+            return;
+        }
+        snprintf(ids[nid++], 65, "%s", id);
+    }
+    if (read_errs) {
+        say(fd, "psxmerge failed (the card's list)\n");
+        return;
+    }
+    const char *tmp = "/tmp/smc_psxmerge/read";   /* (not in the backup: the library would list it) */
+    static uint8_t smc_img[MC_SIZE], card_img[MC_SIZE], merged[MC_SIZE], back[MC_SIZE], mcs[128 + 15 * MC_BLOCK];
+    for (int g = 0; g < nid; g++) {
+        const char *gid = ids[g];
+        /* the copy: its biggest file (the 128 KB card image) */
+        char gd[1300], path[1400];
+        snprintf(gd, sizeof(gd), "%s/%s", dir, gid);
+        DIR *d = opendir(gd);
+        struct dirent *e;
+        int have = 0;
+        while (d && (e = readdir(d)))
+            if (e->d_name[0] != '.' && strcmp(e->d_name, "times.txt")) {
+                snprintf(path, sizeof(path), "%s/%s", gd, e->d_name);
+                if (read_whole(path, smc_img, MC_SIZE) == MC_SIZE && mc_formatted(smc_img))
+                    have = 1;
+                if (have)
+                    break;
+            }
+        if (d)
+            closedir(d);
+        if (!have) {
+            say(fd, "merge %s: no card image in the copy, left as it is\n", gid);
+            continue;
+        }
+        int r = ps1card_read(c, gid, tmp, card_img);
+        if (r < 0) {
+            say(fd, "merge %s: its own card couldn't be read, left as it is\n", gid);
+            bad = 1;
+            continue;
+        }
+        if (r == 1) {   /* the game's card as it was, kept in smcd's state (<state>/psxmerge/<id>-1.mcd) before it changes */
+            char kd[1200], kp[1300];
+            snprintf(kd, sizeof(kd), "%s/psxmerge", state);
+            snprintf(kp, sizeof(kp), "%s/%s-1.mcd", kd, gid);
+            if (mkdir_p(kd) || write_whole(kp, card_img, MC_SIZE)) {
+                say(fd, "merge %s: its card couldn't be kept first, left as it is\n", gid);
+                bad = 1;
+                continue;
+            }
+        }
+        if (r == 0 || !mc_formatted(card_img))
+            mc_blank(card_img);
+        memcpy(merged, card_img, MC_SIZE);
+        mc_card_t sc, cc;
+        mc_parse(smc_img, &sc);
+        mc_parse(card_img, &cc);
+        int added = 0, kept = 0, noroom = 0;
+        for (int i = 0; i < sc.nsaves; i++) {
+            if (sc.saves[i].broken)
+                continue;
+            int same = 0;
+            for (int j = 0; j < cc.nsaves; j++)
+                same |= !strcmp(cc.saves[j].name, sc.saves[i].name);
+            if (same) {
+                kept++;
+                continue;
+            }
+            size_t n = 0;
+            const char *err = NULL;
+            if (mc_export(smc_img, sc.saves[i].slot, mcs, &n, &err) || mc_import(merged, mcs, n, &err)) {
+                lg("PSX merge: %s %s: %s", gid, sc.saves[i].name, err ? err : "?");
+                noroom++;
+                continue;
+            }
+            added++;
+        }
+        int ok = 1;
+        if (added) {
+            const char *wdir = "/tmp/smc_psxmerge/write";
+            snprintf(gd, sizeof(gd), "%s/%s", wdir, gid);
+            snprintf(path, sizeof(path), "%s/%s-1.mcd", gd, gid);
+            ok = !mkdir_p(gd) && !write_whole(path, merged, MC_SIZE) && import_game(c, SMC_PS1CARD, 1, wdir, gid) > 0;
+            /* read back: exactly what was written */
+            ok = ok && ps1card_read(c, gid, tmp, back) == 1 && !memcmp(back, merged, MC_SIZE);
+        }
+        /* the copy goes only when every save of it is on the game's card */
+        if (ok && !noroom)
+            ok = delete_game(c, "PSX", 1, gid) >= 0;
+        lg("PSX merge: %s: %d added, %d kept (the game's card had them), %d without room: %s", gid, added, kept, noroom,
+           ok ? (noroom ? "the copy kept" : "the copy taken off") : "failed");
+        say(fd, "merge %s added %d kept %d noroom %d %s\n", gid, added, kept, noroom, ok ? "ok" : "failed");
+        bad |= !ok;
+        games++;
+    }
+    say(fd, bad ? "psxmerge failed\n" : "psxmerge ok %d\n", games);
+}
+
 /* <dir>/<id>/ onto a virtual card. The files written, or <0 */
 static int import_game(struct conn *c, const char *sys, int card, const char *dir, const char *id) {
     if (!safe_part(id))
@@ -1232,9 +1613,50 @@ static void do_command(int fd, char *l) {
     memset(&rep, 0, sizeof(rep));
     char *a = strchr(l, ' ');
     a = a ? a + 1 : l + strlen(l);
+    /* the card's progress bar for the commands that move saves */
+    static const struct { const char *verb, *what; } bars[] = {
+        {"READ", "Reading card"}, {"EXPORT ", "Copying"}, {"IMPORT ", "Writing"}, {"IMAGE ", "Reading"},
+        {"PLAY ", "Loading"}, {"PLAYPREP ", "Loading"}, {"USE ", "Loading"}, {"DELGAME ", "Deleting"},
+        {"CLEAR ", "Clearing card"}, {"DELETE ", "Deleting"}, {"PSXMERGE ", "Moving PSX saves"}};
+    for (size_t i = 0; i < sizeof(bars) / sizeof(bars[0]); i++)
+        if (!strncmp(l, bars[i].verb, strlen(bars[i].verb)) && (bars[i].verb[strlen(bars[i].verb) - 1] == ' ' || !l[strlen(bars[i].verb)])) {
+            /* the game, when the command names one: its last field (a save, an ID...) */
+            const char *nm = NULL;
+            if (strcmp(bars[i].verb, "READ") && strcmp(bars[i].verb, "CLEAR ") && strcmp(bars[i].verb, "PSXMERGE ")) {
+                nm = strrchr(a, '\t');
+                nm = nm ? nm + 1 : a;
+                if (!strcmp(bars[i].verb, "EXPORT ") || !strcmp(bars[i].verb, "IMPORT ")) {
+                    /* EXPORT/IMPORT <sys>\t<card>\t<id>\t<dir>: the id */
+                    char *f2 = strchr(a, '\t'), *f3 = f2 ? strchr(f2 + 1, '\t') : NULL, *f4 = f3 ? strchr(f3 + 1, '\t') : NULL;
+                    static char id[80];
+                    snprintf(id, sizeof(id), "%.*s", f3 && f4 ? (int)(f4 - f3 - 1) : 0, f3 ? f3 + 1 : "");
+                    nm = strcmp(id, "*") ? id : "saves";
+                }
+            }
+            xfer_begin(&c, bars[i].what, nm);
+            break;
+        }
     if (!strcmp(l, "HELLO")) {
         say(fd, "card %s version %u features 0x%02x free_kb %u\n", c.card.id, c.card.version, c.card.features,
             c.card.free_kb);
+    } else if (!strncmp(l, "SELECT ", 7)) {
+        /* (Coreshell, just before a game's core loads) the game being started: <sys> \t <game ID>. PSX: that game's own
+         * PS1 card on the bus (set game ID); other systems: Core, the card in that system's mode */
+        char *f[2];
+        if (split_tabs(a, f, 2) != 2 || !f[0][0] || !f[1][0])
+            say(fd, "select failed\n");
+        else if (!strcmp(f[0], "PSX")) {
+            int r = smc_ps1_set_game_id(&c.bus, f[1]);
+            lg("PSX: game %s %s", f[1], r == SMC_OK ? "selected on the card" : "not taken by the card");
+            say(fd, r == SMC_OK ? "select ok\n" : "select failed\n");
+        } else {
+            int card = smc_core(&c.bus, f[0], true);
+            lg("%s: game %s, %s %d", f[0], f[1], card > 0 ? "card" : "the card didn't answer Core", card);
+            if (card > 0)
+                say(fd, "select ok %d\n", card);
+            else
+                say(fd, "select failed\n");
+        }
     } else if (!strcmp(l, "READ")) {
         smc_icons_retry(true); /* a manual read: games still on their system's icon are looked for again */
         int rr = smc_sync(&c.bus, &k, &rep);
@@ -1255,15 +1677,24 @@ static void do_command(int fd, char *l) {
         sscanf(a, "%64s %d", sys, &card);
         char id[65];
         read_errs = 0;
-        for (int i = 0; list_card_r(&c.bus, sys, card, i, id) == SMC_OK; i++) {
+        const char *st = store_of(sys);   /* (PSX: each game's own PS1 card) */
+        for (int i = 0; list_card_r(&c.bus, st, card, i, id) == SMC_OK; i++) {
             struct smc_game_info gi;
-            if (game_info_r(&c.bus, sys, card, id, &gi) != SMC_OK)
+            if (strcmp(st, sys) && !ps1_game_folder(id))
+                continue;   /* (PSX: not PS1 mode's own cards) */
+            if (strcmp(st, sys) && ps1card_drop_empty(&c, id) == 1) {
+                i--;   /* a game's card with no save: deleted (the next one is at this place now) */
+                continue;
+            }
+            if (game_info_r(&c.bus, st, card, id, &gi) != SMC_OK)
                 continue;
             if (gi.has_icon)
-                card_icon(&c, sys, card, id);
+                card_icon(&c, st, card, id);
             if (gi.files || gi.has_icon || gi.name[0]) /* as SECTION: a game folder with no save yet too, not a deleted one */
                 say(fd, "%s\t%s\t%u\t%d\t%u\t%d\t%s\t%s\t%s\n", gi.name[0] ? gi.name : gi.title[0] ? gi.title : gi.save_name,
                     gi.id, gi.time, gi.files, gi.bytes, gi.has_icon ? 1 : 0, gi.save_name, id, gi.label);
+            if (!strcmp(st, sys) && (gi.files || gi.has_icon)) /* the menus show its picture big (PSX: the library's) */
+                smc_icon_want_cover(&k, sys, id, gi.name[0] ? gi.name : gi.save_name);
         }
         if (read_errs)
             say(fd, "partial\t%d\n", read_errs);
@@ -1294,11 +1725,19 @@ static void do_command(int fd, char *l) {
         if (split_tabs(a, f, 4) != 4 || f[3][0] != '/' || strstr(f[3], "..") || atoi(f[1]) < 1 || atoi(f[1]) > 99) {
             say(fd, "%s failed\n", imp ? "import" : "export");
         } else {
+            /* PSX: each game's own PS1 card; one PS1 mode still has open (from the last game played) is let go first,
+             * unless a PSX game is running now */
+            psx_free = !strcmp(f[0], "PSX") && strcmp(play_sys, "PSX");
+            f[0] = (char *)store_of(f[0]);
             int card = atoi(f[1]);
+            if (psx_free && !strcmp(f[0], SMC_PS1CARD))
+                psx_let_go(&c);     /* (a game's card still open in PS1 mode answers "busy": let go of first) */
             if (!imp && mkdir_p(f[3]))
                 bad = 1;
             if (strcmp(f[2], "*")) {
                 int r = bad ? -1 : imp ? import_game(&c, f[0], card, f[3], f[2]) : export_game(&c, f[0], card, f[2], f[3]);
+                if (r < 0 && !bad && psx_free && !psx_let_go(&c))
+                    r = imp ? import_game(&c, f[0], card, f[3], f[2]) : export_game(&c, f[0], card, f[2], f[3]);
                 if (r < 0)
                     bad = 1;
                 else {
@@ -1310,12 +1749,17 @@ static void do_command(int fd, char *l) {
                 read_errs = 0;
                 for (int i = 0; !bad && list_card_r(&c.bus, f[0], card, i, id) == SMC_OK; i++) {
                     struct smc_game_info gi;
+                    if (!strcmp(f[0], SMC_PS1CARD) && !ps1_game_folder(id))
+                        continue;   /* (PSX: not PS1 mode's own cards, Card1...) */
                     if (game_info_r(&c.bus, f[0], card, id, &gi) != SMC_OK || !gi.files)
                         continue;   /* (a game whose saves are gone) */
                     int r = export_game(&c, f[0], card, id, f[3]);
-                    if (r < 0)
+                    if (r < 0 && psx_free && !psx_let_go(&c))
+                        r = export_game(&c, f[0], card, id, f[3]);
+                    if (r < 0) {
+                        lg("export: %s card %d: %s failed (%d)", f[0], card, id, r);
                         bad = 1;
-                    else {
+                    } else {
                         games++;
                         files += r;
                     }
@@ -1326,9 +1770,11 @@ static void do_command(int fd, char *l) {
                 DIR *d = opendir(f[3]);
                 struct dirent *e;
                 while (d && !bad && (e = readdir(d))) {
-                    if (e->d_name[0] == '.')
-                        continue;
+                    if (e->d_name[0] == '.' || (!strcmp(f[0], SMC_PS1CARD) && !ps1_game_folder(e->d_name)))
+                        continue;   /* (PSX: never onto PS1 mode's own cards) */
                     int r = import_game(&c, f[0], card, f[3], e->d_name);
+                    if (r < 0 && psx_free && !psx_let_go(&c))
+                        r = import_game(&c, f[0], card, f[3], e->d_name);
                     if (r < 0)
                         bad = 1;
                     else {
@@ -1346,20 +1792,40 @@ static void do_command(int fd, char *l) {
                    imp ? "from" : "to", f[3]);
             say(fd, bad ? "%s failed\n" : "%s ok %d %d\n", imp ? "import" : "export", games, files);
         }
+    } else if (!strncmp(l, "PSXMERGE ", 9)) {
+        psx_merge(fd, &c, a);
     } else if (!strncmp(l, "DELGAME ", 8)) {
         /* DELGAME <sys>\t<card>\t<id>: that game's saves off that card only: delgame ok <files> | delgame failed */
         char *f[3];
-        int r = split_tabs(a, f, 3) == 3 && !(play_sys[0] && !strcmp(play_sys, f[0])) ? delete_game(&c, f[0], atoi(f[1]), f[2]) : -1;
+        int r = split_tabs(a, f, 3) == 3 && !(play_sys[0] && !strcmp(play_sys, f[0])) ? delete_game(&c, store_of(f[0]), atoi(f[1]), f[2]) : -1;
         if (r >= 0)
             lg("%s card %s: %s deleted (%d file(s))", f[0], f[1], f[2], r);
+        if (r >= 0 && !strcmp(store_of(f[0]), SMC_PS1CARD))
+            ps1card_forget(f[2]);
         say(fd, r >= 0 ? "delgame ok %d\n" : "delgame failed\n", r);
     } else if (!strncmp(l, "IMAGE ", 6)) {
         /* a save's file as it is on the card (PSX: its 128 KB card image), for a frontend to open save by save */
         char *f1 = strchr(a, '\t'), *f2 = f1 ? strchr(f1 + 1, '\t') : NULL;
         if (!f2) {
             say(fd, "image failed\n");
+        } else if (*f1 = *f2 = 0, store_of(a) != a) {
+            /* PSX: the game's own PS1 card, from smcd's copy while its CRC (the card's generation for it) is the same */
+            static uint8_t img[MC_SIZE];
+            int r = ps1card_cached(&c, f2 + 1, img);
+            if (r != 1) {
+                say(fd, "image failed\n");
+            } else {
+                say(fd, "image %u\n", MC_SIZE);
+                char line[300];
+                for (uint32_t o = 0; o < MC_SIZE; o += 128) {
+                    int k = 0;
+                    for (uint32_t j = o; j < o + 128; j++)
+                        k += snprintf(line + k, sizeof(line) - k, "%02x", img[j]);
+                    line[k++] = '\n';
+                    send_all(fd, line, (size_t)k);
+                }
+            }
         } else {
-            *f1 = *f2 = 0;
             int card = atoi(f1 + 1), n = smc_select_card(&c.bus, a, f2 + 1, card, NULL), best = -1;
             struct smc_file fi;
             uint32_t size = 0;
@@ -1453,7 +1919,9 @@ static void do_command(int fd, char *l) {
             say(fd, r == 0 ? "name ok\n" : r == -2 ? "name nosave\n" : "name failed\n");
         }
     } else if (!strncmp(l, "PLAY ", 5)) {
-        play(fd, &c, &k, a, &rep);
+        play(fd, &c, &k, a, &rep, 1);
+    } else if (!strncmp(l, "PLAYPREP ", 9)) {
+        play(fd, &c, &k, a, &rep, 0);
     } else if (!strncmp(l, "USE ", 4)) {
         /* a save picked in the OSD: this SuperStation's saves to their card, the picked card's in. Main then starts the
          * game again, so it loads that save */

@@ -69,6 +69,20 @@ int smc_select_card(const struct smc_bus *b, const char *sys, const char *game, 
 int smc_core(const struct smc_bus *b, const char *sys, bool running);
 /* Core, setting the system's virtual card to use from now on (a save picked on the SuperStation). The card, or <0. */
 int smc_core_set_card(const struct smc_bus *b, const char *sys, int card);
+/* PS1: put a game's own card on the bus (the MMCE set-game-ID command, 81 21 00 LEN ID, as ODEs send it on a real
+ * PlayStation): the card opens that game's card, a blank one if it has none. id: e.g. "SLUS-01041". SMC_OK, or <0. */
+int smc_ps1_set_game_id(const struct smc_bus *b, const char *id);
+/* the card back on its default PS1 card (leaves a game's own card, so that card's file can be read or written) */
+int smc_ps1_default_card(const struct smc_bus *b);
+/* (card version 4) the card's progress bar: pct 0..100 with text over its screen; pct < 0: done, its screen again */
+#define SMC_PROGRESS_TEXT 32
+int smc_progress(const struct smc_bus *b, int pct, const char *text);
+/* set (to "Copying Chrono Cross"...) while a job reads or writes files on a version 4 card: smc_read_file and
+ * smc_write_file show their share done on the card's progress bar as they go; NULL: no bar */
+extern const char *smc_xfer_text;
+/* PS1 mode's own per-game cards as files: the system name for Select / List (card version 4) */
+#define SMC_PS1CARD "PS1CARD"
+#define SMC_BUSY_STATUS 0x42
 /* Core with the card's screen for the running system (card version 3 on, SMC_PROTOCOL_GAME): its lines are the header
  * (the system's name), the game, when its save was made, the save's state and its size; NULL or "" : empty. The game
  * line takes 48 characters (it scrolls), the others 16. The system's current card, or <0. */
@@ -102,6 +116,7 @@ int smc_list_card(const struct smc_bus *b, const char *sys, int card, int idx, c
 #define SMC_CARDS_MAX 99
 #define SMC_PROTOCOL 2 /* 2: Core and virtual cards (the least a card needs) */
 #define SMC_PROTOCOL_GAME 3 /* the card takes its screen in Core (smc_core_screen) */
+#define SMC_PROTOCOL_FILES 4 /* PS1 mode's per-game cards as files (SMC_PS1CARD), the progress bar (smc_progress) */
 
 /* ---- the card's identity (docs/12-card-identity.md) ---- */
 #define SMC_FEATURE_IDENTITY 0x10 /* Hello's features: the card has CERT, AUTH and AUTHSIG */

@@ -1,0 +1,95 @@
+--- a/src/gui.c
++++ b/src/gui.c
+@@ -837,6 +837,52 @@
+     lv_obj_add_style(lbl, &style_inv, 0);
+ }
+ 
++#if WITH_SUPERMEMCARD
++/* the SS1's progress bar (Super MemCard's Progress): over whichever screen is up, back to it when done */
++static lv_obj_t *scr_smc_progress, *smc_prog_bar, *smc_prog_text, *smc_prog_pct;
++
++static void create_smc_progress_screen(void) {
++    scr_smc_progress = ui_scr_create();
++    ui_header_create(scr_smc_progress, "SuperStation", true);
++    static lv_style_t style_progress;
++    lv_style_init(&style_progress);
++    lv_style_set_line_width(&style_progress, 12);
++    lv_style_set_line_color(&style_progress, lv_palette_main(LV_PALETTE_BLUE));
++    smc_prog_bar = lv_line_create(scr_smc_progress);
++    lv_obj_set_width(smc_prog_bar, DISPLAY_WIDTH);
++    lv_obj_add_style(smc_prog_bar, &style_progress, 0);
++    smc_prog_text = lv_label_create(scr_smc_progress);
++    lv_obj_set_align(smc_prog_text, LV_ALIGN_TOP_LEFT);
++    lv_obj_set_pos(smc_prog_text, 0, 14);
++    lv_obj_set_width(smc_prog_text, DISPLAY_WIDTH);
++    lv_label_set_long_mode(smc_prog_text, LV_LABEL_LONG_DOT);   /* still: a scrolling line would be redrawn between blocks */
++    lv_label_set_text(smc_prog_text, "");
++    smc_prog_pct = lv_label_create(scr_smc_progress);
++    lv_obj_set_align(smc_prog_pct, LV_ALIGN_TOP_LEFT);
++    lv_obj_set_pos(smc_prog_pct, 0, DISPLAY_HEIGHT - 9);
++    lv_label_set_text(smc_prog_pct, "");
++}
++
++/* the bar and text as the SS1 last sent them */
++static void update_smc_progress(int pct, const char *text) {
++    static lv_point_t pts[2] = {{0, DISPLAY_HEIGHT / 2 + 4}, {0, DISPLAY_HEIGHT / 2 + 4}};
++    static int shown = -2;
++    static char shown_text[SMC_PROGRESS_TEXT + 1];
++    if (pct != shown) {
++        shown = pct;
++        pts[1].x = (lv_coord_t)(DISPLAY_WIDTH * pct / 100);
++        lv_line_set_points(smc_prog_bar, pts, 2);
++        static char p[8];
++        snprintf(p, sizeof(p), "%d%%", pct);
++        lv_label_set_text(smc_prog_pct, p);
++    }
++    if (strcmp(text, shown_text)) {
++        snprintf(shown_text, sizeof(shown_text), "%s", text);
++        lv_label_set_text(smc_prog_text, shown_text);
++    }
++}
++#endif
++
+ static void create_cardswitch_screen(void) {
+     scr_card_switch = ui_scr_create();
+ 
+@@ -1288,6 +1334,9 @@
+     create_main_screen();
+     create_menu_screen();
+     create_cardswitch_screen();
++#if WITH_SUPERMEMCARD
++    create_smc_progress_screen();
++#endif
+     create_switch_nag_screen();
+     create_splash();
+ 
+@@ -1414,6 +1463,18 @@
+                 // After initial splash time - move to main screen
+                 ui_state = UI_STATE_MAIN;
+             case UI_STATE_MAIN:
++#if WITH_SUPERMEMCARD
++            {
++                int pct;
++                const char *text;
++                if (ps1_supermemcard_progress(&pct, &text)) {   /* the SS1 is reading or writing the card */
++                    ui_goto_screen(scr_smc_progress);
++                    update_smc_progress(pct, text);
++                    oled_update_last_action_time();
++                    break;
++                }
++            }
++#endif
+                 ui_goto_screen(scr_main);
+                 break;
+             case UI_STATE_SWITCHING:
+--- a/src/ps1/ps1_memory_card.c
++++ b/src/ps1/ps1_memory_card.c
+@@ -478,7 +478,7 @@
+                 case 'W': mc_cmd_write(); break;
+ #endif
+ #if WITH_SUPERMEMCARD
+-                case 0x60 ... 0x6D: mc_supermemcard(ch); break;
++                case 0x60 ... 0x6E: mc_supermemcard(ch); break;
+ #endif
+                 default: DPRINTF("Unknown command: 0x%.02x\n", ch); break;
+             }

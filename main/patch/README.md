@@ -1,7 +1,7 @@
 # Super MemCard for a MiSTer Main: the whole change as one patch
 
 `main-mister-super-memcard.patch`: everything a Main needs for Super MemCard, against MiSTer-devel/Main_MiSTer
-(`8329c5a`, Nov 2026), for porting into another Main (Console Mode's `MiSTer_ConsoleMode`):
+(`738cb7a`, the MiSTer_20261010 release: newer Mains take it with `git apply --3way`, or input.cpp's two lines by hand), for porting into another Main (Console Mode's `MiSTer_ConsoleMode`):
 
 | file | change |
 |---|---|
@@ -9,6 +9,7 @@
 | `fpga_io.cpp` | `fpga_load_rbf()`: `smc_shim_core_start(name, xml)` before a core that isn't the menu loads |
 | `main.cpp` | after `user_io_init()`: `smc_shim_main_start(argv[1], argv[2])`; in the loop: `smc_shim_poll()` |
 | `scheduler.cpp` | `smc_shim_poll()` beside `user_io_poll()` (Mains built with the scheduler) |
+| `input.cpp` | `smc_shim_busy()`: the menu's input wait 1 ms instead of 25 while smcd's card frames pass |
 | `menu.cpp` | the OSD's " Saves" row and its two states (`MENU_SMC_SAVES1/2`); `smc_shim_rom_load()` where the file browser hands Main a game (`MENU_GENERIC_FILE_SELECTED`, and the CD systems' disc in `MENU_GENERIC_IMAGE_SELECTED`) |
 
 ```

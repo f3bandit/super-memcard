@@ -85,6 +85,10 @@ $(B)/smc_gamedb.o: ../../host/smc_gamedb.c ../../host/smc_gamedb.h
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -fno-pie -c $< -o $@
 
+$(B)/smc_mcformat.o: ../../host/smc_mcformat.c ../../host/smc_mcformat.h
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -fno-pie -c $< -o $@
+
 $(B)/smc_vcard.o: ../../host/smc_vcard.c ../../host/smc_vcard.h
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -fno-pie -c $< -o $@
@@ -102,7 +106,7 @@ $(B)/smcd.o: ../../smcd/smcd.c
 	$(CC) $(CFLAGS) -I../../host -fno-pie -c $< -o $@
 
 # Super MemCard on the SuperStation (smcd/): the program beside Main
-$(B)/smcd: $(B)/smcd.o $(B)/smc_vcard.o $(B)/smc_host.o $(B)/smc_genuine.o $(B)/monocypher.o $(B)/smc_sync.o $(B)/smc_icons.o $(B)/smc_art_icon.o $(B)/smc_ident.o $(B)/smc_gameid.o $(B)/smc_gamedb.o
+$(B)/smcd: $(B)/smcd.o $(B)/smc_vcard.o $(B)/smc_host.o $(B)/smc_genuine.o $(B)/monocypher.o $(B)/smc_sync.o $(B)/smc_icons.o $(B)/smc_art_icon.o $(B)/smc_ident.o $(B)/smc_gameid.o $(B)/smc_gamedb.o $(B)/smc_mcformat.o
 	$(CC) $^ $(LDFLAGS) $(LDFLAGS_STATIC) -o $@
 
 # test only: main/smc_shim.cpp as Main runs it, with vcardd for the front ports

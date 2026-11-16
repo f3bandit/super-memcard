@@ -52,7 +52,7 @@ while not b.endswith(b'END\n'):
     b+=d
 print(b.decode().split(chr(10))[0])")
 kill $gpid 2>/dev/null || true; wait $gpid 2>/dev/null || true; rm -f /tmp/smcd_g.sock
-echo "$r" | grep -q "^card .* version 3" && ok "-G (test build): a card without its identity used" || bad "-G: $r"
+echo "$r" | grep -q "^card .* version 4" && ok "-G (test build): a card without its identity used" || bad "-G: $r"
 kill $sm; wait $sm 2>/dev/null || true; rm -f /tmp/smcd.sock
 # Retro Remake gives the card its identity (the test key), as at the factory
 chip=$("$B/smccli" -s "$w/vc.sock" chip | sed -n 's/^chip //p')
@@ -63,13 +63,120 @@ rm -f /tmp/smcd.log
 "$B/smcd" -S "$w/saves" -T "$w/state" -g "$w/games" -d "$w/lists" -v "$w/none.sock" & pids="$pids $!"
 for i in $(seq 50); do [ -S /tmp/smcd.sock ] && break; sleep 0.1; done
 
+# CORESHELL=<core_shell checkout>: the same tests with Coreshell installed: Main's LAUNCH/MENU/ROM go through it (its
+# card_event), and its launch log has them
+if [ -n "$CORESHELL" ]; then
+    mkdir -p "$w/root/coreshell"; printf '#!/bin/sh\n' > "$w/root/coreshell/coreshell.sh"; chmod +x "$w/root/coreshell/coreshell.sh"
+    export SHIM_ROOT="$w/root"; rm -f /tmp/coreshell/launch.log
+    (cd "$CORESHELL" && exec python3 -m coreshell serve --root "$w/root" --socket /tmp/coreshell.sock) > "$w/coreshell.log" 2>&1 & pids="$pids $!"
+    for i in $(seq 50); do [ -S /tmp/coreshell.sock ] && break; sleep 0.1; done
+fi
+
 # 1. no Main passing frames yet: the frontend's command finds no card
 [ "$(ask HELLO | head -1)" = nocard ] && ok "no Main shim: no card" || bad "no Main shim: no card"
 
 # Main (the shim) passes frames from here on
 "$B/shimtest" "$w/vc.sock" serve 300 > "$w/shim.log" 2>&1 & shim=$!; pids="$pids $shim"
 sleep 0.5
-ask HELLO | grep -q "^card .* version 3" && ok "HELLO through the shim" || bad "HELLO through the shim"
+ask HELLO | grep -q "^card .* version 4" && ok "HELLO through the shim" || bad "HELLO through the shim"
+
+# PS1 mode's own per-game cards (MemoryCards/PS1/<id>/) as files: the system PS1CARD (firmware SMC_PS1CARD)
+p1="$w/sd/MemoryCards/PS1/SLUS-00001"; mkdir -p "$p1"
+python3 -c "import os,sys; open(sys.argv[1],'wb').write(b'MC'+os.urandom(128*1024-2))" "$p1/SLUS-00001-1.mcd"
+x1=$(mktemp -d)
+r=$(ask "EXPORT PS1CARD	1	SLUS-00001	$x1/out" | head -1)
+[ "$r" = "export ok 1 1" ] && cmp -s "$x1/out/SLUS-00001/SLUS-00001-1.mcd" "$p1/SLUS-00001-1.mcd" \
+    && ok "PS1CARD: a game's own PS1 card read as a file" || bad "PS1CARD export: $r"
+mkdir -p "$x1/in/SLUS-00001"; python3 -c "import os,sys; open(sys.argv[1],'wb').write(b'MC'+os.urandom(128*1024-2))" "$x1/in/SLUS-00001/SLUS-00001-1.mcd"
+r=$(ask "IMPORT PS1CARD	1	SLUS-00001	$x1/in" | head -1)
+case "$r" in "import ok 1 "*) cmp -s "$x1/in/SLUS-00001/SLUS-00001-1.mcd" "$p1/SLUS-00001-1.mcd" \
+    && ok "PS1CARD: written back whole (the file PS1 mode opens)" || bad "PS1CARD import: the file differs";; *) bad "PS1CARD import: $r";; esac
+[ ! -e "$p1/SLUS-00001-1.mcd.new" ] && ok "  no .new left" || bad "  .new left"
+r=$(ask "LIST PS1CARD" | grep -c "SLUS-00001")
+[ "$r" -ge 1 ] && ok "PS1CARD: LIST has the game's card folder" || bad "PS1CARD list: $(ask "LIST PS1CARD")"
+mounted=$(ls "$w/sd/MemoryCards/PS1" | grep -v SLUS-00001 | head -1)
+r=$(ask "EXPORT PS1CARD	1	$mounted	$x1/busy" | head -1)
+[ "$r" = "export failed" ] && [ ! -s "$x1/busy/$mounted/$mounted-1.mcd" ] && ok "PS1CARD: the card PS1 mode has open ($mounted) is busy, not read" || bad "PS1CARD busy: $r"
+mkdir -p "$x1/w/$mounted"; cp "$x1/in/SLUS-00001/SLUS-00001-1.mcd" "$x1/w/$mounted/$mounted-1.mcd"; before=$(md5sum < "$w/sd/MemoryCards/PS1/$mounted/$mounted-1.mcd")
+r=$(ask "IMPORT PS1CARD	1	$mounted	$x1/w" | head -1)
+[ "$r" = "import failed" ] && [ "$(md5sum < "$w/sd/MemoryCards/PS1/$mounted/$mounted-1.mcd")" = "$before" ] \
+    && ok "PS1CARD: the open card isn't written (its copy in memory is the newer one)" || bad "PS1CARD busy write: $r"
+# PSXMERGE: Super MemCard's own PSX copies into each game's own PS1 card (the PSX store), merged, never losing a save
+mk="$here/mkps1card.py"
+saves_on() { python3 - "$1" <<'PY'
+import sys
+d = open(sys.argv[1], 'rb').read()
+out = []
+for b in range(1, 16):
+    e = d[b * 128:(b + 1) * 128]
+    if e[0] == 0x51:
+        out.append('%s=%02x' % (e[10:30].split(b'\0')[0].decode(), d[b * 8192 + 100]))
+print(' '.join(sorted(out)))
+PY
+}
+x2=$(mktemp -d); mkdir -p "$x2/in/SLUS-00002" "$x2/in/SLUS-00003"
+python3 "$mk" "$x2/in/SLUS-00002/save.sav" BASLUS-00002AAA:0x11 BASLUS-00002BBB:0x22
+python3 "$mk" "$x2/in/SLUS-00003/save.sav" BASLUS-00003CCC:0x33
+# (Super MemCard's own PSX folder, as the copies made before version 4 are: IMPORT PSX is the games' own cards now)
+for g in SLUS-00002 SLUS-00003; do mkdir -p "$w/sd/SuperMemCard/PSX/Card1/$g"; cp "$x2/in/$g/save.sav" "$w/sd/SuperMemCard/PSX/Card1/$g/"; done
+mkdir -p "$w/sd/MemoryCards/PS1/SLUS-00002"; python3 "$mk" "$w/sd/MemoryCards/PS1/SLUS-00002/SLUS-00002-1.mcd" BASLUS-00002AAA:0x99
+r=$(ask "PSXMERGE $x2/bk")
+echo "$r" | grep -qx "merge SLUS-00002 added 1 kept 1 noroom 0 ok" && echo "$r" | grep -qx "merge SLUS-00003 added 1 kept 0 noroom 0 ok" \
+    && echo "$r" | grep -qx "psxmerge ok 2" && ok "PSXMERGE: each copy into its game's own card" || bad "PSXMERGE: $r"
+[ "$(saves_on "$w/sd/MemoryCards/PS1/SLUS-00002/SLUS-00002-1.mcd")" = "BASLUS-00002AAA=99 BASLUS-00002BBB=22" ] \
+    && ok "  a save both had: the game's card's kept; the one it hadn't: added" || bad "  SLUS-00002's card: $(saves_on "$w/sd/MemoryCards/PS1/SLUS-00002/SLUS-00002-1.mcd")"
+[ "$(saves_on "$w/sd/MemoryCards/PS1/SLUS-00003/SLUS-00003-1.mcd")" = "BASLUS-00003CCC=33" ] && ok "  a game with no card yet: a new card with its save" || bad "  SLUS-00003's card"
+cmp -s "$x2/bk/SLUS-00002/save.sav" "$x2/in/SLUS-00002/save.sav" && cmp -s "$x2/bk/SLUS-00003/save.sav" "$x2/in/SLUS-00003/save.sav" \
+    && ok "  every copy backed up first, as it was" || bad "  the backup: $(ls -R "$x2/bk")"
+[ "$(saves_on "$w/state/psxmerge/SLUS-00002-1.mcd")" = "BASLUS-00002AAA=99" ] && ok "  and the game's card as it was, in smcd's state" || bad "  the game's card kept: $(ls "$w/state/psxmerge" 2>&1)"
+[ -z "$(find "$w/sd/SuperMemCard/PSX/Card1" -name save.sav -not -path "*/.deleted/*" 2>/dev/null)" ] \
+    && ok "  the copies taken off Super MemCard's PSX folder" || bad "  copies left: $(find "$w/sd/SuperMemCard/PSX" -type f)"
+r=$(ask "PSXMERGE $x2/bk2"); [ "$(echo "$r" | head -1)" = "psxmerge ok 0" ] && ok "  run again: nothing left to move" || bad "  again: $r"
+# the game whose card PS1 mode has open (switched to by SELECT, as at a launch): the card goes back to its default first
+mkdir -p "$x2/in2/SLUS-00004"; python3 "$mk" "$x2/in2/SLUS-00004/save.sav" BASLUS-00004DDD:0x44
+mkdir -p "$w/sd/SuperMemCard/PSX/Card1/SLUS-00004"; cp "$x2/in2/SLUS-00004/save.sav" "$w/sd/SuperMemCard/PSX/Card1/SLUS-00004/"
+ask "SELECT PSX	SLUS-00004" | head -1 | grep -qx "select ok" || bad "PSXMERGE open card: SELECT"
+sleep 3
+r=$(ask "PSXMERGE $x2/bk3")
+echo "$r" | grep -qx "merge SLUS-00004 added 1 kept 0 noroom 0 ok" && [ "$(saves_on "$w/sd/MemoryCards/PS1/SLUS-00004/SLUS-00004-1.mcd")" = "BASLUS-00004DDD=44" ] \
+    && ok "  the game's card open in PS1 mode: left for the default card, then merged" || bad "  open card: $r / $(ls "$w/sd/MemoryCards/PS1")"
+# the memory manager's PSX: each game's own PS1 card (LIST PSX, IMAGE PSX), PS1 mode's own cards (Card1...) left out
+r=$(ask "LIST PSX")
+echo "$r" | grep -q "^SLUS-00002	" && echo "$r" | grep -q "^SLUS-00003	" && ! echo "$r" | grep -q "^Card1	" \
+    && ok "LIST PSX: the games' own PS1 cards (not PS1 mode's Card1)" || bad "LIST PSX: $r"
+# a game's card with no save (PS1 mode makes a blank one when a game starts): deleted, not listed. One made by the card
+# itself (SELECT, as a launch: it's open in PS1 mode too) and one with no saves on it
+mkdir -p "$w/sd/MemoryCards/PS1/SLUS-00009"; python3 "$mk" "$w/sd/MemoryCards/PS1/SLUS-00009/SLUS-00009-1.mcd"
+ask "SELECT PSX	SLUS-00010" | head -1 | grep -qx "select ok" || bad "empty cards: SELECT"
+sleep 3
+[ -f "$w/sd/MemoryCards/PS1/SLUS-00010/SLUS-00010-1.mcd" ] || bad "empty cards: the card didn't make SLUS-00010's"
+r=$(ask "LIST PSX")
+! echo "$r" | grep -q "^SLUS-0000[9]	\|^SLUS-00010	" && echo "$r" | grep -q "^SLUS-00002	" && [ ! -e "$w/sd/MemoryCards/PS1/SLUS-00009" ] \
+    && [ ! -e "$w/sd/MemoryCards/PS1/SLUS-00010" ] && ok "a game's card with no save (blank, or just made by the card): deleted, not listed" \
+    || bad "empty cards: $r / $(ls "$w/sd/MemoryCards/PS1")"
+img_of() { ask "IMAGE PSX	1	$1" | tail -n +2 | grep -v '^END' | tr -d '\n' | python3 -c "import sys,binascii; sys.stdout.buffer.write(binascii.unhexlify(sys.stdin.read().strip()))" > "$2"; }
+img_of SLUS-00002 "$x2/i1"; n1=$(grep -c "^.*bus: " /tmp/smcd.log)
+cmp -s "$x2/i1" "$w/sd/MemoryCards/PS1/SLUS-00002/SLUS-00002-1.mcd" && ok "IMAGE PSX: the game's own card" || bad "IMAGE PSX: $(head -c 80 "$x2/i1" | od -c | head -2)"
+img_of SLUS-00002 "$x2/i2"; n2=$(grep -c "^.*bus: " /tmp/smcd.log)
+cmp -s "$x2/i2" "$x2/i1" && [ "$n2" = "$n1" ] && ok "  again: from smcd's copy, the card not read (its CRC the same)" || bad "  again: read again ($n1 -> $n2)"
+python3 "$mk" "$w/sd/MemoryCards/PS1/SLUS-00002/SLUS-00002-1.mcd" BASLUS-00002ZZZ:0x77
+img_of SLUS-00002 "$x2/i3"
+cmp -s "$x2/i3" "$w/sd/MemoryCards/PS1/SLUS-00002/SLUS-00002-1.mcd" && ok "  changed by PS1 mode: read again" || bad "  changed: the old copy served"
+# every PSX game at once (the memory manager's library backup): the games' own cards only, then back
+mkdir -p "$w/sd/MemoryCards/PS1/Card1"
+r=$(ask "EXPORT PSX	1	*	$x2/all" | head -1)
+case "$r" in "export ok "*) [ -s "$x2/all/SLUS-00002/SLUS-00002-1.mcd" ] && [ ! -e "$x2/all/Card1" ] \
+    && ok "EXPORT PSX *: every game's own card, not PS1 mode's Card1" || bad "EXPORT PSX *: $(ls "$x2/all")";; *) bad "EXPORT PSX *: $r";; esac
+mkdir -p "$x2/all/Card1"; cp "$x2/all/SLUS-00002/SLUS-00002-1.mcd" "$x2/all/Card1/Card1-1.mcd"
+r=$(ask "IMPORT PSX	1	*	$x2/all" | head -1)
+case "$r" in "import ok "*) ! cmp -s "$w/sd/MemoryCards/PS1/Card1/Card1-1.mcd" "$x2/all/Card1/Card1-1.mcd" \
+    && ok "IMPORT PSX *: back, and never onto PS1 mode's Card1" || bad "IMPORT PSX *: Card1 written";; *) bad "IMPORT PSX *: $r";; esac
+[ ! -e "$w/state/ps1cards/SLUS-00009-1.mcd" ] && [ ! -e "$w/state/ps1cards/SLUS-00010-1.mcd" ] && ok "a deleted game card's copy in smcd's state goes too" || bad "ps1cards: $(ls "$w/state/ps1cards")"
+rm -rf "$x2"
+grep -q "^smc progress 0 Copying SLUS-00001" "$w/vcardd.log" && grep -q "^smc progress -1" "$w/vcardd.log" \
+    && ok "the card's progress bar: up while a save is copied, down after" || bad "progress: $(grep progress "$w/vcardd.log" | head -5)"
+[ "$(grep -c "^smc progress [0-9]" "$w/vcardd.log")" -ge 4 ] && ok "  and it moved as the 128 KB card went (more than start and end)" || bad "  progress steps: $(grep -c "^smc progress" "$w/vcardd.log")"
+rm -rf "$x1"
 
 # the card bus is someone else's (the memory manager reading the PS1 card): smcd waits, then leaves it alone
 sleep 30 & holder=$!; pids="$pids $holder"
@@ -189,6 +296,16 @@ r=$(ask "PLAY NES	1	Test Game" | head -1)
 [ "$(ask "PLAY NES	1	No Such Game" | head -1)" = "play notfound" ] && [ ! -s "$w/mister_cmd" ] && ok "PLAY: no ROM: notfound, Main not told" || bad "PLAY notfound"
 [ "$(ask "PLAY PSX	1	Some Game" | head -1)" = "play psx" ] && ok "PLAY PSX: refused (its own card)" || bad "PLAY PSX"
 [ "$(ask "PLAY NES	0	Test Game" | head -1)" = "play failed" ] && ok "PLAY card 0: refused" || bad "PLAY 0"
+# PLAYPREP (Coreshell's): the same card switch, Main not told; the game's MGL in the answer, for Coreshell to start it
+: > "$w/mister_cmd"
+r=$(ask "PLAYPREP NES	2	Test Game" | head -1)
+[ "$r" = "play ok 2	/tmp/smc_play.mgl" ] && [ ! -s "$w/mister_cmd" ] && [ ! -e "$w/saves/NES/Test Game.sav" ] \
+    && ok "PLAYPREP on card 2: the switch, the MGL in the answer, Main not told" || bad "PLAYPREP 2: $r / $(cat "$w/mister_cmd")"
+r=$(ask "PLAYPREP NES	1	Test Game" | head -1)
+[ "$r" = "play ok 1	/tmp/smc_play.mgl" ] && cmp -s "$w/saves/NES/Test Game.sav" "$w/first.sav" && [ ! -s "$w/mister_cmd" ] \
+    && ok "PLAYPREP on card 1: its save back" || bad "PLAYPREP 1: $r"
+[ "$(ask "PLAYPREP NES	1	No Such Game" | head -1)" = "play notfound" ] && ok "PLAYPREP: no ROM: notfound" || bad "PLAYPREP notfound"
+[ "$(ask "PLAYPREP PSX	1	Some Game" | head -1)" = "play psx" ] && ok "PLAYPREP PSX: its own card" || bad "PLAYPREP PSX"
 
 # 4c. the memory manager's Rename (Console Mode's on-screen keyboard): a name for that card's save, on the card
 [ "$(ask "NAME NES	1	Test Game	  Main run " | head -1)" = "name ok" ] && ask "LIST NES 1" | grep -q "	Test Game	.*	Main run$" \
@@ -243,6 +360,16 @@ case "$r" in "import ok 1 "*) ask "LIST NES 6" | grep -q "^Test Game	" && ok "IM
     && ok "EXPORT/IMPORT: no .. in an ID, only absolute folders" || bad "EXPORT/IMPORT refusals"
 
 # 5. a long list on the OSD page (a stand-in smcd with 30 saves): it scrolls, no row cut off or past the page
+# SELECT: the game being started. PSX: that game's own PS1 card on the bus (set game ID, the firmware's Game ID setting
+# on, as it is by default); a game with no card yet gets a new blank one
+r=$(ask "SELECT PSX	SLUS-01041" | head -1)
+for i in $(seq 30); do [ -d "$w/sd/MemoryCards/PS1/SLUS-01041" ] && break; sleep 0.2; done
+[ "$r" = "select ok" ] && [ -d "$w/sd/MemoryCards/PS1/SLUS-01041" ] && grep -q "PSX: game SLUS-01041 selected on the card" /tmp/smcd.log \
+    && ok "SELECT PSX: the game's own card on the bus ($(ls "$w/sd/MemoryCards/PS1/SLUS-01041" | head -1))" || bad "SELECT PSX: $r, $(ls "$w/sd/MemoryCards/PS1" 2>&1)"
+r=$(ask "SELECT NES	CRC-5B622B11" | head -1)
+echo "$r" | grep -q "^select ok [0-9]" && ok "SELECT NES: the card in NES mode ($r)" || bad "SELECT NES: $r"
+[ "$(ask "SELECT PSX" | head -1)" = "select failed" ] && ok "SELECT without a game ID: refused" || bad "SELECT without a game ID"
+
 kill $(pgrep -f "$B/smcd") 2>/dev/null || true; sleep 0.5; rm -f /tmp/smcd.sock
 python3 - <<'PY' & pids="$pids $!"
 import socket, os
@@ -266,5 +393,25 @@ grep -q "^osd 2|  Card 27  Playthrough number $" "$w/osd5.last" && ok "OSD: a sa
 grep -qE "^scroll [2-6]\| Card [0-9 ]+  Playthrough number [0-9]+  [A-Z][a-z]{2} [0-9]{2} 20[0-9]{2} [0-9:]{5}\|10 " "$w/osd5.log" \
     && ok "OSD: the selected row's name and date scroll (the card number stays)" || bad "OSD scroll: $(grep ^scroll "$w/osd5.log" | head -3)"
 
+if [ -n "$CORESHELL" ]; then
+    grep -q "card in .*_Console/NES_20260603.rbf" /tmp/coreshell/launch.log && grep -q "card out " /tmp/coreshell/launch.log \
+        && ok "Coreshell: Main's LAUNCH and MENU went through it, in its launch log" || bad "Coreshell launch log: $(cat /tmp/coreshell/launch.log 2>&1)"
+fi
+# the icons' pictures (smc_sync.c smc_fetch_icons): kept as <base>.cover, for the menus' big picture
+rm -rf /tmp/covt; mkdir -p /tmp/covt
+python3 -c "
+import zlib,struct
+w,h=200,280
+raw=b''.join(b'\\x00'+b''.join(bytes([(x*255//w),(y*255//h),120]) for x in range(w)) for y in range(h))
+c=lambda t,d: struct.pack('>I',len(d))+t+d+struct.pack('>I',zlib.crc32(t+d)&0xffffffff)
+open('/tmp/covt/cover.png','wb').write(b'\\x89PNG\\r\\n\\x1a\\n'+c(b'IHDR',struct.pack('>IIBBBBB',w,h,8,2,0,0,0))+c(b'IDAT',zlib.compress(raw))+c(b'IEND',b''))"
+B="$here/../sim/card/build-smc"
+if gcc -no-pie -I"$here/../host" "$here/covertest.c" "$B/smc_sync.o" "$B/smc_art_icon.o" "$B/smc_gamedb.o" "$B/smc_ident.o" \
+       "$B/smc_gameid.o" "$B/smc_host.o" "$B/smc_icons.o" -o /tmp/covt/t -lz -lm 2>/dev/null; then
+    /tmp/covt/t > /tmp/covt/out
+    while read -r st rest; do [ "$st" = ok ] && ok "covers: $rest" || bad "covers: $rest"; done < /tmp/covt/out
+else
+    bad "covers: the test didn't build"
+fi
 echo "--- smcd.log"; cat /tmp/smcd.log | cut -c1-160
 [ $fail = 0 ] && echo "ALL PASSED" || { echo FAILED; exit 1; }

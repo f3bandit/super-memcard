@@ -12,6 +12,10 @@
  *   SuperMemCard/<system>/Card<N>/<game ID>/<file>.new a save being written, until Commit
  *   SuperMemCard/<system>/Card<N>/<game ID>/meta.ini   <file>=<generation>,<time>, or <file>=-<generation>,<time>: deleted
  *   SuperMemCard/<system>/Card<N>/<game ID>/.deleted/  deleted saves, kept
+ *   MemoryCards/PS1/<game ID>/<game ID>-<n>.mcd        the system "PS1CARD" (SMC_PS1CARD): PS1 mode's own per-game cards,
+ *                                                      as files (Select, List, Read, Create, Commit, Delete), for the
+ *                                                      SuperStation's memory manager. The card PS1 mode has open is
+ *                                                      busy (SMC_BUSY): its copy in memory is the newer one
  *
  * A save is written to <file>.new and only replaces <file> at Commit, so a card pulled or
  * powered off mid-save keeps the previous save whole. */
@@ -20,6 +24,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 #include "pico/rand.h"
 #ifndef SMC_SIM
@@ -29,6 +34,8 @@ bool stdio_usb_connected(void);   /* pico_stdio_usb's (linked into the firmware;
 #include "sd.h"
 
 #define ROOT "SuperMemCard"
+#define PS1_ROOT "MemoryCards/PS1"
+#include "ps1_cardman.h"
 
 /* ---- mailbox between the cores ---- */
 
@@ -77,8 +84,8 @@ static void log_command(uint8_t cmd, const uint8_t *r, int rlen, const uint8_t *
     }
     log_transfer_end();
     static const char *const names[] = {"Hello", "Select", "Read", "Write", "Create", "Commit", "Status", "List",
-                                        "Info", "Core", "Delete", "Cert", "Auth", "AuthSig"};
-    const char *nm = cmd >= SMC_HELLO && cmd <= SMC_AUTHSIG ? names[cmd - SMC_HELLO] : "?";
+                                        "Info", "Core", "Delete", "Cert", "Auth", "AuthSig", "Progress"};
+    const char *nm = cmd >= SMC_HELLO && cmd <= SMC_PROGRESS ? names[cmd - SMC_HELLO] : "?";
     smc_log("%s (%02x) %d bytes in, %d out, status %02x, %lu us\n", nm, cmd, rlen, alen, alen > 0 ? a[0] : 0,
             (unsigned long)us);
     if (cmd == SMC_SELECT && rlen > 1) {
@@ -87,6 +94,10 @@ static void log_command(uint8_t cmd, const uint8_t *r, int rlen, const uint8_t *
     }
 }
 static uint32_t free_kb = 0xFFFFFFFFu, written_kb; /* counted in the menu; KB written since */
+/* the SS1's progress bar (SMC_PROGRESS): -1 none */
+static int prog_pct = -1;
+static char prog_text[SMC_PROGRESS_TEXT + 1];
+static uint64_t prog_at;
 static uint64_t last_cmd_at;
 
 bool ps1_supermemcard_active(void) { return __atomic_load_n(&active, __ATOMIC_ACQUIRE); }
@@ -118,6 +129,10 @@ int ps1_supermemcard_req_len(uint8_t cmd, const uint8_t *r, int have) {
         return 1 + r[0] + 1 + 2;
     case SMC_INFO: return 1;
     case SMC_DELETE: return 9;
+    case SMC_PROGRESS:
+        if (have < 2) return 2;
+        if (r[1] > SMC_PROGRESS_TEXT) return -1;
+        return 2 + r[1];
     case SMC_CERT:
     case SMC_AUTH:
     case SMC_AUTHSIG: return ps1_supermemcard_id_req_len(cmd);
@@ -171,6 +186,8 @@ struct file {
 static char card_id[17];
 static char set_dir[24 + SMC_SYS_LEN + SMC_ID_LEN];
 static bool have_set;
+static bool set_ps1;                         /* the set is a PS1 mode card folder (PS1CARD) */
+static char set_id[SMC_ID_LEN + 1];
 static struct file files[SMC_MAX_FILES];
 static int nfiles;
 static int open_fd = -1, open_file = -1; /* one file kept open */
@@ -324,7 +341,14 @@ static bool is_save_name(const char *n) {
     size_t l = strlen(n);
     if (l == 0 || l > SMC_NAME_LEN || strcmp(n, "meta.ini") == 0 || n[0] == '.')
         return false;
+    if (set_ps1)                             /* a PS1 card folder: its cards only (<id>-<n>.mcd) */
+        return l > 4 && strcasecmp(n + l - 4, ".mcd") == 0;
     return !(l > 4 && strcmp(n + l - 4, ".new") == 0);
+}
+
+/* the selected PS1 card folder is the one PS1 mode has open (in memory, written back as it goes): busy */
+static bool ps1_set_busy(void) {
+    return set_ps1 && strcasecmp(set_id, ps1_cardman_get_folder_name()) == 0;
 }
 
 /* a save of the game, not the SuperStation's notes beside it (its name, game, icon, label) */
@@ -410,12 +434,43 @@ bool ps1_supermemcard_card_key(int delta) {
     return true;
 }
 
+/* a file's CRC-32 (zlib's): ~0.15 s for a 128 KB card. A PS1 mode card's "generation" (Info): the SS1 keeps a copy
+ * of each card and reads one again only when this changed */
+static uint32_t file_crc(const char *dir, const char *name) {
+    static uint32_t table[256];
+    if (!table[1])
+        for (uint32_t i = 0; i < 256; i++) {
+            uint32_t c = i;
+            for (int k = 0; k < 8; k++)
+                c = c & 1 ? 0xEDB88320u ^ (c >> 1) : c >> 1;
+            table[i] = c;
+        }
+    char p[192];
+    snprintf(p, sizeof(p), "%s/%s", dir, name);
+    int fd = sd_open(p, O_RDONLY);
+    if (fd < 0)
+        return 0;
+    static uint8_t buf[4096];
+    uint32_t crc = 0xFFFFFFFFu;
+    int n;
+    while ((n = sd_read(fd, buf, sizeof(buf))) > 0)
+        for (int i = 0; i < n; i++)
+            crc = table[(crc ^ buf[i]) & 0xFF] ^ (crc >> 8);
+    sd_close(fd);
+    return ~crc;
+}
+
 static void select_set(const char *sys, const char *id, int card) {
     close_open();
     /* .new files of the previous set stay on the SD card unfinished: never committed, never read */
     nfiles = 0;
     have_set = true;
-    snprintf(set_dir, sizeof(set_dir), ROOT "/%s/Card%d/%s", sys, card, id);
+    set_ps1 = strcmp(sys, SMC_PS1CARD) == 0;
+    snprintf(set_id, sizeof(set_id), "%s", id);
+    if (set_ps1)
+        snprintf(set_dir, sizeof(set_dir), PS1_ROOT "/%s", id);
+    else
+        snprintf(set_dir, sizeof(set_dir), ROOT "/%s/Card%d/%s", sys, card, id);
 
     static char meta[SMC_MAX_FILES * (SMC_NAME_LEN + 16)];
     char p[192];
@@ -442,6 +497,10 @@ static void select_set(const char *sys, const char *id, int card) {
     if (it != -1)
         sd_close(it);
     sd_close(dir);
+    /* a PS1 mode card: PS1 mode writes it without meta.ini, so its generation is its CRC-32 (the folder closed first) */
+    if (set_ps1)
+        for (int i = 0; i < nfiles; i++)
+            files[i].gen = file_crc(set_dir, files[i].name);
     /* tombstones: deleted saves, in meta.ini only */
     for (const char *l = meta; *l && nfiles < SMC_MAX_FILES; l = strchr(l, '\n') ? strchr(l, '\n') + 1 : "") {
         const char *eq = strchr(l, '=');
@@ -780,6 +839,10 @@ static int do_command(uint8_t cmd, const uint8_t *r, int len, uint8_t *a) {
         a[129] = SMC_FAIL;
         if (!file_ok(f) || !files[f].exists || off >= files[f].size)
             return 130;
+        if (ps1_set_busy()) {
+            a[129] = SMC_BUSY;
+            return 130;
+        }
         int fd = fd_for(f, false);
         if (fd < 0 || sd_seek(fd, (int32_t)off, SEEK_SET) != 0)
             return 130;
@@ -825,6 +888,10 @@ static int do_command(uint8_t cmd, const uint8_t *r, int len, uint8_t *a) {
         if (!have_set || size == 0 || size > SMC_MAX_FILE || !take_name(name, sizeof(name), r + 5, r[4], true) ||
             !is_save_name(name))
             return 2;
+        if (ps1_set_busy()) {
+            a[0] = SMC_BUSY;
+            return 2;
+        }
         int f = -1;
         for (int i = 0; i < nfiles; i++)
             if (strcmp(files[i].name, name) == 0)
@@ -860,6 +927,10 @@ static int do_command(uint8_t cmd, const uint8_t *r, int len, uint8_t *a) {
         a[0] = SMC_FAIL;
         if (!file_ok(f) || !files[f].writing)
             return 1;
+        if (ps1_set_busy()) {                /* (switched to it since Create) */
+            a[0] = SMC_BUSY;
+            return 1;
+        }
         close_open();
         char p[192], np[192];
         path_of(p, sizeof(p), f, false);
@@ -890,9 +961,31 @@ static int do_command(uint8_t cmd, const uint8_t *r, int len, uint8_t *a) {
         a[0] = SMC_FAIL;
         if (!file_ok(f) || !files[f].exists || files[f].writing)
             return 1;
+        if (ps1_set_busy()) {
+            a[0] = SMC_BUSY;
+            return 1;
+        }
         close_open();
         char p[192], t[200];
         path_of(p, sizeof(p), f, false);
+        if (set_ps1) {
+            /* a PS1 mode card (the SS1 deletes a game's card with no saves on it): gone for good, and its folder with
+             * its last card (no tombstone: PS1 mode makes a new blank one if the game is played again) */
+            if (sd_remove(p) != 0)
+                return 1;
+            files[f].exists = false;
+            bool left = false;
+            for (int i = 0; i < nfiles; i++)
+                left |= files[i].exists;
+            if (!left) {
+                snprintf(t, sizeof(t), "%s/meta.ini", set_dir);
+                if (sd_exists(t))
+                    sd_remove(t);
+                sd_rmdir(set_dir);
+            }
+            a[0] = SMC_GOOD;
+            return 1;
+        }
         snprintf(t, sizeof(t), "%s/.deleted", set_dir);
         sd_mkdir(t);
         snprintf(t, sizeof(t), "%s/.deleted/%s", set_dir, files[f].name);
@@ -915,6 +1008,22 @@ static int do_command(uint8_t cmd, const uint8_t *r, int len, uint8_t *a) {
     case SMC_AUTHSIG:
         return ps1_supermemcard_id_command(cmd, r, a);
 
+    case SMC_PROGRESS: {
+        /* the SS1's progress bar: printable ASCII only (the font) */
+        int pct = r[0], tl = r[1] > SMC_PROGRESS_TEXT ? SMC_PROGRESS_TEXT : r[1];
+        for (int i = 0; i < tl; i++)
+            prog_text[i] = r[2 + i] >= 0x20 && r[2 + i] < 0x7F ? (char)r[2 + i] : ' ';
+        if (tl || pct == 0xFF)
+            prog_text[tl] = 0;
+        prog_pct = pct == 0xFF ? -1 : pct > 100 ? 100 : pct;
+        prog_at = time_us_64();
+#ifdef SMC_SIM
+        fprintf(stderr, "smc progress %d %s\n", prog_pct, prog_text);   /* (the virtual card has no screen: its log) */
+#endif
+        a[0] = SMC_GOOD;
+        return 1;
+    }
+
     case SMC_STATUS:
         a[0] = a[1] = 0; /* every write above is on the SD card before it's answered */
         return 2;
@@ -928,6 +1037,8 @@ static int do_command(uint8_t cmd, const uint8_t *r, int len, uint8_t *a) {
         a[0] = SMC_NOT_FOUND;
         if (systems)
             snprintf(dir, sizeof(dir), ROOT);
+        else if (sl == (int)strlen(SMC_PS1CARD) && !memcmp(r + 1, SMC_PS1CARD, (size_t)sl))
+            snprintf(dir, sizeof(dir), PS1_ROOT);   /* PS1 mode's card folders */
         else if (take_name(sys, sizeof(sys), r + 1, sl, false) && card <= SMC_MAX_CARDS)
             snprintf(dir, sizeof(dir), ROOT "/%s/Card%d", sys, card ? card : current_card(sys));
         else
@@ -1002,6 +1113,28 @@ uint32_t ps1_supermemcard_count_free(void) {
 }
 
 bool ps1_supermemcard_busy(void) { return last_cmd_at && time_us_64() < last_cmd_at + 1500 * 1000; }
+
+bool ps1_supermemcard_gui_may_run(void) {
+    /* drawing the screen (a scrolling line redrawn and sent to the OLED) holds this core ~20 ms, and the SS1's next
+     * block waits for it: while blocks are coming (one in the last 30 ms), the screen is drawn every 250 ms only */
+    static uint64_t drawn;
+    uint64_t now = time_us_64();
+    if (!last_cmd_at || now > last_cmd_at + 30 * 1000 || now > drawn + 250 * 1000) {
+        drawn = now;
+        return true;
+    }
+    return false;
+}
+
+bool ps1_supermemcard_progress(int *pct, const char **text) {
+    if (prog_pct < 0 || time_us_64() > prog_at + SMC_PROGRESS_TIMEOUT_MS * 1000ull)
+        return false;
+    if (pct)
+        *pct = prog_pct;
+    if (text)
+        *text = prog_text;
+    return true;
+}
 
 void ps1_supermemcard_task(void) {
     if (!__atomic_load_n(&enabled, __ATOMIC_ACQUIRE))

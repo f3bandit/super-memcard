@@ -12,6 +12,9 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
+#include <dirent.h>
+#include <sys/wait.h>
+#include <time.h>
 
 #include "smc_frontport.h"
 #include "file_io.h"   // getRootDir
@@ -115,13 +118,14 @@ static void serve_line(char *l)
 	else send_line(peer_fd, "ERR -1\n");
 }
 
-// pass smcd's frames: accept it, read its lines, answer them. wait_ms: how long to wait for something to do
-static void serve(int wait_ms)
+// pass smcd's frames: accept it, read its lines, answer them. wait_ms: how long to wait for something to do. Returns
+// how many of smcd's requests it answered
+static int serve(int wait_ms)
 {
 	listen_front();
-	if (listen_fd < 0) return;
+	if (listen_fd < 0) return 0;
 	struct pollfd p[2] = { { listen_fd, POLLIN, 0 }, { peer_fd, POLLIN, 0 } };
-	if (poll(p, peer_fd >= 0 ? 2 : 1, wait_ms) <= 0) return;
+	if (poll(p, peer_fd >= 0 ? 2 : 1, wait_ms) <= 0) return 0;
 	if (p[0].revents & POLLIN)
 	{
 		int fd = accept4(listen_fd, NULL, NULL, SOCK_CLOEXEC);
@@ -131,30 +135,33 @@ static void serve(int wait_ms)
 			peer_fd = fd;
 			peer_len = 0;
 		}
-		return;
+		return 0;
 	}
-	if (peer_fd < 0 || !(p[1].revents & (POLLIN | POLLHUP | POLLERR))) return;
+	if (peer_fd < 0 || !(p[1].revents & (POLLIN | POLLHUP | POLLERR))) return 0;
 	ssize_t r = recv(peer_fd, peer_buf + peer_len, sizeof(peer_buf) - 1 - peer_len, MSG_DONTWAIT);
 	if (r <= 0)
 	{
-		if (r < 0 && (errno == EAGAIN || errno == EINTR)) return;
+		if (r < 0 && (errno == EAGAIN || errno == EINTR)) return 0;
 		close(peer_fd);
 		peer_fd = -1;
 		smc_frontport_hold(0);   // smcd went away: the front ports are the core's again
-		return;
+		return 0;
 	}
 	peer_len += (size_t)r;
 	peer_buf[peer_len] = 0;
 	char *nl;
+	int answered = 0;
 	while ((nl = strchr(peer_buf, '\n')))
 	{
 		*nl = 0;
 		serve_line(peer_buf);
+		answered++;
 		size_t used = (size_t)(nl + 1 - peer_buf);
 		memmove(peer_buf, nl + 1, peer_len - used + 1);
 		peer_len -= used;
 	}
 	if (peer_len >= sizeof(peer_buf) - 1) peer_len = 0;   // a line too long: dropped
+	return answered;
 }
 
 static int read_two(const char *file, char *a, size_t an, char *b, size_t bn)
@@ -178,8 +185,54 @@ static void write_two(const char *file, const char *a, const char *b)
 
 static void bounce_go();
 
+// The children this Main got from the program it replaced (a Main started by exec, as MiSTer_Quake's wrapper goes back
+// to the menu: its quake-mister): nobody else waits for them, so they're waited for here when they end (no zombies
+// left). Only those: the children this Main starts itself are its own to wait for (system(), popen()).
+static int inherited[16], n_inherited;
+static void find_inherited()
+{
+	n_inherited = 0;
+	DIR *d = opendir("/proc");
+	if (!d) return;
+	struct dirent *e;
+	pid_t me = getpid();
+	while ((e = readdir(d)) && n_inherited < (int)(sizeof(inherited) / sizeof(inherited[0])))
+	{
+		int pid = atoi(e->d_name);
+		if (pid <= 0 || pid == me) continue;
+		char p[64], st[512];
+		snprintf(p, sizeof(p), "/proc/%d/stat", pid);
+		FILE *f = fopen(p, "r");
+		if (!f) continue;
+		size_t n = fread(st, 1, sizeof(st) - 1, f);
+		fclose(f);
+		st[n] = 0;
+		const char *r = strrchr(st, ')');   // pid (comm) state ppid ...
+		int ppid = 0;
+		char state;
+		if (r && sscanf(r + 1, " %c %d", &state, &ppid) == 2 && ppid == me) inherited[n_inherited++] = pid;
+	}
+	closedir(d);
+}
+static void reap_inherited()
+{
+	static struct timespec last;
+	struct timespec t;
+	if (!n_inherited) return;
+	clock_gettime(CLOCK_MONOTONIC, &t);
+	if ((t.tv_sec - last.tv_sec) * 1000 + (t.tv_nsec - last.tv_nsec) / 1000000 < 500) return;
+	last = t;
+	for (int i = 0; i < n_inherited;)
+	{
+		pid_t r = waitpid(inherited[i], NULL, WNOHANG);
+		if (r == inherited[i] || (r < 0 && errno == ECHILD)) inherited[i] = inherited[--n_inherited];
+		else i++;
+	}
+}
+
 void smc_shim_poll()
 {
+	reap_inherited();
 	static char core[64];
 	if (strncmp(core, user_io_get_core_name(), sizeof(core) - 1))
 	{
@@ -187,11 +240,24 @@ void smc_shim_poll()
 		smc_frontport_reset();   // another core: ask its driver again
 	}
 	if (is_menu() && !access(BOUNCE_FILE, R_OK)) bounce_go();   // back in the menu core for a bounce: the game now
-	serve(0);
+	// smcd sends its frames one after another, each waiting for the last one's answer: while it's sending, the next
+	// frames are passed here (a few ms each) rather than one a turn of Main's loop (a 128 KB card: a minute, not 5 s).
+	// At most 20 ms of Main's loop at a time in the menu, 4 ms while a core runs (its input stays prompt)
+	if (!serve(0)) return;
+	int budget = is_menu() ? 20 : 4;
+	struct timespec t0, t;
+	clock_gettime(CLOCK_MONOTONIC, &t0);
+	for (;;)
+	{
+		if (!serve(2)) return;   // smcd paused: Main's loop goes on
+		clock_gettime(CLOCK_MONOTONIC, &t);
+		if ((t.tv_sec - t0.tv_sec) * 1000 + (t.tv_nsec - t0.tv_nsec) / 1000000 >= budget) return;
+	}
 }
 
-// tell smcd; with wait, wait for its DONE (passing frames meanwhile) and give its answer in reply
-static void tell(const char *line, int wait, char *reply = NULL, size_t rn = 0)
+// tell smcd itself (a Main with no Coreshell installed: Console Mode's); with wait, wait for its DONE (passing frames
+// meanwhile) and give its answer in reply
+static void tell_smcd(const char *line, int wait, char *reply, size_t rn)
 {
 	if (reply && rn) reply[0] = 0;
 	listen_front();   // before smcd hears of it: it connects to pass its frames straight away
@@ -218,6 +284,80 @@ static void tell(const char *line, int wait, char *reply = NULL, size_t rn = 0)
 	close(fd);
 }
 
+// Coreshell installed (Phosphor): it owns every launch's card steps and their log, so smcd is told through it (its
+// card_event), never straight; Coreshell being restarted (its supervisor): up to 3 s for it, the frames still passed
+static int coreshell_installed()
+{
+	char p[1024];
+	snprintf(p, sizeof(p), "%s/coreshell/coreshell.sh", getRootDir());
+	return !access(p, X_OK);
+}
+
+static int smcd_up()
+{
+	int fd = unix_connect(SMCD_SOCK);
+	if (fd < 0) return 0;
+	close(fd);
+	return 1;
+}
+
+#define CORESHELL_SOCK "/tmp/coreshell.sock"
+// tell smcd; with wait, wait for its DONE (passing frames meanwhile: smcd reads the card through them), in reply
+static void tell(const char *line, int wait, char *reply = NULL, size_t rn = 0)
+{
+	if (reply && rn) reply[0] = 0;
+	listen_front();   // before smcd hears of it: it connects to pass its frames straight away
+	if (!smcd_up()) return;   // no smcd: Super MemCard isn't installed or running
+	if (!coreshell_installed()) { tell_smcd(line, wait, reply, rn); return; }
+	int fd = -1;
+	for (int t = 0; t < 300 && fd < 0; t++)   // 3 s
+	{
+		fd = unix_connect(CORESHELL_SOCK);
+		if (fd < 0) serve(10);
+	}
+	if (fd < 0) { printf("Super MemCard: Coreshell isn't running: the card wasn't told (%.40s)\n", line); return; }
+	char req[2600];
+	size_t k = (size_t)snprintf(req, sizeof(req), "{\"v\":1,\"cmd\":\"card_event\",\"line\":\"");
+	for (const char *c = line; *c && k + 8 < sizeof(req); c++)   // JSON-escaped
+	{
+		if (*c == '\n') continue;
+		if (*c == '"' || *c == '\\') { req[k++] = '\\'; req[k++] = *c; }
+		else if (*c == '\t') { req[k++] = '\\'; req[k++] = 't'; }
+		else if ((unsigned char)*c < 0x20) k += (size_t)snprintf(req + k, sizeof(req) - k, "\\u%04x", *c);
+		else req[k++] = *c;
+	}
+	snprintf(req + k, sizeof(req) - k, "\"}\n");
+	send_line(fd, req);
+	char buf[512];
+	size_t len = 0;
+	int tries = wait ? 3500 : 300;   // 35 s (smcd's own 30 s and Coreshell's), the menu's: 3 s (smcd says DONE first)
+	for (int t = 0; t < tries; t++)
+	{
+		serve(0);
+		struct pollfd p = { fd, POLLIN, 0 };
+		if (poll(&p, 1, 10) > 0)
+		{
+			ssize_t r = recv(fd, buf + len, sizeof(buf) - 1 - len, 0);
+			if (r <= 0) break;
+			len += (size_t)r;
+			buf[len] = 0;
+			if (strchr(buf, '\n'))
+			{
+				const char *q = strstr(buf, "\"reply\": \"");
+				if (q && reply)
+				{
+					q += 10;
+					size_t e = strcspn(q, "\"");
+					snprintf(reply, rn, "%.*s", (int)e, q);
+				}
+				break;
+			}
+			if (len >= sizeof(buf) - 1) len = 0;
+		}
+	}
+	close(fd);
+}
+
 static void copy_file(const char *from, const char *to)
 {
 	FILE *a = fopen(from, "rb");
@@ -233,13 +373,6 @@ static void copy_file(const char *from, const char *to)
 	fclose(a);
 }
 
-static int smcd_up()
-{
-	int fd = unix_connect(SMCD_SOCK);
-	if (fd < 0) return 0;
-	close(fd);
-	return 1;
-}
 
 // the running core has the card driver (core/sys/smc_port.sv): the card can be reached while it runs
 static int core_has_driver()
@@ -317,6 +450,7 @@ static const char *base_name(const char *p)
 
 void smc_shim_main_start(const char *rbf, const char *mgl)
 {
+	find_inherited();
 	if (is_menu()) { smc_shim_menu_start(); return; }
 	// Main started straight into a core: smcd heard of it if this Main's last fpga_load_rbf() said so (it restarts Main
 	// after every core); else (a core started by something else) LAUNCH now, late: the core is already in
@@ -398,6 +532,11 @@ bool smc_shim_rom_load(const char *file, char type, int index)
 	}
 	else if (!strstr(reply, "DONE same")) { unlink(GAME_FILE); unlink(GAME_COPY); }
 	return true;
+}
+
+bool smc_shim_busy()
+{
+	return peer_fd >= 0;   // smcd is connected: it's reading or writing the card through us
 }
 
 bool smc_shim_saves_available()

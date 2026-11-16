@@ -31,7 +31,9 @@ static int present()
 		uint16_t id = spi_uio_cmd_cont(SMC_ID);
 		uint16_t v = spi_w(0);
 		DisableIO();
-		ver = (id == 0x534D && v) ? v : 0;
+		// Super MemCard's driver answers 'SM'; Phosphor's menu core (menu.rbf on a Phosphor or Coreshell SS1) 'PH',
+		// with the same commands (as Phosphor's Main, phosphor.cpp card_ext_present)
+		ver = ((id == 0x534D || id == 0x5048) && v) ? v : 0;
 	}
 	return ver > 0;
 }

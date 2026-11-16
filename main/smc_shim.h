@@ -37,6 +37,8 @@ void smc_shim_poll();
 
 // The OSD's Saves page (smc_osd.cpp): a game whose saves are on the card is running (smcd said so at its LAUNCH)
 bool smc_shim_saves_available();
+// smcd is passing card frames through Main now (Main's loop doesn't wait on its input poll meanwhile)
+bool smc_shim_busy();
 // a command to smcd and its answer (the lines before END) in out: its length, or -1 (no smcd, or no answer in time).
 // Passes smcd's card frames while it waits
 int smc_shim_ask(const char *cmd, char *out, size_t n, int timeout_ms = 20000);

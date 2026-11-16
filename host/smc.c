@@ -7,8 +7,29 @@
 #include <unistd.h>
 
 enum { C_HELLO = 0x60, C_SELECT, C_READ, C_WRITE, C_CREATE, C_COMMIT, C_STATUS, C_LIST, C_INFO, C_CORE, C_DELETE,
-       C_CERT, C_AUTH, C_AUTHSIG };
+       C_CERT, C_AUTH, C_AUTHSIG, C_PROGRESS };
 enum { GOOD = 0x47, BAD_CHECKSUM = 0x4E, NOT_FOUND = 0x4F, DELETED = 0x44, PENDING = 0x50 };
+
+/* the card's progress bar during transfers (smc.h smc_xfer_text): every PROGRESS_BLOCKS blocks, a file's share done */
+const char *smc_xfer_text;
+#define PROGRESS_BLOCKS 128
+static void xfer_progress(const struct smc_bus *b, uint32_t blk, uint32_t size) {
+    uint32_t blocks = (size + 127) / 128;
+    if (smc_xfer_text && blocks > PROGRESS_BLOCKS && blk % PROGRESS_BLOCKS == 0)
+        smc_progress(b, (int)(blk * 100 / blocks), smc_xfer_text);
+}
+
+int smc_progress(const struct smc_bus *b, int pct, const char *text) {
+    uint8_t req[2 + SMC_PROGRESS_TEXT], a[1];
+    size_t tl = text ? strlen(text) : 0;
+    if (tl > SMC_PROGRESS_TEXT)
+        tl = SMC_PROGRESS_TEXT;
+    req[0] = (uint8_t)(pct < 0 ? 0xFF : pct > 100 ? 100 : pct);
+    req[1] = (uint8_t)tl;
+    memcpy(req + 2, text, tl);
+    int rc = smc_frame(b, C_PROGRESS, req, 2 + (int)tl, a, 1);
+    return rc != SMC_OK ? rc : a[0] == GOOD ? SMC_OK : SMC_E_BAD;
+}
 #define RETRIES 3
 
 int smc_frame(const struct smc_bus *b, uint8_t cmd, const uint8_t *req, int rlen, uint8_t *ans, int alen) {
@@ -237,6 +258,7 @@ int smc_delete(const struct smc_bus *b, int idx, uint32_t gen, uint32_t time) {
 
 int smc_read_file(const struct smc_bus *b, int idx, uint32_t size, uint8_t *buf) {
     for (uint32_t blk = 0; blk * 128 < size; blk++) {
+        xfer_progress(b, blk, size);
         uint8_t req[3] = {(uint8_t)idx, (uint8_t)(blk >> 8), (uint8_t)blk}, a[130];
         int tries = 0, rc;
         for (;;) {
@@ -281,6 +303,7 @@ int smc_write_file_at(const struct smc_bus *b, const char *name, const uint8_t *
 
     for (uint32_t blk = 0; blk * 128 < size; blk++) {
         uint32_t n = size - blk * 128 < 128 ? size - blk * 128 : 128;
+        xfer_progress(b, blk, size);
         req[0] = file;
         req[1] = (uint8_t)(blk >> 8);
         req[2] = (uint8_t)blk;
@@ -398,4 +421,57 @@ int smc_core_set_card(const struct smc_bus *b, const char *sys, int card) {
     if (rc)
         return rc;
     return a[0] == GOOD && a[1] == card ? card : SMC_E_BAD;
+}
+
+int smc_ps1_default_card(const struct smc_bus *b) {
+    /* MMCE reset (81 27 + 4): the card leaves a game's own card for its default one (sd2psXtd ps1_cardman_switch_default) */
+    uint8_t out[6] = {0x81, 0x27, 0, 0, 0, 0}, in[6];
+    if (b->frame) {
+        int got = b->frame(b->ctx, out, in, 6);
+        return got == 6 ? SMC_OK : got < 0 ? got : SMC_E_NO_REPLY;
+    }
+    bool ack = false;
+    int rc = SMC_OK;
+    b->select(b->ctx, true);
+    for (int i = 0; i < 6; i++) {
+        bool last = i == 5;
+        b->xfer(b->ctx, out[i], last, &ack);
+        if (!last && !ack) {
+            rc = SMC_E_NO_REPLY;
+            break;
+        }
+    }
+    b->select(b->ctx, false);
+    return rc;
+}
+
+int smc_ps1_set_game_id(const struct smc_bus *b, const char *id) {
+    size_t len = id ? strlen(id) : 0;
+    if (len == 0 || len > 32)
+        return SMC_E_BAD;
+    uint8_t out[4 + 32], in[4 + 32];
+    out[0] = 0x81;
+    out[1] = 0x21;
+    out[2] = 0x00;           /* reserved */
+    out[3] = (uint8_t)len;
+    memcpy(out + 4, id, len);
+    int n = 4 + (int)len;
+    if (b->frame) {
+        /* the card ACKs every byte but the last (its answer ends there): all n exchanged is a whole command */
+        int got = b->frame(b->ctx, out, in, n);
+        return got == n ? SMC_OK : got < 0 ? got : SMC_E_NO_REPLY;
+    }
+    bool ack = false;
+    int rc = SMC_OK;
+    b->select(b->ctx, true);
+    for (int i = 0; i < n; i++) {
+        bool last = i + 1 == n;
+        b->xfer(b->ctx, out[i], last, &ack);
+        if (!last && !ack) {
+            rc = SMC_E_NO_REPLY;
+            break;
+        }
+    }
+    b->select(b->ctx, false);
+    return rc;
 }

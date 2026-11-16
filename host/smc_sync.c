@@ -1057,11 +1057,21 @@ static size_t db_icon(const char *sys, int card, const char *id, const char *bas
     struct stat st;
     icon_db_path(path, sizeof(path), sys, base, "bin");
     size_t l = read_small(path, out, out_max);
-    if (l >= 8 && !memcmp(out, "SMIC", 4))
+    if (l >= 8 && !memcmp(out, "SMIC", 4)) {
+        /* made before the picture it came from was kept (its .cover: the menus show it big, the icon only small):
+         * the picture fetched again, once (.nocover: none found) */
+        char cv[1400], nc[1400];
+        icon_db_path(cv, sizeof(cv), sys, base, "cover");
+        icon_db_path(nc, sizeof(nc), sys, base, "nocover");
+        if (access(cv, F_OK) && access(nc, F_OK))
+            goto queue;
         return l;
+    }
     icon_db_path(path, sizeof(path), sys, base, "none");
     if (!icon_retry && stat(path, &st) == 0 && time(NULL) - st.st_mtime < ICON_RETRY_DAYS * 86400)
         return 0;
+    l = 0;
+queue:;
     const char *crc = NULL, *dash = strrchr(base, '-');
     if (!strncmp(base, "CRC-", 4))
         crc = base + 4;
@@ -1074,7 +1084,7 @@ static size_t db_icon(const char *sys, int card, const char *id, const char *bas
     snprintf(line, sizeof(line), "%s\t%d\t%s\t%s\t%s\t%s\t%s\n", sys, card, id, base, name ? name : "", r ? r->path : "",
              game ? game : "");
     icons_line("queue.txt", line);
-    return 0;
+    return l;
 }
 
 /* libretro's file name for a game (these characters become _), then the URL's escapes */
@@ -1119,13 +1129,58 @@ static bool smc_system_is_cd(const char *sys) {
 }
 
 /* one picture, downloaded and made into an icon */
+/* the picture the icon was made from, kept beside it as <base>.cover (the menus show it big) */
+static const char *cover_to;
 static size_t fetch_icon(int (*fetch)(const char *url, const char *to), const char *url, const char *tmp, uint8_t *out,
                          size_t out_max) {
     size_t l = 0;
     if (fetch(url, tmp) == 0)
         l = smc_art_icon(tmp, out, out_max);
-    unlink(tmp);
+    if (!(l && cover_to && rename(tmp, cover_to) == 0))
+        unlink(tmp);
     return l;
+}
+static void keep_cover(const char *from) {   /* a picture that stays where it is (Console Mode's media/): a copy */
+    if (!cover_to)
+        return;
+    FILE *a = fopen(from, "rb"), *b = a ? fopen(cover_to, "wb") : NULL;
+    static char buf[16384];
+    size_t n;
+    while (a && b && (n = fread(buf, 1, sizeof(buf), a)) > 0)
+        fwrite(buf, 1, n, b);
+    if (a)
+        fclose(a);
+    if (b)
+        fclose(b);
+}
+
+/* a listed game without its picture (.cover) yet: listed for the download of the picture only ("C" for its card: the
+ * icon on the card stays). Asked again ICON_RETRY_DAYS after none was found (.nocover: the game lists may have come). */
+void smc_icon_want_cover(const struct smc_sync_cfg *cfg, const char *sys, const char *id, const char *full) {
+    C = cfg;
+    char base[65], cv[1400], nc[1400];
+    snprintf(base, sizeof(base), "%s", id);
+    if (strchr(base, '~'))
+        *strchr(base, '~') = 0;
+    if (!*base || base[0] == '.' || strchr(base, '/') || strchr(sys, '/') || strchr(base, '\t') || strchr(full, '\t'))
+        return;
+    icon_db_path(cv, sizeof(cv), sys, base, "cover");
+    icon_db_path(nc, sizeof(nc), sys, base, "nocover");
+    struct stat st;
+    if (!access(cv, F_OK) || (stat(nc, &st) == 0 && time(NULL) - st.st_mtime < ICON_RETRY_DAYS * 86400))
+        return;
+    static char asked[256][100];   /* (once per run of smcd: the download takes a while) */
+    static int na;
+    char key[100];
+    snprintf(key, sizeof(key), "%s/%s", sys, base);
+    for (int i = 0; i < na; i++)
+        if (!strcmp(asked[i], key))
+            return;
+    if (na < 256)
+        snprintf(asked[na++], sizeof(asked[0]), "%s", key);
+    char line[600];
+    snprintf(line, sizeof(line), "%s\tC\t%s\t%s\t\t\t%s\n", sys, id, base, full);
+    icons_line("queue.txt", line);
 }
 
 int smc_fetch_icons(const struct smc_sync_cfg *cfg, int (*fetch)(const char *url, const char *to)) {
@@ -1181,8 +1236,15 @@ int smc_fetch_icons(const struct smc_sync_cfg *cfg, int (*fetch)(const char *url
             seen |= !strcmp(done[i], key);
         snprintf(ready, sizeof(ready), "%s\t%s\t%s\t%s\n", sys, card, id, base);
         icon_db_path(bin, sizeof(bin), sys, base, "bin");
-        if (seen || access(bin, F_OK) == 0) {
-            if (access(bin, F_OK) == 0)
+        char cover[1300], nocover[1300];
+        icon_db_path(cover, sizeof(cover), sys, base, "cover");
+        icon_db_path(nocover, sizeof(nocover), sys, base, "nocover");
+        int had = access(bin, F_OK) == 0;   /* an icon made before its picture was kept: only the picture now */
+        bool want = !strcmp(card, "C");     /* a listed game's picture only (smc_icon_want_cover) */
+        if (want)
+            had = 1;
+        if (seen || (had && (access(cover, F_OK) == 0 || (!want && access(nocover, F_OK) == 0)))) {
+            if (!want && had)
                 icons_line("ready.txt", ready); /* another card set of a game already done */
             continue;
         }
@@ -1199,7 +1261,9 @@ int smc_fetch_icons(const struct smc_sync_cfg *cfg, int (*fetch)(const char *url
         url_name(en, sizeof(en), base);
         url_name(el, sizeof(el), sys);
         snprintf(url, sizeof(url), "%s/%s/%s.png", SMC_ICON_REPO, el, en);
-        l = fetch_icon(fetch, url, tmp, icon, sizeof(icon));
+        cover_to = NULL;   /* (ours are icon-sized already: no cover from them) */
+        l = had ? 0 : fetch_icon(fetch, url, tmp, icon, sizeof(icon));
+        cover_to = cover;
         /* 2. libretro's cover, by official name, in each of the system's lists (looked up again here: the lists
          * may have come since the game was listed) */
         char fresh_name[400] = "";
@@ -1230,7 +1294,7 @@ int smc_fetch_icons(const struct smc_sync_cfg *cfg, int (*fetch)(const char *url
          * saves), each also without a revision and with only its region, and a CD game as its first disc; covers
          * first, then title screens */
         if (!l) {
-            char cand[8][400];
+            char cand[12][400];
             int nc = 0;
             const char *roots[3] = {name, full, base};
             for (int ri = 0; ri < 3; ri++) {
@@ -1239,13 +1303,17 @@ int smc_fetch_icons(const struct smc_sync_cfg *cfg, int (*fetch)(const char *url
                 char v1[400], v2[400];
                 snprintf(v1, sizeof(v1), "%s", roots[ri]);
                 name_variant_norev(v1, v2, sizeof(v2));
-                const char *vs[4] = {v1, v2, NULL, NULL};
+                const char *vs[5] = {v1, v2, NULL, NULL, NULL};
                 char v3[400], v4[400];
                 name_variant_region(v1, v3, sizeof(v3));
                 vs[2] = v3;
                 snprintf(v4, sizeof(v4), "%s (Disc 1)", v1);
                 vs[3] = smc_system_is_cd(sys) && !strstr(v1, "(Disc") ? v4 : NULL;
-                for (int vi = 0; vi < 4 && nc < 8; vi++) {
+                /* a Color game that runs on a Game Boy too: No-Intro (so libretro) names it so now */
+                char v5[400];
+                snprintf(v5, sizeof(v5), "%s (GB Compatible)", v1);
+                vs[4] = !strcmp(sys, "GBC") && !strstr(v1, "(GB Compatible)") ? v5 : NULL;
+                for (int vi = 0; vi < 5 && nc < 12; vi++) {
                     if (!vs[vi] || !*vs[vi])
                         continue;
                     bool dup = false;
@@ -1285,12 +1353,20 @@ int smc_fetch_icons(const struct smc_sync_cfg *cfg, int (*fetch)(const char *url
                 static const char *const ext[] = {"png", "jpg", "jpeg", "PNG", "JPG"};
                 for (size_t e = 0; e < sizeof(ext) / sizeof(ext[0]) && !l; e++) {
                     snprintf(path, sizeof(path), "%s/media/%s.%s", d2, romname, ext[e]);
-                    if (access(path, R_OK) == 0)
-                        l = smc_art_icon(path, icon, sizeof(icon));
+                    if (access(path, R_OK) == 0 && (l = smc_art_icon(path, icon, sizeof(icon))))
+                        keep_cover(path);
                 }
             }
         }
+        cover_to = NULL;
         icon_db_path(none, sizeof(none), sys, base, "none");
+        if (had) {   /* (the icon it had stays: it's the one on the card) */
+            if (!l)
+                put_small(nocover, "", 0);
+            else
+                unlink(nocover);
+            continue;
+        }
         if (l && put_small(bin, icon, l)) {
             unlink(none);
             icons_line("ready.txt", ready);

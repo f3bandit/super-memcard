@@ -14,6 +14,9 @@ Where they're called in Main:
 - `smc_shim_core_start(name, xml)`: in `fpga_load_rbf()`, before a core that isn't the menu is loaded.
 - `smc_shim_menu_start()`: in `main()`, after `user_io_init()`, when Main starts with the menu core.
 - `smc_shim_poll()`: in Main's loop.
+- `smc_shim_busy()`: in `input.cpp`'s input poll, where a Main waits for input in the menu (Main_MiSTer: 25 ms with
+  the framebuffer up): 1 ms instead while it's true, so smcd's card frames pass at once (a 128 KB PS1 card: seconds,
+  not a minute).
 
 With no `smcd` running, nothing happens and Main works as without Super MemCard. docs/10-console-mode-guide.md has the
 whole picture.

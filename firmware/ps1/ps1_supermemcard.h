@@ -11,7 +11,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define SMC_VERSION     3   /* 2: Core; virtual cards in Select and List. 3: Core carries the screen (SMC_CORE_SCREEN) */
+#define SMC_VERSION     4   /* 2: Core; virtual cards in Select and List. 3: Core carries the screen (SMC_CORE_SCREEN).
+                             * 4: PS1 mode's per-game cards as files (SMC_PS1CARD), Progress */
 
 enum {
     SMC_HELLO  = 0x60, /* 'S' 'M' ver host caps                -> 'S' 'M' ver features id[8] free_kb[4] (16) */
@@ -36,11 +37,20 @@ enum {
                          * no identity (only the chip ID) */
     SMC_AUTH    = 0x6C, /* challenge[32]                      -> status (1): the card signs it after answering */
     SMC_AUTHSIG = 0x6D, /* (none)                             -> status sig[64] (65); status 50: not signed yet */
+    /* version 4 */
+    SMC_PROGRESS = 0x6E, /* pct textlen text                   -> status (1): the card shows a progress bar (0..100) with
+                          * the text ("Saving Chrono Cross") over its screen; pct FF: done, back to the screen. Shown
+                          * until done, or SMC_PROGRESS_TIMEOUT_MS after the last one (the SS1 gone quiet mid-job) */
 };
+#define SMC_PROGRESS_TEXT 32
+#define SMC_PROGRESS_TIMEOUT_MS 4000
 
 /* answer status / end bytes, as the PS1 commands use them */
 enum { SMC_GOOD = 0x47, SMC_BAD_CHECKSUM = 0x4E, SMC_FAIL = 0xFF, SMC_NOT_FOUND = 0x4F, SMC_NO_SET = 0x53,
-       SMC_DELETED = 0x44, SMC_PENDING = 0x50 };
+       SMC_DELETED = 0x44, SMC_PENDING = 0x50, SMC_BUSY = 0x42 /* PS1CARD: the card PS1 mode has open */ };
+
+/* the system name for PS1 mode's own per-game cards (MemoryCards/PS1/<game ID>/<game ID>-<n>.mcd) as files */
+#define SMC_PS1CARD "PS1CARD"
 
 /* host IDs in Hello */
 enum { SMC_HOST_MAIN = 1, SMC_HOST_CONSOLE_MODE = 2, SMC_HOST_CORE = 3, SMC_HOST_TEST = 0x7F };
@@ -121,6 +131,10 @@ void ps1_supermemcard_format_time(const char *in, char *out, size_t n);
 uint32_t ps1_supermemcard_count_free(void);
 /* A Super MemCard command was carried out in the last 1.5 s (the screen shows "saving"). */
 bool ps1_supermemcard_busy(void);
+/* The SS1's progress bar (SMC_PROGRESS): true while one is up, with its percent and text */
+bool ps1_supermemcard_progress(int *pct, const char **text);
+/* the main loop may draw the screen now (src/ps1.c): not between the blocks of a transfer, but every 250 ms then */
+bool ps1_supermemcard_gui_may_run(void);
 /* Browse: the systems with saves on the card (up to max), and a system's games on its current virtual card: their
  * folders (game IDs) and names (game.ini's official name, else the header's, else the folder). */
 #define SMC_BROWSE_NAME 48

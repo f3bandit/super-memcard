@@ -1,0 +1,12 @@
+--- a/src/ps1.c
++++ b/src/ps1.c
+@@ -81,6 +81,9 @@
+ #endif
+ 
+ #if WITH_GUI
++#if WITH_SUPERMEMCARD
++    if (ps1_supermemcard_gui_may_run())   /* not between an SS1's blocks (its next one waits for this loop) */
++#endif
+     gui_task();
+     input_task();
+     oled_task();

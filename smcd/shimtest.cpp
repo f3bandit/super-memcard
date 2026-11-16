@@ -60,7 +60,7 @@ void Info(const char *m, int, int, int, int) { printf("info %s\n", m); }
 int xml_load(const char *x) { printf("restart %s\n", x); menu = 0; smc_shim_core_start("_Console/NES_20260603.rbf", x); printf("relaunched\n"); return 0; }
 static void show() { for (int i = 0; i < OsdGetSize(); i++) printf("osd %d|%s\n", i, osd[i]); }
 void smc_frontport_reset() {}
-const char *getRootDir() { return "/media/fat"; }
+const char *getRootDir() { const char *r = getenv("SHIM_ROOT"); return r ? r : "/media/fat"; }   // (test.sh CORESHELL=: one with Coreshell)
 int fpga_load_rbf(const char *name, const char *, const char *xml) {
     printf("load %s %s\n", name, xml ? xml : "");
     if (!strcmp(name, "menu.rbf")) { menu = 1; return 0; }   // (Main would start again here)

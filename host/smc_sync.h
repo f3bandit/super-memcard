@@ -81,6 +81,8 @@ size_t smc_art_icon(const char *path, uint8_t *out, size_t out_max);
  * worked through with fetch() (url, file to write: 0 on success; smcd: curl), each game's picture made into its icon in
  * the icon database. Returns how many icons were made. Run it where waiting on the net is fine (not in a sync). */
 int smc_fetch_icons(const struct smc_sync_cfg *cfg, int (*fetch)(const char *url, const char *to));
+/* a listed game (its card folder's id, its save's own name) without its picture yet: listed for the picture only */
+void smc_icon_want_cover(const struct smc_sync_cfg *cfg, const char *sys, const char *id, const char *full);
 /* The icons made since: onto the card, over the system's placeholder only. Returns how many. */
 int smc_apply_icons(const struct smc_bus *b, const struct smc_sync_cfg *cfg);
 /* A manual card read: games with no picture found are asked for again (else once in 30 days). */
