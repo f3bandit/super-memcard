@@ -1,35 +1,42 @@
-# Licensing and the agreement with Retro Remake
+# Licensing
 
-**Draft term summary for a lawyer to turn into the agreement. Not legal advice.**
+Not legal advice: a lawyer should review this before it's relied on.
 
-## Parties
+## Super MemCard: open source
 
-- **Licensor:** f3bandit (the author and owner of Super MemCard).
-- **Licensee:** Retro Remake (Taki Udon).
+Super MemCard is f3bandit's (the author and owner; the card and its memory card manager are his idea and
+design). Since Nov 15 2026 it's open source:
 
-## What is licensed
+- **Apache License 2.0** ([LICENSE](../LICENSE), [NOTICE](../NOTICE)) for everything that isn't a GPL part:
+  `smcd`, `host/`, the tools, the docs and the guide. Anyone, Retro Remake included, may use, change, sell
+  and ship it, in their products too, keeping f3bandit's copyright lines and passing the NOTICE on.
+- **GPL-3.0-or-later** for the parts built into GPL works (below), for everyone, with an **additional
+  permission for Retro Remake and Taki Udon**: they may use f3bandit's own code in those parts in any
+  product of theirs, closed-source software such as Console Mode and their hardware included, without the
+  GPL's conditions, free of charge; the only condition is crediting f3bandit. The permission is personal to
+  them (and people working on Retro Remake products for them). It covers f3bandit's code only, not the GPL
+  works it's built into (sd2psXtd, Main_MiSTer and its forks, the cores). The text is in [NOTICE](../NOTICE).
 
-`smcd`, the Super MemCard host program, and everything else in this repository that isn't listed as
-GPL in [LICENSE](../LICENSE): the sync, game IDs and names, icons, virtual cards, the memory-manager
-commands, the documentation, the guide and the tools.
+There's no exclusive licence: the draft terms below never took effect for Super MemCard or Coreshell.
 
-And, on the same terms, f3bandit's own code in his other SuperStation projects (each repository's
-LICENSE.md lists what is f3bandit's and what isn't):
+**Coreshell** (core_shell) is also open source under the Apache License 2.0 (its LICENSE and NOTICE). It
+talks to `smcd` over smcd's socket as a separate program and contains none of its code.
+
+## f3bandit's other SuperStation projects (draft, not in effect)
+
+Draft terms for a lawyer, for f3bandit's code in these projects (each repository's LICENSE.md lists what is
+f3bandit's and what isn't). Not agreed; not legal advice.
 
 - **cm_modules** (and ss1_cm_modules): Console Mode's modules: the memory card manager, the controller
   tester, the drive repair, cmjobd, the app link (cmremote), the modules and CM Link.
 - **phosphor_os** and **phosphor-modules**: Phosphor's TV interface, phosphord, apps, tools and modules,
   including the dock IR remote upgrade and the safe shutdown.
 
-Not included: **core_shell** (Coreshell), which is open source under the Apache License 2.0 (its
-LICENSE and NOTICE): anyone, Retro Remake included, may use, change, sell and ship it, keeping
-f3bandit's copyright lines and passing its NOTICE on. Coreshell talks to `smcd` over smcd's socket as
-a separate program and contains none of its code. Also not included: the GPL forks (phosphor-main, phosphor-menu, the cores), which stay GPL like Super
-MemCard's own GPL parts; and SS1 Tool, f3bandit's support tool for users, which keeps its own licence
-and its existing permission for Retro Remake (anything Retro Remake needs from it is added when it
-comes up).
+Not included: the GPL forks (phosphor-main, phosphor-menu, the cores), which stay GPL; and SS1 Tool,
+f3bandit's support tool for users, which keeps its own licence and its existing permission for Retro
+Remake.
 
-## Terms
+### Draft terms
 
 | | |
 |---|---|
@@ -44,16 +51,16 @@ comes up).
 | Consideration | Retro Remake sends f3bandit, free of charge, one unit of every product Retro Remake releases from now on, as it's released, so he can keep testing and building features for Retro Remake products. No other payment |
 | If it ends | (for the lawyer) e.g. if Retro Remake stops shipping it or doesn't meet the terms, the rights return to f3bandit |
 
-## The open parts
+## The GPL parts
 
-These stay GPL-3.0-or-later, **copyright f3bandit**, because they are built into GPL works. Retro
-Remake uses and ships them under the GPL like anyone, publishing their source with what it ships:
+These stay GPL-3.0-or-later, **copyright f3bandit**, because they are built into GPL works (plus the
+additional permission for Retro Remake and Taki Udon above):
 
 | part | why GPL |
 |---|---|
 | `firmware/`: the card firmware's Super MemCard additions | sd2psXtd is GPL-3.0 |
 | `core/sys/`: the card driver in the cores' `sys_top` (public: f3bandit/super-memcard-cores) | the MiSTer cores are GPL |
-| `main/smc_frontport.*` and the Main shim | Main_MiSTer is GPL-3.0 |
+| `main/smc_frontport.*`, the Main shim and `main/patch/` | Main_MiSTer is GPL-3.0 |
 
 They hold no Super MemCard logic: the firmware stores files, the driver and shim pass bytes.
 

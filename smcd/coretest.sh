@@ -2,7 +2,7 @@
 # Each core with the Super MemCard driver in its sys_top, on an SS1: loaded by the test Main (with the shim), the PS1 card
 # in front port 1 read through that core's driver (sector 0, as a PS1 does it). Needs a PS1 card in port 1.
 #   sh coretest.sh <folder of .rbf>      then the SS1 restarts (Console Mode back as it boots)
-# Copyright (C) 2026 f3bandit. All rights reserved.
+# Copyright (C) 2026 f3bandit. Licensed under the Apache License 2.0 (LICENSE, NOTICE).
 T=/media/fat/supermemcard_test
 dir=${1:?usage: coretest.sh <folder of .rbf>}
 out=/media/fat/supermemcard_test/smc_cores.txt   # on the SD card: the restart at the end clears /tmp

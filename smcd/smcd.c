@@ -1,7 +1,7 @@
 /* smcd: Super MemCard on the SuperStation. A program of its own beside Main: Main only passes card frames to the
  * front ports for it and tells it when a game starts and when the menu is back (main/smc_shim.cpp); the memory manager
  * (Console Mode's frontend) sends it its commands. Everything Super MemCard does is here.
- * Copyright (C) 2026 f3bandit. All rights reserved; licensed exclusively to Retro Remake (LICENSE, docs/11-licensing.md).
+ * Copyright (C) 2026 f3bandit. Licensed under the Apache License 2.0 (LICENSE, NOTICE).
  *
  *   smcd [-f <root>] [-S <saves>] [-T <state>] [-g <games dir>]... [-d <game lists>] [-l <socket>] [-v <vcard socket>]
  *

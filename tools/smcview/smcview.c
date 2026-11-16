@@ -14,7 +14,7 @@
  * with it; left alone it moves down every 3 s. Any other button, or [seconds] (0: none), ends it, and the screen is put
  * back as it was. The controllers are its own while it runs (grabbed), so nothing reaches Console Mode meanwhile;
  * smcview.sh pauses Console Mode's frontend around it, so the two don't draw over each other.
- * Drawing code from fpga_offload_module's cmscreens (f3bandit). Copyright (C) 2026 f3bandit. All rights reserved.
+ * Drawing code from fpga_offload_module's cmscreens (f3bandit). Copyright (C) 2026 f3bandit. Licensed under the Apache License 2.0 (LICENSE, NOTICE).
  */
 #define STB_TRUETYPE_IMPLEMENTATION
 #include "stb_truetype.h"

@@ -7,7 +7,7 @@
 #   cert    Hello and CERT by hand on port 2 (the chip ID for smccert issue) and port 1, at PS1 speed
 #   smcd    smcd (SMCD_OPTS, default -G: a card without its identity used) HELLO on port 2 and port 1, its log
 #   stop    restart the SS1 (everything back as it boots)
-# Copyright (C) 2026 f3bandit. All rights reserved.
+# Copyright (C) 2026 f3bandit. Licensed under the Apache License 2.0 (LICENSE, NOTICE).
 T=/media/fat/supermemcard_test
 D=/media/fat/supermemcard_test
 SMCD_OPTS=${SMCD_OPTS--G}

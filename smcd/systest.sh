@@ -1,6 +1,6 @@
 #!/bin/bash
 # Super MemCard: one save per system round trip on the SS1, card 1 of each system (the BitFunX in port 1).
-# Copyright (C) 2026 f3bandit. All rights reserved.
+# Copyright (C) 2026 f3bandit. Licensed under the Apache License 2.0 (LICENSE, NOTICE).
 # A game with no save of its own; a test save (random bytes) made for it; launched (to card), then the local save
 # moved away and launched again (from card), the bytes compared; then the test save and its card set removed.
 # The user's own saves aren't touched (only games that have none). Results: /media/fat/supermemcard_test/systest.txt

@@ -1,0 +1,61 @@
+Super MemCard
+Copyright 2026 f3bandit (https://github.com/f3bandit)
+The Super MemCard and its memory card manager are f3bandit's idea and design.
+
+This product includes Super MemCard, by f3bandit. Its own code is licensed under
+the Apache License, Version 2.0 (LICENSE), except the GPL parts below. Anyone
+shipping it, changed or not, in a product or otherwise, must pass this NOTICE on
+with it (Apache License 2.0, section 4(d)).
+
+The GPL parts (GNU General Public License, version 3 or later)
+--------------------------------------------------------------
+These files are copyright f3bandit and licensed to everyone under the GNU General
+Public License, version 3 or (at your option) any later version, because they are
+built into GPL works:
+
+  firmware/                 the Super MemCard additions to sd2psXtd (sd2psXtd is
+                            GPL-3.0; its own code belongs to its authors)
+  core/sys/                 the front-port card driver built into MiSTer cores'
+                            sys_top (published in f3bandit/super-memcard-cores)
+  main/smc_frontport.cpp,   the front-port access compiled into a MiSTer Main
+  main/smc_frontport.h      (Main_MiSTer is GPL-3.0)
+  main/smc_shim.cpp,        the Main shim that passes card frames between a
+  main/smc_shim.h,          MiSTer Main and smcd
+  main/patch/               the patch that puts them into Main_MiSTer and its forks
+
+They are distributed WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public
+License for more details: <https://www.gnu.org/licenses/>.
+
+Additional permission for Retro Remake
+--------------------------------------
+In addition, f3bandit grants Retro Remake and Taki Udon (GitHub: Takiiiiiiii) the
+following, for f3bandit's own code in the GPL parts above:
+- Permission to use, copy, modify, merge, publish, distribute, sublicense and sell
+  it, in whole or in part, in any product of theirs (including closed-source
+  software such as Console Mode, and their hardware), without the GPL's
+  conditions, free of charge.
+- The only condition: a mention of f3bandit in the credits of anything that uses it.
+This permission is personal to Retro Remake and Taki Udon and isn't transferable,
+except to people working on Retro Remake products for them. Everyone else gets
+those files under the GPL only. It covers only f3bandit's own code: the GPL works
+the parts are built into (sd2psXtd, Main_MiSTer and its forks, the MiSTer cores)
+stay under their authors' licences. The code is provided "as is", without
+warranty of any kind.
+
+Everything else in this repository (smcd, host/, tools/, the docs and guide) is
+open to everyone, Retro Remake included, under the Apache License 2.0.
+
+Other people's work used here, under their own licences
+--------------------------------------------------------
+  sd2psXtd (the firmware the card runs; sim/card builds it): GPL-3.0, its authors.
+  Monocypher 4.0.2 (third_party/monocypher: the card identity's signatures, in the
+    firmware and in smcd): public domain (CC0) or 2-clause BSD, Loup Vaillant and
+    its contributors.
+  stb_image 2.30 (third_party/stb: reading box art for save icons, in smcd):
+    public domain or MIT, Sean Barrett.
+  MiSTer-devel cores and Main_MiSTer: their own licences, their authors.
+  libretro-database game lists: fetched at run time, not included, used under
+    their own terms.
+
+Super MemCard is not affiliated with or endorsed by any of the authors above.

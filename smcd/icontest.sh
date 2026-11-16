@@ -4,7 +4,7 @@
 #   2. a homebrew game with Console Mode's art beside it (media/<game>.png): that picture
 #   3. a game with no picture anywhere: its system's placeholder stays
 #   4. a manual read again: nothing downloaded twice; a PSX card image keeps its own icon
-# Copyright (C) 2026 f3bandit. All rights reserved.
+# Copyright (C) 2026 f3bandit. Licensed under the Apache License 2.0 (LICENSE, NOTICE).
 set -e
 here=$(cd "$(dirname "$0")" && pwd)
 B=${B:-$here/../sim/card/build-smc}

@@ -14,7 +14,7 @@ saved. The card stays a plain PS1 card for everything else (a real PS1/PS2, the 
 |---|---|---|
 | the card (RP2040 firmware) | `81 60`-`6D` commands, the saves on its SD card, virtual cards per system, its own screen, its identity | `firmware/` (a patch to sd2psXtd, GPL-3.0) |
 | menu core | send a frame of any length (up to 255 bytes) to a front port and give back the card's bytes | `core/sys/smc_port.sv` (`SMC_RAW`, version 3) |
-| `smcd` | all of Super MemCard: which save, the sync, game IDs and names, the genuine-card check, the memory manager's commands | `smcd/` with `host/` (closed, Retro Remake's licence), one program beside Main |
+| `smcd` | all of Super MemCard: which save, the sync, game IDs and names, the genuine-card check, the memory manager's commands | `smcd/` with `host/` (Apache 2.0), one program beside Main |
 | `MiSTer_ConsoleMode` | the shim: passes `smcd`'s card frames to the front ports, tells it when a game starts and when the menu is back | `main/smc_shim.*`, `main/smc_frontport.*` (GPL-3.0, as Main) |
 | frontend | a Super MemCard view in Media › Memory Cards, through `smcd`'s socket | (Console Mode's own screens) |
 

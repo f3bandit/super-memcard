@@ -1,5 +1,5 @@
 /* Super MemCard: is the card a genuine Retro Remake card? (docs/12-card-identity.md)
- * Copyright (C) 2026 f3bandit. All rights reserved. */
+ * Copyright (C) 2026 f3bandit. Licensed under the Apache License 2.0 (LICENSE, NOTICE). */
 #define _GNU_SOURCE
 #include "smc.h"
 #include "smc_rrkey.h"

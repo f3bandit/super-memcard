@@ -1,5 +1,5 @@
 /* Super MemCard: a save icon from the game's box art, as flash-cart menus make their thumbnails (docs/05-design.md).
- * Copyright (C) 2026 f3bandit. All rights reserved.
+ * Copyright (C) 2026 f3bandit. Licensed under the Apache License 2.0 (LICENSE, NOTICE).
  *
  * The art (PNG or JPEG, Console Mode's media/<game>.png) fitted into 32x32, centred, the rest transparent, in 15
  * colours plus transparent: icon.bin's layout (the PS1 save icon's: 4 bits a pixel, a 16-colour PS1 palette), so

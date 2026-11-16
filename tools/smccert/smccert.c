@@ -1,5 +1,5 @@
 /* smccert: Retro Remake's tool for Super MemCard card identities (docs/12-card-identity.md).
- * Copyright (C) 2026 f3bandit. All rights reserved.
+ * Copyright (C) 2026 f3bandit. Licensed under the Apache License 2.0 (LICENSE, NOTICE).
  *
  *   smccert key   <key file>                      a new signing key (Retro Remake's; keep it offline), prints its
  *                                                 public key for smcd and the card firmware

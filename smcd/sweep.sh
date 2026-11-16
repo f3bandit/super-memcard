@@ -3,7 +3,7 @@
 # byte), the core checked each time. Needs the test Main in the menu, vcardd (the simulated card, with an identity) and
 # smcd on the real saves folder (ss1test.sh start, then smcd -S /media/fat/saves). Backs the saves up first.
 #   sh sweep.sh [<system>...]   all, or only these (NES MegaCD ...); log: /media/fat/supermemcard_test/sweep.log
-# Copyright (C) 2026 f3bandit. All rights reserved.
+# Copyright (C) 2026 f3bandit. Licensed under the Apache License 2.0 (LICENSE, NOTICE).
 T=/media/fat/supermemcard_test
 DL=$T/dl
 S=/media/fat/saves

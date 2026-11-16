@@ -1,5 +1,5 @@
 #!/bin/sh
-# Copyright (C) 2026 f3bandit. All rights reserved.
+# Copyright (C) 2026 f3bandit. Licensed under the Apache License 2.0 (LICENSE, NOTICE).
 # Super MemCard on the SS1 (copy to /media/fat/supermemcard_test with smcd, vcardd and a test-bench Main with the shim): the test-bench Main with the shim (main/smc_shim.cpp) and smcd.
 #   sh ss1test.sh start   stop Console Mode's Main, start vcardd, smcd (simulated card) and the test Main
 #   sh ss1test.sh b       B: smcd with the simulated card: READ, then a NES game launched by Main (LAUNCH), then menu (MENU)

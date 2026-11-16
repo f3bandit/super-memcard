@@ -63,7 +63,6 @@ then handed to Retro Remake as a set: protocol spec, `sys/` and Main patches, ca
 ## Open questions
 
 - Confirm the shipping Retro Remake card is still SD2PSX-based and get its firmware source.
-- Licence (the card firmware and MiSTer parts are GPL-3.0; f3bandit's own code TBD).
 
 By f3bandit.
 
@@ -71,6 +70,7 @@ The cores are built in the public repo [f3bandit/super-memcard-cores](https://gi
 (free Actions minutes): the pinned cores, the card driver for `sys/` and the build workflow. `core/sys/` here is
 the same driver, for the bus simulation; a change to it goes to both.
 
-Licence: closed, all rights reserved, licensed exclusively to Retro Remake, except the GPL parts
-(card firmware additions, core driver, Main front-port code): see [LICENSE](LICENSE) and
+Licence: open source, Apache License 2.0 ([LICENSE](LICENSE), [NOTICE](NOTICE)), except the GPL-3.0
+parts built into GPL works (card firmware additions, core driver, Main front-port code and shim),
+which Retro Remake and Taki Udon may also use without the GPL's conditions (NOTICE). See
 [docs/11-licensing.md](docs/11-licensing.md).

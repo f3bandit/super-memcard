@@ -1,5 +1,5 @@
 /* smcd (phosphord's mcformat.h): PlayStation memory card images (mcformat.c, SS1 Tool's mcformat.go in C).
- * Copyright (C) 2026 f3bandit. All rights reserved; licensed to Retro Remake (see LICENSE.md). */
+ * Copyright (C) 2026 f3bandit. Licensed under the Apache License 2.0 (LICENSE, NOTICE). */
 #ifndef PHOSD_MCFORMAT_H
 #define PHOSD_MCFORMAT_H
 

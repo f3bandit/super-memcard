@@ -1,7 +1,7 @@
 #!/bin/sh
 # smcd and the Main shim end to end on a PC: the frontend's commands and Main's LAUNCH/MENU go to smcd, its card frames
 # go through the shim (smc_shim.cpp, as Main runs it) to the virtual card (vcardd). Needs: make -C sim/card SMC=1.
-# Copyright (C) 2026 f3bandit. All rights reserved.
+# Copyright (C) 2026 f3bandit. Licensed under the Apache License 2.0 (LICENSE, NOTICE).
 set -e
 here=$(cd "$(dirname "$0")" && pwd)
 B=${B:-$here/../sim/card/build-smc}

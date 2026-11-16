@@ -1,5 +1,5 @@
 /* Super MemCard: Retro Remake's public key, which signs every genuine card's identity (docs/12-card-identity.md).
- * Copyright (C) 2026 f3bandit. All rights reserved.
+ * Copyright (C) 2026 f3bandit. Licensed under the Apache License 2.0 (LICENSE, NOTICE).
  * This is the TEST key (tools/smccert/test-rr.key): Retro Remake's own goes here, the same as in the firmware's
  * ps1_supermemcard_rrkey.h, and smcd built with the test key says so in its log. */
 #pragma once
