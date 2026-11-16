@@ -1,0 +1,22 @@
+--- a/src/ps1/ps1_memory_card.c
++++ b/src/ps1/ps1_memory_card.c
+@@ -244,14 +244,17 @@
+     prev = page_lsb;
+     for (offset = 0; offset < 128; offset++) {
+         respondOrNextCmd(prev);   receiveOrNextCmd(&in);
+-        ps1_mc_data_interface_write_byte(((page_msb * 256) + page_lsb) * 128 + offset, in);
++        if (page_msb < 4)   /* sectors 0..3FF only: past the card, nothing written (Super MemCard) */
++            ps1_mc_data_interface_write_byte(((page_msb * 256) + page_lsb) * 128 + offset, in);
+         chk ^= in;
+         prev = in;
+     }
+     respondOrNextCmd(prev);           receiveOrNextCmd(&in);
+     respondOrNextCmd(0x5C);           receiveOrNextCmd(&_);
+     respondOrNextCmd(0x5D);           receiveOrNextCmd(&_);
+-    if (in == chk) {
++    if (page_msb >= 4) {
++        respondOrNextCmd(0xFF);   /* a sector past 3FF: Bad Sector, as a Sony card answers */
++    } else if (in == chk) {
+         ps1_mc_data_interface_write_mc((page_msb * 256) + page_lsb);
+         respondOrNextCmd(0x47);
+     } else {

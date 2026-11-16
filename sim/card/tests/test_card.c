@@ -405,9 +405,13 @@ static const struct test tests[] = {
     {"PS1 session leaves SuperMemCard/ byte for byte", t_ps1_session_leaves_super_memcard_alone, true},
     {"power cut after a write: old or new sector, never a mix", t_power_cut_after_write, true},
     {"card picked by the combo is kept after power-off", t_controller_combo_survives_power_off, true},
+#ifdef WITH_SUPERMEMCARD   /* fixed in Super MemCard's firmware (firmware/patches/0006) */
+    {"write past sector 3FF: end byte FF, nothing changed", t_sector_out_of_range, true},
+#else
     {"write past sector 3FF: end byte FF, nothing changed", t_sector_out_of_range, true,
      "without PSRAM, ps1_mc_data_interface_write_byte() writes past the 128 KB card image in RAM "
      "(up to 8 MB past it) and the card answers 47"},
+#endif
     SMC_TESTS
     SYNC_TESTS
 };

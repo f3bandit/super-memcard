@@ -2,6 +2,7 @@
 // (vcardd), so smcd and the shim are tested together on a PC. Not part of anything shipped.
 //   shimtest <vcardd socket> launch <rbf> [<mgl>] | menu | serve <seconds> | rom <file> | switch <rbf> [<mgl>]
 //            (SMC_NODRIVER=1: the core has no card driver)
+//            | leave <busy ms>   leaving a game whose core writes its save for that long: the OSD shown until it's done
 //            | osd <keys>   the OSD's Saves page while the game runs: keys d(own) u(p) s(elect), the page printed after each
 #include <stdio.h>
 #include <stdlib.h>
@@ -60,6 +61,19 @@ void Info(const char *m, int, int, int, int) { printf("info %s\n", m); }
 int xml_load(const char *x) { printf("restart %s\n", x); menu = 0; smc_shim_core_start("_Console/NES_20260603.rbf", x); printf("relaunched\n"); return 0; }
 static void show() { for (int i = 0; i < OsdGetSize(); i++) printf("osd %d|%s\n", i, osd[i]); }
 void smc_frontport_reset() {}
+// leaving a game (smc_shim_leave_game): the OSD, Main's timer and the core's save being written
+static int osd_on, busy_ms, polls;
+static struct timespec t0;
+static long now_ms() { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return (t.tv_sec - t0.tv_sec) * 1000 + (t.tv_nsec - t0.tv_nsec) / 1000000; }
+void OsdEnable(unsigned char) { osd_on = 1; printf("osd on\n"); }
+void OsdDisable() { osd_on = 0; printf("osd off at %ld ms\n", now_ms()); }
+char user_io_osd_is_visible() { return osd_on; }
+void user_io_poll() { polls++; }
+int user_io_disk_busy() { return now_ms() < busy_ms; }
+void scheduler_yield() {}
+unsigned long GetTimer(unsigned long offset) { return (unsigned long)now_ms() + offset; }
+unsigned long CheckTimer(unsigned long t) { return (unsigned long)now_ms() > t; }
+void *co_active() { return 0; }
 const char *getRootDir() { const char *r = getenv("SHIM_ROOT"); return r ? r : "/media/fat"; }   // (test.sh CORESHELL=: one with Coreshell)
 int fpga_load_rbf(const char *name, const char *, const char *xml) {
     printf("load %s %s\n", name, xml ? xml : "");
@@ -105,6 +119,17 @@ int main(int argc, char **argv) {
         smc_shim_core_start(argv[3], argc >= 5 ? argv[4] : "");
         printf("switch returned\n");
         for (int i = 0; i < 400 && menu; i++) { smc_shim_poll(); usleep(5000); }
+        smc_vcard_close(&vbus);
+        return 0;
+    } else if (!strcmp(argv[2], "leave") && argc >= 4) {
+        clock_gettime(CLOCK_MONOTONIC, &t0);
+        busy_ms = atoi(argv[3]);
+        menu = 0;
+        smc_shim_leave_game();
+        printf("left, %s\n", polls ? "Main polled meanwhile" : "Main never polled");
+        menu = 1;
+        smc_shim_leave_game();   // (in the menu: nothing)
+        printf("menu: nothing shown\n");
         smc_vcard_close(&vbus);
         return 0;
     } else if (!strcmp(argv[2], "menu")) {

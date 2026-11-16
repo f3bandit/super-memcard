@@ -239,6 +239,11 @@ grep -q "^restart $w/game.mgl" "$w/osd3.log" && grep -q "^relaunched" "$w/osd3.l
 grep -q "^osd 3|> Card 2   now  empty" "$w/osd4.log" && grep -q "^restart" "$w/osd4.log" && cmp -s "$w/saves/NES/Test Game.sav" "$w/first.sav" \
     && ok "OSD: card 1 picked again, its save back" || bad "OSD card 1: $(cat "$w/osd4.log")"
 long=$(sed -n 's/^osd 0|//p' "$w/osd1.log" | head -1); [ ${#long} -le 29 ] && ok "OSD: rows fit the OSD" || bad "OSD row too long"
+# leaving a game (smc_shim_leave_game): the OSD up until the core's save has been written a moment, none in the menu
+"$B/shimtest" "$w/vc.sock" leave 1200 > "$w/leave.log" 2>&1
+at=$(sed -n 's/^osd off at \([0-9]*\) ms/\1/p' "$w/leave.log")
+grep -q "^title Saving" "$w/leave.log" && [ "${at:-0}" -ge 1450 ] && [ "${at:-0}" -lt 2500 ] && grep -q "Main polled meanwhile" "$w/leave.log" \
+    && [ "$(grep -c '^osd on' "$w/leave.log")" = 1 ] && ok "leaving a game: the OSD up until its save is written" || bad "leaving a game: $(cat "$w/leave.log")"
 
 # 4. back in the menu: MENU (nothing changed since: nothing to do), the card's buttons are the PS1 card's again
 kill $shim 2>/dev/null || true; wait $shim 2>/dev/null || true

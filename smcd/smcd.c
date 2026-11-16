@@ -395,8 +395,11 @@ static int mc_busy(char *holder, size_t n) {
     ssize_t l = readlink(MC_BUSY, t, sizeof(t) - 1);
     if (holder && n)
         holder[0] = 0;
-    if (l <= 0)
+    if (l <= 0) {
+        if (l < 0 && errno == EINVAL)
+            unlink(MC_BUSY);   /* there, but not the link the card's users make: nobody's (a lock can never be taken) */
         return 0;
+    }
     t[l] = 0;
     long pid = atol(t);
     if (pid <= 0 || (kill((pid_t)pid, 0) && errno == ESRCH)) {
@@ -415,8 +418,8 @@ static int mc_lock(int wait_ms, char *holder, size_t n) {
     for (int waited = 0;; waited += 100) {
         if (!symlink(t, MC_BUSY))
             return 0;
-        if (!mc_busy(holder, n))
-            continue;
+        if (errno == EEXIST && !mc_busy(holder, n) && waited < wait_ms + 1000)
+            continue;   /* a stale one was just cleared: try again at once */
         if (waited >= wait_ms)
             return 1;
         usleep(100000);

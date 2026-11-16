@@ -658,7 +658,7 @@ index 0000000..8860285
 +		int port, speed, ms, used = 0;
 +		if (sscanf(l + 6, "%d %d %d %n", &port, &speed, &ms, &used) < 3) { send_line(peer_fd, "ERR -1\n"); return; }
 +		const char *h = l + 6 + used;
-+		uint8_t o[255], in[255];
++		uint8_t o[255], in[255] = { 0 };   // (bytes past the n the port answered: sent as 00)
 +		int len = 0;
 +		while (len < 255 && hexval(h[2 * len]) >= 0 && hexval(h[2 * len + 1]) >= 0)
 +		{

@@ -258,11 +258,19 @@ static void mkdirs(const char *dir) {
     sd_mkdir(p);
 }
 
-/* read a small text file into buf (NUL-terminated); returns its length or -1 */
+/* read a small text file into buf (NUL-terminated); returns its length or -1. Only <path>.new there: write_text was
+ * cut off after the new copy was whole and the old one gone (a power cut, the card pulled): the new one is it */
 static int read_text(const char *path, char *buf, int max) {
     int fd = sd_open(path, O_RDONLY);
-    if (fd < 0)
-        return -1;
+    if (fd < 0) {
+        char tmp[200];
+        snprintf(tmp, sizeof(tmp), "%s.new", path);
+        if (!sd_exists(tmp) || sd_rename(tmp, path) != 0)
+            return -1;
+        fd = sd_open(path, O_RDONLY);
+        if (fd < 0)
+            return -1;
+    }
     int n = sd_read(fd, buf, (size_t)max - 1);
     sd_close(fd);
     if (n < 0)
@@ -307,15 +315,15 @@ static void load_card_id(void) {
     write_text(ROOT "/card.ini", buf);
 }
 
+#define META_MAX (SMC_MAX_FILES * 48)   /* meta.ini: a line a file, name=-gen,time (up to 40 bytes) */
 static void save_meta(void) {
-    char text[SMC_MAX_FILES * (SMC_NAME_LEN + 16)], line[48], p[192];
+    char text[META_MAX], p[192];
+    int k = 0;
     text[0] = 0;
     for (int i = 0; i < nfiles; i++)
-        if (files[i].exists || files[i].deleted) {
-            snprintf(line, sizeof(line), "%s=%s%lu,%lu\n", files[i].name, files[i].deleted ? "-" : "",
-                     (unsigned long)files[i].gen, (unsigned long)files[i].time);
-            strcat(text, line);
-        }
+        if ((files[i].exists || files[i].deleted) && k < (int)sizeof(text))
+            k += snprintf(text + k, sizeof(text) - (size_t)k, "%s=%s%lu,%lu\n", files[i].name, files[i].deleted ? "-" : "",
+                          (unsigned long)files[i].gen, (unsigned long)files[i].time);
     snprintf(p, sizeof(p), "%s/meta.ini", set_dir);
     write_text(p, text);
 }
@@ -343,7 +351,7 @@ static bool is_save_name(const char *n) {
         return false;
     if (set_ps1)                             /* a PS1 card folder: its cards only (<id>-<n>.mcd) */
         return l > 4 && strcasecmp(n + l - 4, ".mcd") == 0;
-    return !(l > 4 && strcmp(n + l - 4, ".new") == 0);
+    return !(l > 4 && (strcmp(n + l - 4, ".new") == 0 || strcmp(n + l - 4, ".old") == 0));
 }
 
 /* the selected PS1 card folder is the one PS1 mode has open (in memory, written back as it goes): busy */
@@ -472,7 +480,7 @@ static void select_set(const char *sys, const char *id, int card) {
     else
         snprintf(set_dir, sizeof(set_dir), ROOT "/%s/Card%d/%s", sys, card, id);
 
-    static char meta[SMC_MAX_FILES * (SMC_NAME_LEN + 16)];
+    static char meta[META_MAX];
     char p[192];
     snprintf(p, sizeof(p), "%s/meta.ini", set_dir);
     if (read_text(p, meta, sizeof(meta)) < 0)
@@ -481,6 +489,37 @@ static void select_set(const char *sys, const char *id, int card) {
     int dir = sd_open(set_dir, O_RDONLY);
     if (dir < 0)
         return;
+    /* a Commit cut off between its renames: <file>.old without <file> is the previous save, put back */
+    if (!set_ps1) {
+        char olds[4][SMC_NAME_LEN + 1];
+        int nold = 0;
+        int it = sd_iterate_dir(dir, -1);
+        while (it != -1) {
+            char name[SMC_NAME_LEN + 6];
+            size_t l;
+            if (!sd_is_dir(it) && sd_get_name(it, name, sizeof(name)) && (l = strlen(name)) > 4 && l - 4 <= SMC_NAME_LEN &&
+                !strcmp(name + l - 4, ".old") && nold < 4) {
+                name[l - 4] = 0;
+                snprintf(olds[nold++], sizeof(olds[0]), "%s", name);
+            }
+            it = sd_iterate_dir(dir, it);
+        }
+        if (it != -1)
+            sd_close(it);
+        sd_close(dir);
+        for (int i = 0; i < nold; i++) {
+            char a[200], b[200];
+            snprintf(a, sizeof(a), "%s/%s", set_dir, olds[i]);
+            snprintf(b, sizeof(b), "%s/%s.old", set_dir, olds[i]);
+            if (sd_exists(a))
+                sd_remove(b);   /* the new save has its name: the old one wasn't removed yet */
+            else
+                sd_rename(b, a);
+        }
+        dir = sd_open(set_dir, O_RDONLY);
+        if (dir < 0)
+            return;
+    }
     int it = sd_iterate_dir(dir, -1);
     while (it != -1 && nfiles < SMC_MAX_FILES) {
         char name[SMC_NAME_LEN + 2];
@@ -681,7 +720,7 @@ static void civil(int64_t days, int *y, int *m, int *d) {
 int ps1_supermemcard_browse_saves(const char *sys, int card, const char *id, char (*names)[SMC_NAME_LEN + 1],
                                   char (*when)[24], int max) {
     char dir[192], p[208];
-    static char meta[SMC_MAX_FILES * (SMC_NAME_LEN + 16)];
+    static char meta[META_MAX];
     snprintf(dir, sizeof(dir), ROOT "/%s/Card%d/%s", sys, card, id);
     snprintf(p, sizeof(p), "%s/meta.ini", dir);
     if (read_text(p, meta, sizeof(meta)) < 0)
@@ -737,7 +776,7 @@ static int do_command(uint8_t cmd, const uint8_t *r, int len, uint8_t *a) {
         a[2] = SMC_VERSION;
         a[3] = 0x1F; /* features: save files, list, virtual cards (Core), delete, identity (CERT/AUTH) */
         for (int i = 0; i < 8; i++) {
-            unsigned v;
+            unsigned v = 0;
             sscanf(card_id + i * 2, "%2x", &v);
             a[4 + i] = (uint8_t)v;
         }
@@ -941,10 +980,20 @@ static int do_command(uint8_t cmd, const uint8_t *r, int len, uint8_t *a) {
             sd_close(nfd);
         if (got != (int)files[f].new_size)
             return 1; /* not every block arrived: the previous save stays */
-        if (sd_exists(p))
-            sd_remove(p);
-        if (sd_rename(np, p) != 0)
+        /* the previous save is renamed <file>.old, the new one takes its name, then .old goes: cut off between
+         * those, select_set puts the previous save back (never a save lost, never half of one) */
+        char op[200];
+        snprintf(op, sizeof(op), "%s.old", p);
+        if (sd_exists(op))
+            sd_remove(op);
+        if (sd_exists(p) && sd_rename(p, op) != 0)
             return 1;
+        if (sd_rename(np, p) != 0) {
+            sd_rename(op, p);
+            return 1;
+        }
+        if (sd_exists(op))
+            sd_remove(op);
         files[f].writing = false;
         files[f].exists = true;
         files[f].deleted = false;

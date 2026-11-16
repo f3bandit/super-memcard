@@ -195,6 +195,85 @@ static void t_smc_new_save_replaces_old_only_at_commit(void) {
     CHECK(memcmp(v2, back, sizeof(v2)) == 0);
 }
 
+static void ren(const char *from, const char *to) {
+    char a[512], b[512];
+    path(a, sizeof(a), from);
+    path(b, sizeof(b), to);
+    CHECK(rename(a, b) == 0);
+}
+
+static void t_smc_commit_cut_between_renames(void) {
+    /* Commit renames the old save to <file>.old, the new one to <file>, then removes .old: the card losing power
+     * between those keeps a whole save, the old one or the new one */
+    static uint8_t v1[2048], v2[2048], back[2048];
+    fill(v1, sizeof(v1), 7);
+    fill(v2, sizeof(v2), 8);
+    struct smc_file f;
+    const char *dir = "SuperMemCard/GBA/Card1/Advance Wars";
+    char a[200], b[200];
+    CHECK_EQ(smc_hello(&vbus, SMC_HOST_TEST, 0, NULL), 1);
+    CHECK_EQ(smc_select(&vbus, "GBA", "Advance Wars"), 0);
+    CHECK_EQ(smc_write_file(&vbus, "save.sav", v1, sizeof(v1), 1), SMC_OK);
+    vcard_power_cut();
+    /* cut after the old save became .old, before the new one had its name */
+    snprintf(a, sizeof(a), "%s/save.sav", dir);
+    snprintf(b, sizeof(b), "%s/save.sav.old", dir);
+    ren(a, b);
+    snprintf(a, sizeof(a), "%s/save.sav.new", dir);
+    write_file(a, v2, sizeof(v2));
+    CHECK_EQ(vcard_start(sd), 0);
+    CHECK_EQ(smc_hello(&vbus, SMC_HOST_TEST, 0, NULL), 1);
+    CHECK_EQ(smc_select(&vbus, "GBA", "Advance Wars"), 1);
+    CHECK_EQ(smc_info(&vbus, 0, &f), SMC_OK);
+    CHECK(strcmp(f.name, "save.sav") == 0);
+    CHECK_EQ(f.gen, 1);
+    CHECK_EQ(smc_read_file(&vbus, 0, f.size, back), SMC_OK);
+    CHECK(memcmp(v1, back, sizeof(v1)) == 0);
+    CHECK(file_size(b) < 0);
+    /* cut after the new save had its name, before .old went: the new one, and .old gone */
+    CHECK_EQ(smc_write_file(&vbus, "save.sav", v2, sizeof(v2), 2), SMC_OK);
+    vcard_power_cut();
+    write_file(b, v1, sizeof(v1));
+    CHECK_EQ(vcard_start(sd), 0);
+    CHECK_EQ(smc_hello(&vbus, SMC_HOST_TEST, 0, NULL), 1);
+    CHECK_EQ(smc_select(&vbus, "GBA", "Advance Wars"), 1);
+    CHECK_EQ(smc_info(&vbus, 0, &f), SMC_OK);
+    CHECK_EQ(f.gen, 2);
+    CHECK_EQ(smc_read_file(&vbus, 0, f.size, back), SMC_OK);
+    CHECK(memcmp(v2, back, sizeof(v2)) == 0);
+    CHECK(file_size(b) < 0);
+    /* meta.ini cut between its own renames (only meta.ini.new left): the saves' generations are still known */
+    vcard_power_cut();
+    snprintf(a, sizeof(a), "%s/meta.ini", dir);
+    snprintf(b, sizeof(b), "%s/meta.ini.new", dir);
+    ren(a, b);
+    CHECK_EQ(vcard_start(sd), 0);
+    CHECK_EQ(smc_hello(&vbus, SMC_HOST_TEST, 0, NULL), 1);
+    CHECK_EQ(smc_select(&vbus, "GBA", "Advance Wars"), 1);
+    CHECK_EQ(smc_info(&vbus, 0, &f), SMC_OK);
+    CHECK_EQ(f.gen, 2);
+}
+
+static void t_smc_sixteen_long_named_files(void) {
+    /* a game with the most files, each with the longest name, and generations and times of 10 digits: meta.ini
+     * holds every one (its buffer once overflowed at about 13) */
+    static uint8_t d[256];
+    CHECK_EQ(smc_hello(&vbus, SMC_HOST_TEST, 0, NULL), 1);
+    CHECK_EQ(smc_select(&vbus, "N64", "Many Files"), 0);
+    for (int i = 0; i < 16; i++) {
+        char nm[17];
+        snprintf(nm, sizeof(nm), "file_%02d_long.ab", i);
+        fill(d, sizeof(d), (uint8_t)i);
+        CHECK_EQ(smc_write_file(&vbus, nm, d, sizeof(d), 4000000000u + (uint32_t)i), SMC_OK);
+    }
+    CHECK_EQ(smc_select(&vbus, "N64", "Many Files"), 16);
+    for (int i = 0; i < 16; i++) {
+        struct smc_file f;
+        CHECK_EQ(smc_info(&vbus, (uint8_t)i, &f), SMC_OK);
+        CHECK_EQ(f.gen, 4000000000u + (uint32_t)i);
+    }
+}
+
 static void t_smc_bad_checksum_and_names(void) {
     uint8_t data[256];
     fill(data, sizeof(data), 7);
@@ -670,6 +749,8 @@ static void t_smc_id_menu_off(void) {
     {"SMC: whole-frame transport (the front ports' way)", t_smc_frame_transport, true, NULL}, \
     {"SMC: slow SD card (2.7 ms a write), 128 KB save", t_smc_slow_sd_card, true, NULL}, \
     {"SMC: Commit refuses a save with blocks missing", t_smc_commit_checks_every_block, true, NULL}, \
+    {"SMC: power cut between Commit's renames: a whole save kept", t_smc_commit_cut_between_renames, true, NULL}, \
+    {"SMC: 16 files with long names and big generations", t_smc_sixteen_long_named_files, true, NULL}, \
     {"SMC: longest system, game and file names", t_smc_longest_names, true, NULL}, \
     {"SMC: off until Hello", t_smc_off_until_hello, true, NULL}, \
     {"SMC: Hello, card ID kept on the card", t_smc_hello_and_card_id, true, NULL}, \

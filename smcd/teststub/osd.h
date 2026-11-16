@@ -6,3 +6,6 @@ int OsdGetSize();
 void OsdUpdate();
 void ScrollText(char n, const char *str, int off, int len, int max_len, unsigned char invert, int idx = 0);
 void ScrollReset(int idx = 0);
+#define DISABLE_KEYBOARD 0x02
+void OsdEnable(unsigned char mode);
+void OsdDisable();
