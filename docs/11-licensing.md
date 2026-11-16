@@ -20,11 +20,11 @@ LICENSE.md lists what is f3bandit's and what isn't):
   tester, the drive repair, cmjobd, the app link (cmremote), the modules and CM Link.
 - **phosphor_os** and **phosphor-modules**: Phosphor's TV interface, phosphord, apps, tools and modules,
   including the dock IR remote upgrade and the safe shutdown.
-- **core_shell** (Coreshell): the unified core menu over stock cores, its launcher, API, Super MemCard
-  page, INI check and profile tools, its core menu dumps and profiles: all closed, none of it GPL
-  (its LICENSE). Console Mode uses it over its socket, as a separate program.
 
-Not included: the GPL forks (phosphor-main, phosphor-menu, the cores), which stay GPL like Super
+Not included: **core_shell** (Coreshell), which is open source under the Apache License 2.0 (its
+LICENSE and NOTICE): anyone, Retro Remake included, may use, change, sell and ship it, keeping
+f3bandit's copyright lines and passing its NOTICE on. Coreshell talks to `smcd` over smcd's socket as
+a separate program and contains none of its code. Also not included: the GPL forks (phosphor-main, phosphor-menu, the cores), which stay GPL like Super
 MemCard's own GPL parts; and SS1 Tool, f3bandit's support tool for users, which keeps its own licence
 and its existing permission for Retro Remake (anything Retro Remake needs from it is added when it
 comes up).
