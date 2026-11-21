@@ -1331,9 +1331,8 @@ int phosphor_pad(uint32_t mask, int press)
 	return 1;
 }
 
-// ---- RetroAchievements beside Coreshell: raengine (core_shell) runs the achievements outside any Main and
-// writes its events to /tmp/raengine.events, one JSON line each. Unlocks pop up here, in MiSTer's info box over
-// the game (Info(), as MiSTer's own messages), since only Main draws over a running core.
+// ---- RetroAchievements: MiSTer_RA's events (Phosphor's link in it writes them to /tmp/raengine.events, one JSON line
+// each: the name from when Coreshell ran an engine of its own), read here, since only Main draws over a running core.
 // ---- a game's loading box, drawn by the frontend in its own style (MiSTer's OSD progress box otherwise). Main restarts
 // with each core and is busy in the load, so nothing goes over the socket: the frontend that draws it says so in
 // <tmp>/draws-loading (its pid), and the load's progress is <tmp>/loading ("cur max\ttitle\tfile"), written as it moves
@@ -1629,9 +1628,7 @@ int phosphor_keep_main(const char *cfg_main)
 	const char *b = strrchr(cfg_main, '/');
 	b = b ? b + 1 : cfg_main;
 	if (!strcasecmp(b, "MiSTer")) return 1;
-	// RetroAchievements: with Coreshell's raengine installed, the achievements run beside the core (raengine reads
-	// the RA cores' shared memory), so RA games stay here with Phosphor's in-game menu; without it, MiSTer_RA
-	if (!strcasecmp(b, "MiSTer_RA") && !access("/media/fat/coreshell/bin/raengine", X_OK)) return 1;
+	// (RetroAchievements: MiSTer_RA, odelot's, as on any MiSTer: its cores go to it)
 	return 0;
 }
 
