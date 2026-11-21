@@ -1,8 +1,8 @@
 // Phosphor's in-game link in MiSTer_RA (odelot's RetroAchievements Main, with the Super MemCard / Coreshell shim).
 // MiSTer_RA is the RetroAchievements client and does all of it (login, tracking, unlocks, hardcore, as configured in
 // its retroachievements.cfg); this only shows its results to the frontend, read-only:
-//   - its events, as JSON lines in /tmp/raengine.events (the format Phosphor and Coreshell read: game, unlocked,
-//     mastered, progress, challenge, leaderboard, login and server errors), and its state in /tmp/raengine.status;
+//   - its events, as JSON lines in /tmp/mister_ra.events (what Phosphor and Coreshell read: game, unlocked, mastered,
+//     progress, challenge, leaderboard, login and server errors);
 //   - "ra" and "ra list" on Phosphor's link (phosphor.cpp): the game, the counts, hardcore, every achievement;
 //   - while Phosphor's shell has the menu button, its own pop-ups for these instead of MiSTer_RA's OSD ones.
 // Nothing here talks to RetroAchievements or changes what MiSTer_RA sends.
@@ -16,8 +16,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#define RA_EVENTS "/tmp/raengine.events"
-#define RA_STATUS "/tmp/raengine.status"
+#define RA_EVENTS "/tmp/mister_ra.events"
 
 rc_client_t *achievements_rc_client(void);   // achievements.cpp (the link's lines there)
 int achievements_popup_pos(void);
@@ -64,28 +63,6 @@ static void emit(const char *event, ...)
 	fclose(f);
 }
 
-static void write_status(rc_client_t *client, const char *state)
-{
-	FILE *f = fopen(RA_STATUS ".tmp", "w");
-	if (!f) return;
-	const rc_client_game_t *g = client ? rc_client_get_game_info(client) : NULL;
-	rc_client_user_game_summary_t s;
-	memset(&s, 0, sizeof(s));
-	if (g && g->id) rc_client_get_user_game_summary(client, &s);
-	fprintf(f, "{\"state\":");
-	json_str(f, state);
-	if (g && g->id) {
-		fprintf(f, ",\"game_id\":%u,\"title\":", g->id);
-		json_str(f, g->title);
-		fprintf(f, ",\"achievements\":%u,\"unlocked\":%u,\"points\":%u,\"points_unlocked\":%u",
-		        s.num_core_achievements, s.num_unlocked_achievements, s.points_core, s.points_unlocked);
-	}
-	fprintf(f, ",\"hardcore\":%s,\"pid\":%d,\"main\":\"MiSTer_RA\"}\n",
-	        client && rc_client_get_hardcore_enabled(client) ? "true" : "false", (int)getpid());
-	fclose(f);
-	rename(RA_STATUS ".tmp", RA_STATUS);
-}
-
 static void badge_url(const rc_client_achievement_t *a, char *out, size_t n)
 {
 	if (rc_client_achievement_get_image_url(a, RC_CLIENT_ACHIEVEMENT_STATE_UNLOCKED, out, n) != RC_OK) out[0] = 0;
@@ -106,7 +83,6 @@ void phosphor_ra_event(const rc_client_event_t *e, rc_client_t *c)
 		badge_url(e->achievement, badge, sizeof(badge));
 		emit("unlocked", "title", e->achievement->title, "description", e->achievement->description,
 		     "badge", badge, "#id", (long)e->achievement->id, "#points", (long)e->achievement->points, NULL);
-		write_status(c, "playing");
 		break;
 	case RC_CLIENT_EVENT_GAME_COMPLETED: {
 		const rc_client_game_t *g = rc_client_get_game_info(c);
@@ -138,7 +114,7 @@ void phosphor_ra_event(const rc_client_event_t *e, rc_client_t *c)
 // its login and game-load callbacks (achievements.cpp ra_login_callback, ra_load_game_callback)
 void phosphor_ra_login(int result, const char *err, rc_client_t *c)
 {
-	if (result != RC_OK) { emit("login_failed", "message", err ? err : "", NULL); write_status(c, "login_failed"); return; }
+	if (result != RC_OK) { emit("login_failed", "message", err ? err : "", NULL); return; }
 	const rc_client_user_t *usr = rc_client_get_user_info(c);
 	emit("logged_in", "user", usr ? usr->display_name : "", NULL);
 }
@@ -147,7 +123,6 @@ void phosphor_ra_game(int result, const char *err, rc_client_t *c)
 {
 	if (result != RC_OK) {
 		emit(result == RC_NO_GAME_LOADED ? "unknown_game" : "error", "message", err ? err : "couldn't load the game", NULL);
-		write_status(c, result == RC_NO_GAME_LOADED ? "unknown_game" : "error");
 		return;
 	}
 	unlink(RA_EVENTS);                                 // a new game's events (a new file: readers start again)
@@ -158,7 +133,6 @@ void phosphor_ra_game(int result, const char *err, rc_client_t *c)
 	rc_client_game_get_image_url(g, img, sizeof(img));
 	emit("game", "title", g->title, "badge", img, "#game_id", (long)g->id, "#achievements", (long)s.num_core_achievements,
 	     "#unlocked", (long)s.num_unlocked_achievements, "#hardcore", (long)rc_client_get_hardcore_enabled(c), NULL);
-	write_status(c, "playing");
 }
 
 // Phosphor's pop-ups in the corner the user set for RetroAchievements' (retroachievements.cfg popup_position)

@@ -1331,8 +1331,8 @@ int phosphor_pad(uint32_t mask, int press)
 	return 1;
 }
 
-// ---- RetroAchievements: MiSTer_RA's events (Phosphor's link in it writes them to /tmp/raengine.events, one JSON line
-// each: the name from when Coreshell ran an engine of its own), read here, since only Main draws over a running core.
+// ---- RetroAchievements: MiSTer_RA's events (Phosphor's link in it writes them to /tmp/mister_ra.events, one JSON line
+// each), read here, since only Main draws over a running core.
 // ---- a game's loading box, drawn by the frontend in its own style (MiSTer's OSD progress box otherwise). Main restarts
 // with each core and is busy in the load, so nothing goes over the socket: the frontend that draws it says so in
 // <tmp>/draws-loading (its pid), and the load's progress is <tmp>/loading ("cur max\ttitle\tfile"), written as it moves
@@ -1443,11 +1443,11 @@ static void ra_events_poll(void)
 	if (next && !CheckTimer(next)) return;
 	next = GetTimer(400);
 	struct stat st;
-	if (stat("/tmp/raengine.events", &st)) { pos = 0; ino = 1; return; }
+	if (stat("/tmp/mister_ra.events", &st)) { pos = 0; ino = 1; return; }
 	if (!ino) { ino = st.st_ino; pos = st.st_size; }   // (this Main just started: what's there is an earlier game's)
 	if (st.st_ino != ino || st.st_size < pos) { ino = st.st_ino; pos = 0; }   // a new game's events
 	if (st.st_size == pos) return;
-	FILE *f = fopen("/tmp/raengine.events", "r");
+	FILE *f = fopen("/tmp/mister_ra.events", "r");
 	if (!f) return;
 	fseek(f, pos, SEEK_SET);
 	char line[2048];
