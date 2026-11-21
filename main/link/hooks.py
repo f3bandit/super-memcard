@@ -2,7 +2,7 @@
 import os, re, sys, shutil
 d = sys.argv[1]
 src = os.path.dirname(os.path.abspath(__file__))
-for f in ('phosphor.cpp', 'phosphor.h', 'phosphor_version.h', 'phosphor_disc.h', 'phosphor_link.cpp'):
+for f in ('phosphor.cpp', 'phosphor.h', 'phosphor_disc.h', 'phosphor_link.cpp'):
     shutil.copy(os.path.join(src, f), os.path.join(d, f))
 
 def edit(f, fn):
