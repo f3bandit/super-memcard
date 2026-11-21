@@ -47,6 +47,4 @@ int phosphor_start(void);
 // Main is about to restart the system on purpose: heavy work that was running didn't lose power
 void phosphor_mark_clean(void);
 
-void phosphor_ra_reply(int list, char *out, size_t n);   // "ra" / "ra list" (the RA client's Main)
-int phosphor_frontend_here(void);    // Phosphor's shell has the menu button: its pop-ups, not Main's
 #endif

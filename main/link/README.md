@@ -11,8 +11,7 @@ these hooks. GPL-3.0, like Main. Applied after the shim (`../patch`), by Coreshe
 |---|---|
 | `phosphor.cpp/.h` | Phosphor's own Main's local API (phosphor-main's, the same file): `/tmp/phosphor-main.sock`, the menu button, the in-game menu over the game |
 | `phosphor_link.cpp`, `phosphor_disc.h` | what that API needs from a Main that isn't Phosphor's: the core's options, DIP switches and settings through Main's public functions; the rest answered as "none" |
-| `phosphor_link_ra.cpp` | MiSTer_RA only (when the tree has `achievements.cpp`): its client's results, read-only, as `ra` / `ra list` and `/tmp/mister_ra.events`; its pop-ups drawn as Phosphor's cards while Phosphor is the frontend (same queue, timing, sounds and corner as its own) |
-| `phosphor_osd_card.cpp`, `phosphor_osd_font.h` | the cards: a 1-bit bitmap in the OSD, Pixel Operator (CC0, `fonts/`) and icons; `tools/gen_osd_card.py` makes the header |
-| `hooks.py` | the hooks: `phosphor_poll()` in the loops, the keys and the file picked in `menu.cpp`, the pad in `input.cpp`, the cheats' API, and for MiSTer_RA its events, login, game load and pop-up drawing step |
+| `hooks.py` | the hooks: `phosphor_poll()` in the loops, the keys and the file picked in `menu.cpp`, the pad in `input.cpp`, the cheats' API, and Phosphor's own cards for a game's loading and saving (`ProgressMessage`, the shim's `smc_shim_leave_game`) |
 
-Nothing here talks to RetroAchievements or changes what MiSTer_RA sends: MiSTer_RA is the client and does all of it.
+Nothing here touches RetroAchievements: no hook in MiSTer_RA's `achievements.cpp`, rcheevos or its pop-ups. MiSTer_RA
+is the client and does all of it, as on any MiSTer; Phosphor shows the user's progress from the RA Viewer add-on.

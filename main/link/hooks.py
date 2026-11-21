@@ -102,6 +102,58 @@ edit('menu.cpp', loaded)
 print('file hooks in', d)
 
 # cheats.cpp: a core's cheats for Phosphor's own screen (phosphor-main's, the same code: cheats[] is cheats.cpp's)
+# the save written as a game is left (the shim's smc_shim_leave_game) and a game's loading box (menu.cpp's
+# ProgressMessage): Phosphor's own cards in their place, as in Phosphor's Main (phosphor_saving / phosphor_loading,
+# phosphor.cpp); MiSTer's OSD boxes only where the frontend doesn't draw them (a CRT's OSD text, no frontend)
+def leave(s):
+    s = once(s, """	busy = 1;
+	OsdSetTitle("Saving", 0);
+	int rows = OsdGetSize();
+	for (int i = 0; i < rows; i++) OsdWrite(i, i == rows / 2 - 1 ? "     Saving the game..." : "", 0, 0);
+	OsdUpdate();
+	OsdEnable(DISABLE_KEYBOARD);
+	unsigned long hard = GetTimer(5000), quiet = GetTimer(500);
+	while (!CheckTimer(hard))
+	{
+""", """	busy = 1;
+	// Phosphor draws it in its own style (its loading card, "Saving"); MiSTer's OSD box where it can't
+	int phosphor_saving(int on);
+	int fe = phosphor_saving(1);
+	unsigned long osd_at = fe ? 0 : GetTimer(0);
+	unsigned long hard = GetTimer(5000), quiet = GetTimer(500);
+	while (!CheckTimer(hard))
+	{
+		if (fe) phosphor_saving(1);       // (it shows after 350 ms: a quick save shows nothing)
+		else if (osd_at)
+		{
+			osd_at = 0;
+			OsdSetTitle("Saving", 0);
+			int rows = OsdGetSize();
+			for (int i = 0; i < rows; i++) OsdWrite(i, i == rows / 2 - 1 ? "     Saving the game..." : "", 0, 0);
+			OsdUpdate();
+			OsdEnable(DISABLE_KEYBOARD);
+		}
+""")
+    s = once(s, """		usleep(1000);
+	}
+	OsdDisable();
+	busy = 0;
+}""", """		usleep(1000);
+	}
+	if (fe) phosphor_saving(0);
+	else OsdDisable();
+	busy = 0;
+}""")
+    return s
+edit('smc_shim.cpp', leave)
+
+def progress(s):
+    return re.sub(r'(void ProgressMessage\(const char\* ?title, const char\* ?text, int current, int max\)\n\{\n\tstatic int progress;\n)',
+                  lambda m: m.group(1) + '\tint phosphor_loading(const char *, const char *, int, int);\n'
+                  '\tif (phosphor_loading(title, text, current, max)) { progress = -1; return; }   // Phosphor draws it (phosphor.cpp)\n',
+                  s, count=1)
+edit('menu.cpp', progress)
+
 def cheats(s):
     return s.rstrip('\n') + '''
 
@@ -125,74 +177,3 @@ int cheats_toggle_at(int i)
 '''
 edit('cheats.cpp', cheats)
 print('cheats in', d)
-
-# MiSTer_RA (odelot's): its client's results to the frontend (phosphor_link_ra.cpp), read-only
-if os.path.exists(os.path.join(d, 'achievements.cpp')):
-    for f in ('phosphor_link_ra.cpp', 'phosphor_osd_card.cpp', 'phosphor_osd_font.h'):
-        shutil.copy(os.path.join(src, f), os.path.join(d, f))
-    def ra(s):
-        s = once(s, '#include "rc_client.h"\n', '#include "rc_client.h"\n'
-                 '// Phosphor\'s in-game link (phosphor_link_ra.cpp): this client\'s results shown by the frontend, read-only\n'
-                 'void phosphor_ra_event(const rc_client_event_t *e, rc_client_t *c);\n'
-                 'void phosphor_ra_login(int result, const char *err, rc_client_t *c);\n'
-                 'void phosphor_ra_game(int result, const char *err, rc_client_t *c);\n'
-                 'void phosphor_ra_draw(const char *text, int ms, int align, int frame);\n')
-        s = once(s, 'static rc_client_t *g_client = NULL;\n', 'static rc_client_t *g_client = NULL;\n'
-                 'rc_client_t *achievements_rc_client(void) { return g_client; }   // Phosphor\'s in-game link: "ra", "ra list"\n')
-        s = re.sub(r'(?m)^(static int g_popup_pos\b[^\n]*\n)', lambda m: m.group(1) + 'int achievements_popup_pos(void);   // Phosphor\'s in-game link: its pop-ups in the same corner\n', s, count=1)
-        s = s.rstrip('\n') + '\n\nint achievements_popup_pos(void) { return g_popup_pos; }   // Phosphor\'s in-game link\n'
-        s = once(s, '\t(void)client;\n\tRA_LOG("Event: type=%d", event->type);\n',
-                 '\t(void)client;\n\tphosphor_ra_event(event, client);   // Phosphor\'s in-game link: the frontend\'s pop-ups\n'
-                 '\tRA_LOG("Event: type=%d", event->type);\n')
-        s = once(s, '\tg_login_pending = 0;\n', '\tg_login_pending = 0;\n\tphosphor_ra_login(result, error_message, client);   // Phosphor\'s in-game link\n')
-        s = once(s, '\tg_game_load_pending = 0;\n', '\tg_game_load_pending = 0;\n\tphosphor_ra_game(result, error_message, client);   // Phosphor\'s in-game link\n')
-        # its pop-ups' drawing step: Phosphor's card (phosphor_ra_draw); its queue, timings, sounds and corner unchanged
-        head, body = s.split('int achievements_popup_pos(void);', 1)
-        n = len(re.findall(r'\bInfoAligned\(', body))
-        assert n >= 2, n
-        s = head + 'int achievements_popup_pos(void);' + re.sub(r'\bInfoAligned\(', 'phosphor_ra_draw(', body)
-        return s
-    edit('achievements.cpp', ra)
-    def ra_menu(s):   # menu.cpp's one RetroAchievements pop-up (cheats off in hardcore), at Info's place (top left)
-        if 'void phosphor_ra_draw(' not in s:
-            s = once(s, '#include "phosphor.h"   // Phosphor\'s in-game link\n',
-                     '#include "phosphor.h"   // Phosphor\'s in-game link\nvoid phosphor_ra_draw(const char *text, int ms, int align, int frame);\n')
-        s = once(s, '\t\t\t\tInfo("Hardcore Mode: cheats disabled", 3000);\n',
-                 '\t\t\t\tphosphor_ra_draw("Hardcore Mode: cheats disabled", 3000, 0, 1);   // Phosphor\'s card (phosphor_link_ra.cpp)\n')
-        return s.rstrip('\n') + '''
-
-// Phosphor's cards over a game (phosphor_osd_card.cpp): a bitmap in the OSD, shown the way InfoAligned shows its box
-void OSD_PrintBitmap(const uint8_t *cols, int w, int hrows);   // osd.cpp (the link's)
-void PhosphorInfoBitmap(const uint8_t *cols, int wch, int hrows, int timeout, int align)
-{
-	if (menustate <= MENU_INFO)
-	{
-		OSD_PrintBitmap(cols, wch * 8, hrows);
-		int x = INFO_MARGIN;
-		if (align == INFO_ALIGN_CENTER) x = (INFO_SPAN - (wch * 8)) / 2;
-		else if (align == INFO_ALIGN_RIGHT) x = INFO_SPAN - (wch * 8) - INFO_MARGIN;
-		if (x < 0) x = 0;
-		InfoEnable(x, (cfg.direct_video && get_vga_fb()) ? 30 : 10, wch, hrows);
-		OsdSetSize(16);
-		menu_timer = GetTimer(timeout);
-		menustate = MENU_INFO;
-		OsdUpdate();
-	}
-}
-'''
-    edit('menu.cpp', ra_menu)
-    def osd(s):
-        return s.rstrip('\n') + '''
-
-// Phosphor's cards (phosphor_osd_card.cpp): <hrows> OSD rows of a 1-bit bitmap, a byte per column (bit 0 at the top)
-void OSD_PrintBitmap(const uint8_t *cols, int w, int hrows)
-{
-	for (int y = 0; y < hrows; y++)
-	{
-		osd_start(y);
-		memcpy(osdbuf + osdbufpos, cols + y * w, w);
-	}
-}
-'''
-    edit('osd.cpp', osd)
-    print('RetroAchievements link in', d)

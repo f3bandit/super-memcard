@@ -901,18 +901,13 @@ static void crt_command(int i, const char *args)
 	send_line(i, out);
 }
 
-// RetroAchievements' answers ("ra", "ra list"): this Main isn't a client (phosphor-main); MiSTer_RA's link has its own
-__attribute__((weak)) void phosphor_ra_reply(int list, char *out, size_t n)
-{
-	snprintf(out, n, list ? "{\"ok\":true,\"achievements\":[]}" : "{\"ok\":true,\"active\":false,\"logged_in\":false,\"game\":0,\"main\":\"MiSTer_RA\"}");
-}
 
 static void command(int i, char *line)
 {
 	char out[512];
 	while (*line == ' ') line++;
 	if (!strcmp(line, "hello"))
-		send_line(i, "{\"ok\":true,\"api\":7,\"name\":\"phosphor-main\",\"pads\":true,\"scripts\":true,\"mapping\":true,\"disc\":true,\"ingame\":true,\"ra\":true,\"crt\":true,\"osdapi\":true}");   // osdapi: confstr, opt, action, reset, here (the frontend's own OSD); api 3: scripts, 4: mapping, 5: disc, ingame, 6: ra, 7: crt
+		send_line(i, "{\"ok\":true,\"api\":7,\"name\":\"phosphor-main\",\"pads\":true,\"scripts\":true,\"mapping\":true,\"disc\":true,\"ingame\":true,\"crt\":true,\"osdapi\":true}");   // osdapi: confstr, opt, action, reset, here (the frontend's own OSD); api 3: scripts, 4: mapping, 5: disc, ingame, 7: crt
 	else if (!strncmp(line, "script ", 7)) script_start(i, line + 7);
 	else if (!strcmp(line, "osdtext"))   // the test bench: the OSD's rows, as text
 	{
@@ -1035,16 +1030,6 @@ static void command(int i, char *line)
 	}
 	else if (!strncmp(line, "disc", 4) && (!line[4] || line[4] == ' ') && phosphor_disc_command(line, out, sizeof(out)))
 		send_line(i, out);
-	// RetroAchievements left Phosphor's Main: RA cores (Update All's RA_*) run under odelot's
-	// MiSTer_RA through MiSTer.ini, so this Main never has an RA game. The commands stay so the
-	// apps keep working and say where RA lives.
-	else if (!strcmp(line, "ra") || !strcmp(line, "ra list"))
-	{
-		// RetroAchievements, from the Main that's the client (MiSTer_RA, with Phosphor's in-game link: phosphor_link_ra.cpp)
-		static char ra[16384];
-		phosphor_ra_reply(!strcmp(line, "ra list"), ra, sizeof(ra));
-		send_line(i, ra);
-	}
 	else if (!strcmp(line, "sheet off")) { if (sheet_client == i) sheet_client = -1; send_line(i, "{\"ok\":true}"); }
 	// The frontend API (a frontend doing what MiSTer's OSD does, without it): the running core's options as raw
 	// status bits, its config string, and an MGL's options, file loads and resets applied to it with no reload
@@ -1331,8 +1316,6 @@ int phosphor_pad(uint32_t mask, int press)
 	return 1;
 }
 
-// ---- RetroAchievements: MiSTer_RA's events (Phosphor's link in it writes them to /tmp/mister_ra.events, one JSON line
-// each), read here, since only Main draws over a running core.
 // ---- a game's loading box, drawn by the frontend in its own style (MiSTer's OSD progress box otherwise). Main restarts
 // with each core and is busy in the load, so nothing goes over the socket: the frontend that draws it says so in
 // <tmp>/draws-loading (its pid), and the load's progress is <tmp>/loading ("cur max\ttitle\tfile"), written as it moves
@@ -1349,9 +1332,6 @@ static int loading_drawn_by_frontend(void)
 	fclose(f);
 	return pid > 0 && kill(pid, 0) == 0;
 }
-// Phosphor's shell is here: it has the menu button, or it's running and draws (its pid in draws-loading; it reconnects
-// to each new Main a moment after the core starts, when a game's first pop-ups are already due): its pop-ups, not Main's
-int phosphor_frontend_here(void) { return sheet_client >= 0 || loading_drawn_by_frontend(); }
 static int ld_keep_screen;
 int phosphor_loading(const char *title, const char *text, int cur, int max)
 {
@@ -1394,97 +1374,9 @@ int phosphor_loading(const char *title, const char *text, int cur, int max)
 	return 1;
 }
 
-void Info(const char *message, int timeout, int width, int height, int frame);
-static int ra_field(const char *line, const char *key, char *out, size_t n)
-{
-	char k[40];
-	snprintf(k, sizeof(k), "\"%s\":", key);
-	const char *p = strstr(line, k);
-	if (!p) return 0;
-	p += strlen(k);
-	size_t o = 0;
-	if (*p == '"') {
-		for (p++; *p && *p != '"' && o + 1 < n; p++) {
-			if (*p == '\\' && p[1]) { p++; if (*p == 'n') { out[o++] = ' '; continue; } }
-			out[o++] = *p;
-		}
-	} else {
-		while (*p && *p != ',' && *p != '}' && o + 1 < n) out[o++] = *p++;
-	}
-	out[o] = 0;
-	return 1;
-}
-static void ra_wrap(char *dst, size_t dn, const char *src, int width, int max_lines)
-{
-	// MiSTer's info box: short lines; long text broken at spaces
-	size_t o = strlen(dst);
-	int col = 0, lines = 0;
-	const char *w = src;
-	while (*w && lines < max_lines) {
-		const char *e = w;
-		while (*e && *e != ' ') e++;
-		int len = (int)(e - w);
-		if (col && col + 1 + len > width) { if (o + 1 < dn) dst[o++] = '\n'; col = 0; lines++; if (lines >= max_lines) break; }
-		else if (col && o + 1 < dn) { dst[o++] = ' '; col++; }
-		for (int i = 0; i < len && o + 1 < dn; i++) { dst[o++] = w[i]; col++; }
-		w = *e ? e + 1 : e;
-	}
-	dst[o] = 0;
-}
-// a pop-up over the game, out of the way: in the corner the user chose for RetroAchievements' pop-ups (MiSTer_RA's
-// popup_position, phosphor_link_ra.cpp); a Main without corners: MiSTer's info box
-__attribute__((weak)) void phosphor_ra_popup(const char *msg, int ms) { Info(msg, ms, 0, 0, 1); }
-
-static void ra_events_poll(void)
-{
-	static unsigned long next;
-	static off_t pos;
-	static ino_t ino;
-	if (next && !CheckTimer(next)) return;
-	next = GetTimer(400);
-	struct stat st;
-	if (stat("/tmp/mister_ra.events", &st)) { pos = 0; ino = 1; return; }
-	if (!ino) { ino = st.st_ino; pos = st.st_size; }   // (this Main just started: what's there is an earlier game's)
-	if (st.st_ino != ino || st.st_size < pos) { ino = st.st_ino; pos = 0; }   // a new game's events
-	if (st.st_size == pos) return;
-	FILE *f = fopen("/tmp/mister_ra.events", "r");
-	if (!f) return;
-	fseek(f, pos, SEEK_SET);
-	char line[2048];
-	while (fgets(line, sizeof(line), f)) {
-		if (!strchr(line, '\n')) break;                // (a line still being written: next time)
-		pos = ftell(f);
-		char ev[32] = "", title[200] = "", desc[300] = "", pts[16] = "", msg[600] = "";
-		ra_field(line, "event", ev, sizeof(ev));
-		ra_field(line, "title", title, sizeof(title));
-		if (!strcmp(ev, "unlocked")) {
-			ra_field(line, "description", desc, sizeof(desc));
-			ra_field(line, "points", pts, sizeof(pts));
-			snprintf(msg, sizeof(msg), "Achievement unlocked!\n");
-			ra_wrap(msg, sizeof(msg), title, 28, 2);
-			strncat(msg, "\n", sizeof(msg) - strlen(msg) - 1);
-			ra_wrap(msg, sizeof(msg), desc, 28, 3);
-			if (pts[0] && strlen(msg) + 20 < sizeof(msg)) { strcat(msg, "\n"); strcat(msg, pts); strcat(msg, strcmp(pts, "1") ? " points" : " point"); }
-		} else if (!strcmp(ev, "mastered")) {
-			snprintf(msg, sizeof(msg), "Mastered!\n");
-			ra_wrap(msg, sizeof(msg), title, 28, 2);
-		} else if (!strcmp(ev, "game")) {
-			char total[16] = "", got[16] = "";
-			ra_field(line, "achievements", total, sizeof(total));
-			ra_field(line, "unlocked", got, sizeof(got));
-			snprintf(msg, sizeof(msg), "RetroAchievements\n");
-			ra_wrap(msg, sizeof(msg), title, 28, 2);
-			if (strlen(msg) + 40 < sizeof(msg)) sprintf(msg + strlen(msg), "\n%s of %s unlocked", got, total);
-		}
-		if (msg[0] && !is_menu()) phosphor_ra_popup(msg, ev[0] == 'g' ? 3000 : 5000);
-	}
-	if (feof(f)) pos = ftell(f);
-	fclose(f);
-}
 
 void phosphor_poll(void)
 {
-	ra_events_poll();
 	if (osd_release && CheckTimer(osd_release)) { osd_release = 0; menu_key_set(KEY_F12 | UPSTROKE); }   // "ingame osd"
 	static int started;
 	if (!started) { started = 1; busy_init(); }
