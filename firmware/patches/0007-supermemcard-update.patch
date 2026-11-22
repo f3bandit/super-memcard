@@ -8,11 +8,14 @@
              ${CMAKE_CURRENT_SOURCE_DIR}/monocypher.c
  )
  
-@@ -25,6 +26,7 @@
+@@ -25,6 +26,10 @@
  if (SD2PSX_WITH_SUPERMEMCARD)
      target_link_libraries(ps1_card PRIVATE pico_rand)   # the card ID (ps1_supermemcard.c)
      target_link_libraries(ps1_card PRIVATE hardware_flash pico_unique_id pico_multicore)   # the card identity (ps1_supermemcard_id.c)
 +    target_link_libraries(ps1_card PRIVATE hardware_watchdog)   # the firmware update (ps1_supermemcard_update.c)
++    if (DEFINED ENV{SMC_BUILD})   # the firmware's version, as the card reports it (firmware/build.sh)
++        target_compile_definitions(ps1_card PRIVATE SMC_BUILD="$ENV{SMC_BUILD}")
++    endif()
  endif()
  
  if (SD2PSX_WITH_PSRAM)

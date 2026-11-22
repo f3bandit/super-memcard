@@ -3,7 +3,11 @@
 # links on the hardware's toolchain, GUI included (sim/card builds neither the GUI nor the RP2040 parts).
 #   firmware/build.sh [variant]      variant: SD2PSX (default, has the screen), SD2PSXlite, PMC+, PMCZero, PSXMemCard
 # Needs cmake and gcc-arm-none-eabi (+ libnewlib-arm-none-eabi, libstdc++-arm-none-eabi-newlib). Output:
-# firmware/build/<variant>/<name>.uf2
+# firmware/build/<variant>/<name>.uf2, and with Super MemCard's updater (firmware/flashloader):
+#   <name>-full.uf2               the updater and the firmware: a card's first flash over USB
+#   <name>.bin                    the firmware for an update through the front port (smcd FWUPDATE)
+#   supermemcard.bin/.version     the same .bin and its version, as Phosphor ships them (phosphor/firmware/)
+# The version (what the card reports, FWINFO) is the build's date and time and this repository's commit.
 # Copyright (C) 2026 f3bandit.
 set -e
 here=$(cd "$(dirname "$0")" && pwd)
@@ -21,6 +25,14 @@ git -C "$src" submodule update --quiet --init --recursive
 sh "$here/apply.sh" "$src"
 # (the PS2 game list's github.com/.../raw/ address is refused from some build machines: the same file, by raw.githubusercontent.com)
 sed -i 's#https://github.com/israpps/HDL-Batch-installer/raw/main/#https://raw.githubusercontent.com/israpps/HDL-Batch-installer/main/#' "$src/database/CMakeLists.txt"
+SMC_BUILD=$(date -u +%Y%m%d.%H%M)-$(git -C "$here" rev-parse --short HEAD 2>/dev/null || echo local)
+export SMC_BUILD
 cmake -S "$src" -B "$here/build/$variant" -DCMAKE_BUILD_TYPE=Release -DVARIANT="$variant" -G "Unix Makefiles" >/dev/null
 cmake --build "$here/build/$variant" -j"$(nproc)"
+name=$(echo "$variant" | tr 'A-Z' 'a-z')
+if [ -f "$here/build/$variant/$name.bin" ] && [ -f "$here/build/$variant/$name-full.uf2" ]; then
+	cp "$here/build/$variant/$name.bin" "$here/build/$variant/supermemcard.bin"
+	echo "$SMC_BUILD" > "$here/build/$variant/supermemcard.version"
+fi
 ls "$here/build/$variant"/*.uf2
+echo "version $SMC_BUILD"
