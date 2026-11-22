@@ -32,7 +32,7 @@ FW_SRC  = src/ps1.c src/ps1/ps1_memory_card.c src/ps1/ps1_mc_data_interface.c sr
           src/ps1/ps1_cardman.c src/ps1/ps1_mmce.c src/ps1/ps1_empty_card.c src/card_config.c \
           src/util.c src/game_db/game_db.c src/bigmem.c ext/inih/ini.c
 ifeq ($(SMC),1)
-FW_SRC += src/ps1/ps1_supermemcard.c src/ps1/ps1_supermemcard_id.c src/ps1/monocypher.c
+FW_SRC += src/ps1/ps1_supermemcard.c src/ps1/ps1_supermemcard_id.c src/ps1/ps1_supermemcard_update.c src/ps1/monocypher.c
 endif
 HOST_SRC = host/vcard.c host/vcard_wire.c host/sd_host.c host/firmware_host.c
 B       ?= build

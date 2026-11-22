@@ -54,6 +54,8 @@ Other people's work used here, under their own licences
     its contributors.
   stb_image 2.30 (third_party/stb: reading box art for save icons, in smcd):
     public domain or MIT, Sean Barrett.
+  pico-flashloader (firmware/flashloader: the card's resident updater, unchanged,
+    commit 79817c8): BSD-3-Clause, Richard Hulme (firmware/flashloader/LICENSE).
   MiSTer-devel cores and Main_MiSTer: their own licences, their authors.
   libretro-database game lists: fetched at run time, not included, used under
     their own terms.

@@ -89,5 +89,5 @@ Looked at with backups first (saves, config, `ConsoleMode/memcards`, binaries' c
 - Where in the launch path Console Mode wants the two hooks.
 - Raw frames in the RC1 menu core: the same command as the test menu core's `SMC_RAW`, or its own.
 - Firmware updates through the front port: Retro Remake's cards reportedly update this way already (f3bandit, from
-  Taki, Nov 11 2026). How (the frames, the file's checks or signature, what Console Mode sends), so Super MemCard's
-  firmware takes updates the same way instead of a second updater.
+  Taki, Nov 11 2026). How (the frames, the file's checks or signature, what Console Mode sends), so smcd can update
+  those cards too. Super MemCard's own firmware has its update through the front port (SMC_UPDATE, 05; 08 Nov 21 2026).

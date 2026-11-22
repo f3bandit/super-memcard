@@ -745,7 +745,100 @@ static void t_smc_id_menu_off(void) {
     CHECK_EQ(smc_cert(&vbus, chip, pub, cert), SMC_E_NO_REPLY);
 }
 
+/* ---- the card's own firmware through the front port (SMC_UPDATE) ---- */
+
+/* the updater's CRC (CRC-32/MPEG-2), for a test firmware's boot2 check */
+static uint32_t t_crc_m(const uint8_t *p, int n) {
+    uint32_t c = 0xFFFFFFFFu;
+    for (int i = 0; i < n; i++) {
+        c ^= (uint32_t)p[i] << 24;
+        for (int k = 0; k < 8; k++)
+            c = c & 0x80000000u ? (c << 1) ^ 0x04C11DB7u : c << 1;
+    }
+    return c;
+}
+static uint32_t t_crc_z(const uint8_t *p, size_t n) {
+    uint32_t c = 0xFFFFFFFFu;
+    while (n--) {
+        c ^= *p++;
+        for (int k = 0; k < 8; k++)
+            c = (c >> 1) ^ (0xEDB88320u & (0u - (c & 1)));
+    }
+    return ~c;
+}
+static void put_le(uint8_t *p, uint32_t v) { p[0] = (uint8_t)v; p[1] = v >> 8; p[2] = v >> 16; p[3] = v >> 24; }
+/* a firmware as the build makes one for the updater: boot2 with its check, then the vectors (reset at `pc`) */
+static void test_firmware(uint8_t *fw, size_t n, uint32_t pc) {
+    fill(fw, n, 77);
+    put_le(fw + 0x100, 0x20042000u);
+    put_le(fw + 0x104, pc);
+    put_le(fw + 0xFC, t_crc_m(fw, 252));
+}
+
+static void t_smc_update(void) {
+    static uint8_t fw[300 * 1024 + 77], back[sizeof(fw)];
+    test_firmware(fw, sizeof(fw), 0x10001101u);
+    struct smc_card c;
+    CHECK_EQ(smc_hello(&fbus, SMC_HOST_TEST, 0, &c), 1);
+    CHECK(c.features & SMC_FEATURE_UPDATE);
+    int loader = -1, result = -1, why = -1;
+    char ver[25];
+    CHECK_EQ(smc_update_info(&fbus, &loader, &result, ver), SMC_OK);
+    CHECK_EQ(loader, 1);
+    CHECK_EQ(result, SMC_UPDATE_NONE);
+    CHECK(ver[0] != 0);
+    /* APPLY before a checked firmware: refused */
+    CHECK_EQ(smc_update_apply(&fbus), SMC_E_BAD);
+    CHECK_EQ(smc_update_send(&fbus, fw, sizeof(fw), &why, NULL, NULL), SMC_OK);
+    CHECK_EQ(smc_update_apply(&fbus), SMC_OK);
+    usleep(800 * 1000);   /* (the card applies it 0.3 s after answering) */
+    CHECK_EQ(smc_update_info(&fbus, &loader, &result, ver), SMC_OK);
+    CHECK_EQ(result, SMC_UPDATE_UPDATED);
+    /* what the updater installed is the firmware, byte for byte */
+    char p[512];
+    snprintf(p, sizeof(p), "%s/SuperMemCard/update/installed.bin", sd);
+    FILE *f = fopen(p, "rb");
+    CHECK(f != NULL);
+    CHECK_EQ(fread(back, 1, sizeof(back), f), sizeof(fw));
+    fclose(f);
+    CHECK(memcmp(fw, back, sizeof(fw)) == 0);
+}
+
+static void t_smc_update_refuses(void) {
+    static uint8_t fw[64 * 1024];
+    int why = -1;
+    CHECK_EQ(smc_hello(&fbus, SMC_HOST_TEST, 0, NULL), 1);
+    /* a firmware linked at 0 (no updater): would never start after the updater */
+    test_firmware(fw, sizeof(fw), 0x10000101u);
+    CHECK_EQ(smc_update_send(&fbus, fw, sizeof(fw), &why, NULL, NULL), SMC_E_BAD);
+    CHECK_EQ(why, 0);
+    CHECK_EQ(smc_update_apply(&fbus), SMC_E_BAD);
+    /* boot2's check wrong */
+    test_firmware(fw, sizeof(fw), 0x10001101u);
+    fw[0x10] ^= 1;
+    CHECK_EQ(smc_update_send(&fbus, fw, sizeof(fw), &why, NULL, NULL), SMC_E_BAD);
+    /* too big for the firmware's space */
+    static uint8_t big[0x200000];
+    test_firmware(big, sizeof(big), 0x10001101u);
+    CHECK_EQ(smc_update_send(&fbus, big, sizeof(big), &why, NULL, NULL), SMC_E_BAD);
+    CHECK_EQ(why, 2);
+    /* a block lost on the way (the CRC Begin announced doesn't match): refused, nothing applied */
+    test_firmware(fw, sizeof(fw), 0x10001101u);
+    uint8_t req[9] = {0}, a[2];
+    req[0] = 0;
+    uint32_t sz = sizeof(fw), crc = t_crc_z(fw, sizeof(fw)) ^ 1;
+    req[1] = sz >> 24; req[2] = sz >> 16; req[3] = sz >> 8; req[4] = (uint8_t)sz;
+    req[5] = crc >> 24; req[6] = crc >> 16; req[7] = crc >> 8; req[8] = (uint8_t)crc;
+    CHECK_EQ(smc_frame(&fbus, 0x6F, req, 9, a, 2), SMC_OK);
+    CHECK_EQ(a[0], 0x47);
+    int loader, result;
+    CHECK_EQ(smc_update_info(&fbus, &loader, &result, NULL), SMC_OK);
+    CHECK_EQ(result, SMC_UPDATE_NONE);
+}
+
 #define SMC_TESTS \
+    {"SMC: firmware update: sent, checked, applied byte for byte", t_smc_update, true, NULL}, \
+    {"SMC: firmware update refuses a wrong or damaged firmware", t_smc_update_refuses, true, NULL}, \
     {"SMC: whole-frame transport (the front ports' way)", t_smc_frame_transport, true, NULL}, \
     {"SMC: slow SD card (2.7 ms a write), 128 KB save", t_smc_slow_sd_card, true, NULL}, \
     {"SMC: Commit refuses a save with blocks missing", t_smc_commit_checks_every_block, true, NULL}, \

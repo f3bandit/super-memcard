@@ -136,6 +136,7 @@ int ps1_supermemcard_req_len(uint8_t cmd, const uint8_t *r, int have) {
     case SMC_CERT:
     case SMC_AUTH:
     case SMC_AUTHSIG: return ps1_supermemcard_id_req_len(cmd);
+    case SMC_UPDATE: return ps1_supermemcard_update_req_len(r, have);
     case SMC_CORE: {
         if (have < 1) return 1;
         if (r[0] == 0 || r[0] > SMC_SYS_LEN) return -1;
@@ -774,7 +775,9 @@ static int do_command(uint8_t cmd, const uint8_t *r, int len, uint8_t *a) {
         a[0] = 'S';
         a[1] = 'M';
         a[2] = SMC_VERSION;
-        a[3] = 0x1F; /* features: save files, list, virtual cards (Core), delete, identity (CERT/AUTH) */
+        /* features: save files, list, virtual cards (Core), delete, identity (CERT/AUTH); the firmware update through
+         * the front port when the card has the resident updater */
+        a[3] = 0x1F | (ps1_supermemcard_update_available() ? SMC_FEATURE_UPDATE : 0);
         for (int i = 0; i < 8; i++) {
             unsigned v = 0;
             sscanf(card_id + i * 2, "%2x", &v);
@@ -1057,6 +1060,9 @@ static int do_command(uint8_t cmd, const uint8_t *r, int len, uint8_t *a) {
     case SMC_AUTHSIG:
         return ps1_supermemcard_id_command(cmd, r, a);
 
+    case SMC_UPDATE:
+        return ps1_supermemcard_update_command(r, len, a);
+
     case SMC_PROGRESS: {
         /* the SS1's progress bar: printable ASCII only (the font) */
         int pct = r[0], tl = r[1] > SMC_PROGRESS_TEXT ? SMC_PROGRESS_TEXT : r[1];
@@ -1207,4 +1213,5 @@ void ps1_supermemcard_task(void) {
     if (ps1_supermemcard_enabled())
         ps1_supermemcard_has_identity();
     ps1_supermemcard_id_task();
+    ps1_supermemcard_update_task();
 }

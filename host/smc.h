@@ -135,6 +135,21 @@ int smc_genuine(const struct smc_bus *b, const struct smc_card *card, char *why,
 /* smcd built with the test key (tools/smccert/test-rr.key) instead of Retro Remake's */
 bool smc_genuine_test_key(void);
 
+/* ---- the card's own firmware, through the front port (firmware/ps1/ps1_supermemcard_update.c) ---- */
+#define SMC_FEATURE_UPDATE 0x20 /* Hello's features: the card has the resident updater (takes SMC_UPDATE) */
+enum { SMC_UPDATE_NONE = 0, SMC_UPDATE_UPDATED = 1, SMC_UPDATE_FAILED = 2 };
+/* INFO: the card has the resident updater (*loader), how its last update went at this start (SMC_UPDATE_*), the running
+ * firmware's version (24 characters at most). SMC_OK or <0. */
+int smc_update_info(const struct smc_bus *b, int *loader, int *result, char version[25]);
+/* Sends a new firmware (the update .bin, built for the updater) onto the card's SD card and has the card check it
+ * (size, CRC-32, built for the updater). progress(ctx, pct) as the blocks go (may be NULL). SMC_OK: checked, ready to
+ * apply; SMC_E_BAD: refused (*why: 1 no updater, 2 too big, 3 SD card; 0 the check failed), else the bus's error. */
+int smc_update_send(const struct smc_bus *b, const uint8_t *fw, uint32_t size, int *why,
+                    void (*progress)(void *ctx, int pct), void *ctx);
+/* APPLY: the card copies the checked firmware into its flash and restarts into the updater (it's gone from the bus
+ * for several seconds, then answers Hello again: smc_update_info says how it went). */
+int smc_update_apply(const struct smc_bus *b);
+
 /* A whole command frame (81 cmd, request, answer); exposed for tests. Returns SMC_OK or
  * SMC_E_NO_REPLY. */
 int smc_frame(const struct smc_bus *b, uint8_t cmd, const uint8_t *req, int rlen, uint8_t *ans, int alen);

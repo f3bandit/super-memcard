@@ -33,6 +33,8 @@ the card has the answer (an SD access, so up to tens of milliseconds late: Super
 | `69` **Core** | `syslen sys flags [card]` | `status card`: the system's current virtual card. Flags bit 0: this system's core is running now (the card shows it, its buttons pick this system's card); sys `.` with bit 0: none is. Without bit 0 it only asks. Flags bit 1 (`0x02`) and one more byte, `card` (1–99): the system's card set to that one, kept in `card.ini` (the OSD's Saves page: smcd's `USE`) |
 | `6A` **Delete** | `file gen[4] time[4]` | `end`: the save is deleted at generation gen; the card keeps a tombstone (meta.ini `<file>=-<gen>`) and the file itself in `<game>/.deleted/` |
 
+| `6F` **Update** | `sub ...`: the card's own firmware through the front port (`firmware/ps1/ps1_supermemcard_update.c`, Hello's features bit `0x20` when the card has the resident updater). `00` Begin `size[4] crc[4]` (zlib CRC-32) → `status why` (why: 1 no updater, 2 too big, 3 SD card); `01` Data `blk_hi blk_lo data[128] chk` → `end`, as Write; `02` Check → `50` pending (ask again), `47` checked, `4E` not the firmware Begin announced or not built for the updater; `03` Apply → `47`, then the card stages it in flash and restarts into the updater; `04` Info → `status updater result version[24]` (result 1: updated at this start, 2: the last apply failed) | see the left |
+
 Status bytes: `47` good, `44` deleted, `4F` not found, `53` no game selected, `FF` failed. Before a Hello, `61`-`6A` aren't
 ACKed (exactly like stock firmware). Names that could leave `SuperMemCard/` (`/`, `\`, `:`, `..`, leading or
 trailing dots and spaces) are refused. A save only replaces the previous one at Commit, so a card pulled or powered

@@ -1,0 +1,29 @@
+--- a/src/ps1/CMakeLists.txt
++++ b/src/ps1/CMakeLists.txt
+@@ -7,6 +7,7 @@
+             ${CMAKE_CURRENT_SOURCE_DIR}/ps1_mmce.c
+             ${CMAKE_CURRENT_SOURCE_DIR}/ps1_supermemcard.c
+             ${CMAKE_CURRENT_SOURCE_DIR}/ps1_supermemcard_id.c
++            ${CMAKE_CURRENT_SOURCE_DIR}/ps1_supermemcard_update.c
+             ${CMAKE_CURRENT_SOURCE_DIR}/monocypher.c
+ )
+ 
+@@ -25,6 +26,7 @@
+ if (SD2PSX_WITH_SUPERMEMCARD)
+     target_link_libraries(ps1_card PRIVATE pico_rand)   # the card ID (ps1_supermemcard.c)
+     target_link_libraries(ps1_card PRIVATE hardware_flash pico_unique_id pico_multicore)   # the card identity (ps1_supermemcard_id.c)
++    target_link_libraries(ps1_card PRIVATE hardware_watchdog)   # the firmware update (ps1_supermemcard_update.c)
+ endif()
+ 
+ if (SD2PSX_WITH_PSRAM)
+--- a/src/ps1/ps1_memory_card.c
++++ b/src/ps1/ps1_memory_card.c
+@@ -481,7 +481,7 @@
+                 case 'W': mc_cmd_write(); break;
+ #endif
+ #if WITH_SUPERMEMCARD
+-                case 0x60 ... 0x6E: mc_supermemcard(ch); break;
++                case 0x60 ... 0x6F: mc_supermemcard(ch); break;
+ #endif
+                 default: DPRINTF("Unknown command: 0x%.02x\n", ch); break;
+             }

@@ -15,6 +15,9 @@
  *                           core and starts the core again with the game, LAUNCH) | DONE saves | DONE (as LAUNCH)
  *   PROBE                   what each front port holds: port <n> smc <card id> <free kb, ? not counted yet> | port <n> ps1 | port <n> empty
  *   HELLO                   the card: id, version, free space
+ *   FWINFO                  the card's firmware: fwinfo <updater 0|1> <none|updated|failed> <version> | fwinfo none
+ *   FWUPDATE <file>         the card's new firmware (<variant>.bin, built for its updater) through the front port:
+ *                           fwupdate ok <version> | noupdater | badfile | refused <why> | failed <step> (about 4 min)
  *   SELECT <sys>\t<game ID>  (Coreshell, before a game's core loads) the game being started: PSX, that game's own PS1
  *                           card on the bus; others, the card in that system's mode. select ok [card] | select failed
  *   READ                    the memory manager's Read card: everything both ways
@@ -1600,6 +1603,95 @@ static int split_tabs(char *a, char **f, int max) {
     return n;
 }
 
+/* ---- the card's own firmware through the front port (firmware/ps1/ps1_supermemcard_update.c) ---- */
+
+/* FWINFO: fwinfo <updater 0|1> <last update: none|updated|failed> <the firmware's version> | fwinfo none (a card that
+ * can't take one through the front port: over USB only) */
+static void fw_info(int fd, struct conn *c) {
+    int loader = 0, result = 0;
+    char ver[25];
+    if (!(c->card.features & SMC_FEATURE_UPDATE) || smc_update_info(&c->bus, &loader, &result, ver) != SMC_OK) {
+        say(fd, "fwinfo none\n");
+        return;
+    }
+    say(fd, "fwinfo %d %s %s\n", loader, result == SMC_UPDATE_UPDATED ? "updated" : result == SMC_UPDATE_FAILED ? "failed" : "none",
+        ver);
+}
+
+struct fw_bar { const struct smc_bus *bus; int last; };
+static void fw_progress(void *ctx, int pct) {
+    struct fw_bar *b = ctx;
+    if (pct / 5 == b->last / 5)
+        return;
+    if (pct / 25 != b->last / 25)
+        lg("card firmware: %d%% sent", pct / 25 * 25);
+    b->last = pct;
+    smc_progress(b->bus, pct, "Updating card");
+}
+
+/* FWUPDATE <file>: the card's new firmware (the build's <variant>.bin, made for the card's updater) onto the card, checked
+ * by the card, installed by its updater at a restart; then the card again. fwupdate ok <version> |
+ * fwupdate noupdater (USB only) | fwupdate badfile | fwupdate refused <why> | fwupdate failed <step> */
+static void fw_update(int fd, struct conn *c, const char *path) {
+    if (!(c->card.features & SMC_FEATURE_UPDATE)) {
+        say(fd, "fwupdate noupdater\n");
+        return;
+    }
+    struct stat st;
+    FILE *f = path[0] == '/' && !stat(path, &st) && S_ISREG(st.st_mode) && st.st_size > 0x200 && st.st_size <= 0x200000
+                  ? fopen(path, "rb") : NULL;
+    uint8_t *fw = f ? malloc((size_t)st.st_size) : NULL;
+    if (!fw || fread(fw, 1, (size_t)st.st_size, f) != (size_t)st.st_size) {
+        if (f)
+            fclose(f);
+        free(fw);
+        say(fd, "fwupdate badfile\n");
+        return;
+    }
+    fclose(f);
+    char before[25] = "";
+    smc_update_info(&c->bus, NULL, NULL, before);
+    lg("card firmware: %s (%ld bytes) onto card %s (now %s)", path, (long)st.st_size, c->card.id, before);
+    struct fw_bar bar = {&c->bus, -5};
+    int why = 0, rc = smc_update_send(&c->bus, fw, (uint32_t)st.st_size, &why, fw_progress, &bar);
+    free(fw);
+    if (rc != SMC_OK) {
+        lg("card firmware: not taken (%d, why %d)", rc, why);
+        if (rc == SMC_E_BAD)
+            say(fd, "fwupdate refused %s\n", why == 1 ? "noupdater" : why == 2 ? "toobig" : why == 3 ? "sdcard" : "check");
+        else
+            say(fd, "fwupdate failed send\n");
+        return;
+    }
+    smc_progress(&c->bus, 100, "Installing");
+    if (smc_update_apply(&c->bus) != SMC_OK) {
+        say(fd, "fwupdate failed apply\n");
+        return;
+    }
+    lg("card firmware: checked by the card, installing (the card restarts)");
+    smc_xfer_text = NULL;   /* (the card's screen is its own again after the restart) */
+    /* the card copies it into its flash and restarts; its updater installs it: about 10 s off the bus */
+    sleep(3);
+    for (int t = 0; t < 60; t++, sleep(1)) {
+        struct smc_card card;
+        if (smc_hello(&c->bus, SMC_HOST_MAIN, 0, &card) != 1)
+            continue;
+        int loader = 0, result = 0;
+        char ver[25] = "";
+        if (smc_update_info(&c->bus, &loader, &result, ver) != SMC_OK)
+            continue;
+        c->card = card;
+        lg("card firmware: back after %d s, %s (%s)", t + 3, ver, result == SMC_UPDATE_UPDATED ? "updated" : "NOT updated");
+        if (result == SMC_UPDATE_UPDATED)
+            say(fd, "fwupdate ok %s\n", ver);
+        else
+            say(fd, "fwupdate failed install %s\n", ver);
+        return;
+    }
+    lg("card firmware: the card didn't come back in a minute");
+    say(fd, "fwupdate failed noreturn\n");
+}
+
 /* a frontend's command; the answer ends with END */
 static void do_command(int fd, char *l) {
     struct conn c;
@@ -1642,6 +1734,10 @@ static void do_command(int fd, char *l) {
     if (!strcmp(l, "HELLO")) {
         say(fd, "card %s version %u features 0x%02x free_kb %u\n", c.card.id, c.card.version, c.card.features,
             c.card.free_kb);
+    } else if (!strcmp(l, "FWINFO")) {
+        fw_info(fd, &c);
+    } else if (!strncmp(l, "FWUPDATE ", 9)) {
+        fw_update(fd, &c, a);
     } else if (!strncmp(l, "SELECT ", 7)) {
         /* (Coreshell, just before a game's core loads) the game being started: <sys> \t <game ID>. PSX: that game's own
          * PS1 card on the bus (set game ID); other systems: Core, the card in that system's mode */

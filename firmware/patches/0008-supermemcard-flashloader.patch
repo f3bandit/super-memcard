@@ -1,0 +1,12 @@
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -167,3 +167,9 @@
+     target_compile_definitions(sd2psx_common PUBLIC -DPICO_STDIO_USB_CONNECT_WAIT_TIMEOUT_MS=0)
+     pico_enable_stdio_usb(${TARGET_NAME} 1)
+ endif()
++
++# Super MemCard's resident updater (flashloader/, from firmware/flashloader): the firmware after it, updated through
++# the front port
++if (SD2PSX_WITH_SUPERMEMCARD)
++    add_subdirectory(flashloader)
++endif()

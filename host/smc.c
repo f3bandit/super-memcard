@@ -7,7 +7,8 @@
 #include <unistd.h>
 
 enum { C_HELLO = 0x60, C_SELECT, C_READ, C_WRITE, C_CREATE, C_COMMIT, C_STATUS, C_LIST, C_INFO, C_CORE, C_DELETE,
-       C_CERT, C_AUTH, C_AUTHSIG, C_PROGRESS };
+       C_CERT, C_AUTH, C_AUTHSIG, C_PROGRESS, C_UPDATE };
+enum { U_BEGIN, U_DATA, U_CHECK, U_APPLY, U_INFO };
 enum { GOOD = 0x47, BAD_CHECKSUM = 0x4E, NOT_FOUND = 0x4F, DELETED = 0x44, PENDING = 0x50 };
 
 /* the card's progress bar during transfers (smc.h smc_xfer_text): every PROGRESS_BLOCKS blocks, a file's share done */
@@ -474,4 +475,103 @@ int smc_ps1_set_game_id(const struct smc_bus *b, const char *id) {
     }
     b->select(b->ctx, false);
     return rc;
+}
+
+/* ---- the card's own firmware ---- */
+
+/* zlib's CRC-32, as the card checks a firmware with (smc_sync's smc_crc32 with a table: 1.3 MB) */
+static uint32_t crc_z(uint32_t crc, const uint8_t *p, size_t n) {
+    static uint32_t t[256];
+    if (!t[1])
+        for (uint32_t i = 0; i < 256; i++) {
+            uint32_t c = i;
+            for (int k = 0; k < 8; k++)
+                c = c & 1 ? 0xEDB88320u ^ (c >> 1) : c >> 1;
+            t[i] = c;
+        }
+    crc = ~crc;
+    for (size_t i = 0; i < n; i++)
+        crc = t[(crc ^ p[i]) & 0xFF] ^ (crc >> 8);
+    return ~crc;
+}
+
+int smc_update_info(const struct smc_bus *b, int *loader, int *result, char version[25]) {
+    uint8_t req[1] = {U_INFO}, a[27];
+    int rc = smc_frame(b, C_UPDATE, req, 1, a, sizeof(a));
+    if (rc)
+        return rc;
+    if (a[0] != GOOD)
+        return SMC_E_BAD;
+    if (loader)
+        *loader = a[1];
+    if (result)
+        *result = a[2];
+    if (version) {
+        memcpy(version, a + 3, 24);
+        version[24] = 0;
+    }
+    return SMC_OK;
+}
+
+int smc_update_send(const struct smc_bus *b, const uint8_t *fw, uint32_t size, int *why,
+                    void (*progress)(void *ctx, int pct), void *ctx) {
+    uint8_t req[132], a[2];
+    if (why)
+        *why = 0;
+    req[0] = U_BEGIN;
+    put32(req + 1, size);
+    put32(req + 5, crc_z(0, fw, size));
+    int rc = smc_frame(b, C_UPDATE, req, 9, a, 2);
+    if (rc)
+        return rc;
+    if (a[0] != GOOD) {
+        if (why)
+            *why = a[1];
+        return SMC_E_BAD;
+    }
+    uint32_t blocks = (size + 127) / 128;
+    for (uint32_t blk = 0; blk < blocks; blk++) {
+        uint32_t n = size - blk * 128 < 128 ? size - blk * 128 : 128;
+        if (progress && blk % 64 == 0)
+            progress(ctx, (int)(blk * 100 / blocks));
+        req[0] = U_DATA;
+        req[1] = (uint8_t)(blk >> 8);
+        req[2] = (uint8_t)blk;
+        memset(req + 3, 0, 128);
+        memcpy(req + 3, fw + blk * 128, n);
+        uint8_t chk = req[1] ^ req[2];
+        for (int i = 0; i < 128; i++)
+            chk ^= req[3 + i];
+        req[131] = chk;
+        for (int tries = 0;;) {
+            rc = smc_frame(b, C_UPDATE, req, 132, a, 1);
+            if (rc == SMC_OK && a[0] == GOOD)
+                break;
+            if (rc == SMC_OK && a[0] != BAD_CHECKSUM)
+                return SMC_E_BAD;
+            if (rc == SMC_OK && b->bad_data)
+                b->bad_data(b->ctx);
+            if (++tries == 6)   /* (a firmware is ten thousand blocks: a few more tries than a save's) */
+                return rc ? rc : SMC_E_CHECKSUM;
+        }
+    }
+    if (progress)
+        progress(ctx, 100);
+    /* the card reads it back on its own: about 2 s for a whole firmware */
+    req[0] = U_CHECK;
+    for (int t = 0; t < 300; t++) {
+        rc = smc_frame(b, C_UPDATE, req, 1, a, 1);
+        if (rc == SMC_OK && a[0] == GOOD)
+            return SMC_OK;
+        if (rc == SMC_OK && a[0] != PENDING)
+            return SMC_E_BAD;   /* (*why 0: the check failed) */
+        usleep(100 * 1000);
+    }
+    return SMC_E_NO_REPLY;
+}
+
+int smc_update_apply(const struct smc_bus *b) {
+    uint8_t req[1] = {U_APPLY}, a[1];
+    int rc = smc_frame(b, C_UPDATE, req, 1, a, 1);
+    return rc ? rc : a[0] == GOOD ? SMC_OK : SMC_E_BAD;
 }

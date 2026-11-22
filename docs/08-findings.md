@@ -587,6 +587,21 @@ started a third time (from the card), the bytes compared; then the test files to
 - To decide: the launch path syncs the PSX core's card image (`saves/PSX/<game>.sav`) like any other save, but the
   ROM-load hook (a game picked in the OSD) leaves PSX out ("PSX: its own card").
 
+### The card's firmware through the front port (Nov 21 2026, SS1, the Super MemCard in port 1)
+
+- **Speed, the port held** (CERT, its 105-byte answer, compared byte for byte, 200 each): 250 kHz 197 right / 3 cut
+  short, 9.5 KB/s; 500 kHz 200 right, 19.1 KB/s; 1 MHz and 2 MHz all cut short. Never wrong data at any speed. Without
+  HOLD every frame pays the front ports' 50 ms switch to card mode (1.8 KB/s). smcd had already measured this card at
+  speed 1 (500 kHz).
+- **A firmware-sized run** at 500 kHz (1.25 MB of CERT answers): 56.8 s, 22 KB/s, 12,195 frames, 20 cut short (all
+  went through when sent again), 0 wrong.
+- **Writing it to the card's SD** (IMPORT of a 1.28 MB file in two halves: the card takes 1 MB a save file at most):
+  119 s, 10.7 KB/s; read back 109 s; byte for byte the same. Writes wait for the card's SD card.
+- **The update itself** (`FWUPDATE`, the build's `sd2psx.bin`, 1,281,112 bytes): sent and checked by the card in about
+  2 minutes (10,138 frames, 12.75 ms each, 36 sent again), staged and installed by the resident updater, the card back
+  on the bus about 36 s after Apply; 153 s in all. `FWINFO` then said `updated` with the new build's stamp, and the
+  card's saves were all still there. The card got the updater once, over its USB from the SS1 (`sd2psx-full.uf2`).
+
 ### Open
 
 - (Closed: the flaky PC test was the first write after a card switch, see above.)

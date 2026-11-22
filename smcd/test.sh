@@ -374,6 +374,28 @@ for i in $(seq 30); do [ -d "$w/sd/MemoryCards/PS1/SLUS-01041" ] && break; sleep
 r=$(ask "SELECT NES	CRC-5B622B11" | head -1)
 echo "$r" | grep -q "^select ok [0-9]" && ok "SELECT NES: the card in NES mode ($r)" || bad "SELECT NES: $r"
 [ "$(ask "SELECT PSX" | head -1)" = "select failed" ] && ok "SELECT without a game ID: refused" || bad "SELECT without a game ID"
+# the card's own firmware through the front port (FWUPDATE): a test firmware built for the updater, installed byte for byte
+# (a Main serving the front ports for the whole update: the card is off the bus for a while as it restarts)
+"$B/shimtest" "$w/vc.sock" serve 120 > "$w/shim6.log" 2>&1 & fwshim=$!; pids="$pids $fwshim"; sleep 1.5
+python3 - "$w/fw.bin" <<'EOF'
+import os, struct, sys
+def crcm(d):
+    c = 0xffffffff
+    for x in d:
+        c ^= x << 24
+        for _ in range(8): c = ((c << 1) ^ 0x04C11DB7) & 0xffffffff if c & 0x80000000 else (c << 1) & 0xffffffff
+    return c
+b = bytearray(os.urandom(200 * 1024 + 9))
+b[0x100:0x108] = struct.pack('<II', 0x20042000, 0x10001201)
+b[252:256] = struct.pack('<I', crcm(b[:252]))
+open(sys.argv[1], 'wb').write(b)
+EOF
+for i in 1 2 3 4 5; do r=$(ask FWINFO); [ "${r%%[[:space:]]*}" = nocard ] || break; sleep 1; done; echo "$r" | grep -q "^fwinfo 1 none " && ok "FWINFO: the card has the updater" || bad "FWINFO: $r"
+ask "FWUPDATE $w/fw.bin" | grep -q "^fwupdate ok " && cmp -s "$w/fw.bin" "$w/sd/SuperMemCard/update/installed.bin" \
+    && ok "FWUPDATE: sent, checked by the card, installed byte for byte" || bad "FWUPDATE"
+ask FWINFO | grep -q "^fwinfo 1 updated " && ok "  and FWINFO says it was updated" || bad "FWINFO after: $(ask FWINFO)"
+ask "FWUPDATE $w/nothing.bin" | grep -q "^fwupdate badfile" && ok "FWUPDATE: no such file" || bad "FWUPDATE no file"
+kill $fwshim 2>/dev/null || true; wait $fwshim 2>/dev/null || true
 
 kill $(pgrep -f "$B/smcd") 2>/dev/null || true; sleep 0.5; rm -f /tmp/smcd.sock
 python3 - <<'PY' & pids="$pids $!"

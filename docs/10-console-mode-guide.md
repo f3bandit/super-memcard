@@ -418,8 +418,10 @@ Saturn (the saves are standard `<game>.sav`; Saturn's naming is in the card test
   built and tested in the test Main), and starting `smcd` at boot (a start script still to come).
 - The card's own menu in a system's mode (pick a card, a new blank card, the game's saves, clock 12 h / 24 h): being
   designed with f3bandit.
-- Firmware updates through the front port: Retro Remake's cards update this way already (from Taki); the same frames
-  and checks for Super MemCard's firmware, rather than a second updater.
+- Firmware updates through the front port: Super MemCard's own (SMC_UPDATE `81 6F`, smcd `FWUPDATE`, the resident
+  updater in firmware/flashloader) works on the SS1 (08, Nov 21 2026). Retro Remake's cards update through the front
+  port their own way (from Taki): smcd supports both, so Retro Remake's frames and checks go in beside ours when we have
+  them.
 - On an SS1, one game each of Master System, Game Gear and Saturn (7b).
 - Retro Remake's own signing key in `smcd` and the firmware (12); the test key until then.
 - The SuperStation check (features only on a genuine SS1): how Console Mode recognizes one.

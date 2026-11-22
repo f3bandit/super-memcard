@@ -1,6 +1,6 @@
 /* Copyright (C) 2026 f3bandit. Super MemCard additions to sd2psXtd: GPL-3.0-or-later, as sd2psXtd.
  * This program is distributed WITHOUT ANY WARRANTY; see the GNU General Public License. */
-/* Super MemCard for sd2psXtd's PS1 mode: commands 81 60..6A (docs/05-design.md §2).
+/* Super MemCard for sd2psXtd's PS1 mode: commands 81 60..6F (docs/05-design.md §2).
  *
  * Other systems' saves live on the card's SD card under SuperMemCard/<system>/Card<N>/<game ID>/, never
  * inside a .mcd, so PS1 mode can't see or change them (rule 3). Each system has virtual cards 1..99, like
@@ -41,7 +41,24 @@ enum {
     SMC_PROGRESS = 0x6E, /* pct textlen text                   -> status (1): the card shows a progress bar (0..100) with
                           * the text ("Saving Chrono Cross") over its screen; pct FF: done, back to the screen. Shown
                           * until done, or SMC_PROGRESS_TIMEOUT_MS after the last one (the SS1 gone quiet mid-job) */
+    /* the card's own firmware, through the front port (ps1_supermemcard_update.c); Hello's features bit 5 when the
+     * card has the resident updater */
+    SMC_UPDATE = 0x6F,  /* sub ...: see SMC_UPD_* */
 };
+/* SMC_UPDATE's sub-commands */
+enum {
+    SMC_UPD_BEGIN = 0, /* size[4] crc[4] (zlib CRC-32 of the firmware) -> status why (2) */
+    SMC_UPD_DATA  = 1, /* blk_hi blk_lo data[128] chk              -> end (1), as Write */
+    SMC_UPD_CHECK = 2, /* (none)                                    -> status (1): 50 pending (ask again), 47 good,
+                        * 4E not the firmware Begin announced (or not one for the updater) */
+    SMC_UPD_APPLY = 3, /* (none)                                    -> status (1): 47, then the card restarts into the
+                        * updater about 0.3 s later (several seconds without an answer) */
+    SMC_UPD_INFO  = 4, /* (none)                                    -> status loader result version[24] (27) */
+};
+enum { SMC_UPD_WHY_OK = 0, SMC_UPD_WHY_NO_LOADER = 1, SMC_UPD_WHY_SIZE = 2, SMC_UPD_WHY_SD = 3 };
+enum { SMC_UPD_RESULT_NONE = 0, SMC_UPD_RESULT_UPDATED = 1, SMC_UPD_RESULT_FAILED = 2 };
+#define SMC_UPD_VERSION_LEN 24
+#define SMC_FEATURE_UPDATE 0x20
 #define SMC_PROGRESS_TEXT 32
 #define SMC_PROGRESS_TIMEOUT_MS 4000
 
@@ -85,6 +102,12 @@ int ps1_supermemcard_req_len(uint8_t cmd, const uint8_t *req, int have);
 /* Hand a complete request to core 0 and wait for the answer; gives up if *abort becomes set
  * (SEL rose). Returns the answer's length, 0 if aborted. */
 int ps1_supermemcard_exec(uint8_t cmd, const uint8_t *req, int len, uint8_t *ans, volatile int *abort);
+
+/* core 0: the firmware update (ps1_supermemcard_update.c) */
+int ps1_supermemcard_update_req_len(const uint8_t *req, int have);
+int ps1_supermemcard_update_command(const uint8_t *req, int len, uint8_t *ans);
+void ps1_supermemcard_update_task(void);
+bool ps1_supermemcard_update_available(void);
 
 /* core 1: a PS1 read or write came (a PS1 game has the card): system mode ends */
 void ps1_supermemcard_ps1_used(void);
