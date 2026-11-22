@@ -36,6 +36,7 @@ bool stdio_usb_connected(void);   /* pico_stdio_usb's (linked into the firmware;
 #define ROOT "SuperMemCard"
 #define PS1_ROOT "MemoryCards/PS1"
 #include "ps1_cardman.h"
+#include "ps1_mmce.h"
 
 /* ---- mailbox between the cores ---- */
 
@@ -101,6 +102,30 @@ static uint64_t prog_at;
 static uint64_t last_cmd_at;
 
 bool ps1_supermemcard_active(void) { return __atomic_load_n(&active, __ATOMIC_ACQUIRE); }
+
+/* Game ID in a SuperStation: the SS1 picks each game's card (smcd's SELECT: 81 21 right after a Hello). A game's
+ * own Game ID (81 21 from the game, as for a MemCard PRO) would take the card away from it, or (an ID the card
+ * can't use) back to the default card, so it's ignored there: only an ID sent within HOST_ID_US of a Super MemCard
+ * command is the SS1's. Off a SuperStation (no Hello since power-up) every Game ID counts, as stock. */
+#define HOST_ID_US (1000 * 1000)
+static volatile uint64_t last_exec_us;
+static volatile uint32_t game_ids_ignored;
+static char ignored_id[17];
+static volatile bool restoring;   /* the SuperStation's pick being put back after a power cut (see ss1_pick_*) */
+bool ps1_supermemcard_restoring(void) { return __atomic_load_n(&restoring, __ATOMIC_ACQUIRE); }
+
+bool ps1_supermemcard_take_game_id(const uint8_t *id) {
+    if (!ps1_supermemcard_active() || time_us_64() - last_exec_us < HOST_ID_US)
+        return true;
+    for (int i = 0; i < 16; i++) {
+        ignored_id[i] = (char)((id[i] >= 0x20 && id[i] < 0x7f) ? id[i] : (id[i] ? '?' : 0));
+        if (!id[i])
+            break;
+    }
+    ignored_id[16] = 0;
+    __atomic_add_fetch(&game_ids_ignored, 1, __ATOMIC_RELEASE);
+    return false;
+}
 /* core 1: a Hello is only collected while Super MemCard is on: off, 81 60 isn't ACKed, as stock firmware */
 static bool hello_allowed(void) { return __atomic_load_n(&enabled, __ATOMIC_ACQUIRE) == 1; }
 
@@ -174,6 +199,7 @@ int ps1_supermemcard_exec(uint8_t cmd, const uint8_t *req, int len, uint8_t *ans
         if (*abort)
             return 0;
     memcpy(ans, mb_ans, (size_t)mb_alen);
+    last_exec_us = time_us_64();
     return mb_alen;
 }
 
@@ -1214,9 +1240,48 @@ bool ps1_supermemcard_progress(int *pct, const char **text) {
     return true;
 }
 
+/* The SuperStation's pick across a power cut. A card on the port's power alone (no USB) restarts when it's pulled out
+ * of a running game: it would come back on its default card, and the game would find no saves (a real card keeps its
+ * saves through that). So the game card the SuperStation picked (its Game ID right after a Hello) is noted on the SD
+ * card, and a card starting up goes back to it. Cleared when the SuperStation sends the card back to its default one
+ * (its menu), and when anything else picks the card (a PS1's own Game ID, the card's buttons). */
+#define SS1_PICK ROOT "/ss1_pick.txt"
+static char ss1_pick[17];
+static bool ss1_pick_checked;
+
+void ps1_supermemcard_note_pick(const char *id, bool by_ss1) {   /* core 0, after the card was switched */
+    __atomic_store_n(&restoring, false, __ATOMIC_RELEASE);
+    if (by_ss1 && id && id[0]) {
+        if (strcmp(id, ss1_pick) == 0)
+            return;
+        snprintf(ss1_pick, sizeof(ss1_pick), "%s", id);
+        write_text(SS1_PICK, ss1_pick);
+    } else if (ss1_pick[0] || sd_exists(SS1_PICK)) {
+        ss1_pick[0] = 0;
+        sd_remove(SS1_PICK);
+    }
+}
+
+static void ss1_pick_restore(void) {
+    ss1_pick_checked = true;
+    char id[17];
+    if (__atomic_load_n(&enabled, __ATOMIC_ACQUIRE) != 1 || read_text(SS1_PICK, id, sizeof(id)) <= 0)
+        return;
+    id[strcspn(id, "\r\n")] = 0;
+    if (!id[0])
+        return;
+    snprintf(ss1_pick, sizeof(ss1_pick), "%s", id);
+    __atomic_store_n(&restoring, true, __ATOMIC_RELEASE);
+    if (!ps1_mmce_set_gameid((const uint8_t *)id))
+        __atomic_store_n(&restoring, false, __ATOMIC_RELEASE);
+    smc_log("back on %s: the SuperStation's pick from before the card restarted\n", id);
+}
+
 void ps1_supermemcard_task(void) {
     if (!__atomic_load_n(&enabled, __ATOMIC_ACQUIRE))
         load_settings();
+    if (!ss1_pick_checked)
+        ss1_pick_restore();
     /* a PS1 game is using the card: the buttons are the PS1 card's again */
     if (mode_sys[0] && __atomic_load_n(&ps1_used, __ATOMIC_ACQUIRE))
         set_mode("");
@@ -1226,6 +1291,12 @@ void ps1_supermemcard_task(void) {
     }
     if (mode_dirty && time_us_64() >= mode_save_at)
         save_mode_card();
+    static uint32_t ids_logged;
+    uint32_t ign = __atomic_load_n(&game_ids_ignored, __ATOMIC_ACQUIRE);
+    if (ign != ids_logged) {
+        ids_logged = ign;
+        smc_log("a game's own Game ID left alone (%s): the SuperStation picked this card\n", ignored_id);
+    }
 
     uint32_t seq = __atomic_load_n(&posted, __ATOMIC_ACQUIRE);
     if (seq != __atomic_load_n(&done, __ATOMIC_ACQUIRE)) {

@@ -37,7 +37,7 @@
 +/* Game ID: the card's setting, and always on in a SuperStation (a Hello since power-up): each PS1 game's own card there */
 +static bool game_id_on(void) {
 +#if WITH_SUPERMEMCARD
-+    if (ps1_supermemcard_active())
++    if (ps1_supermemcard_active() || ps1_supermemcard_restoring())
 +        return true;
 +#endif
 +    return settings_get_ps1_game_id();
@@ -102,3 +102,90 @@
                  lv_obj_set_y(lbl_card, 24);
                  lv_obj_set_y(scr_main_idx_lbl, 24);
                  lv_obj_set_y(lbl_channel, 32);
+--- a/src/ps1/ps1_mmce.c
++++ b/src/ps1/ps1_mmce.c
+@@ -8,6 +8,15 @@
+ #include "debug.h"
+ #include "game_db/game_db.h"
+ #include "settings.h"
++#if WITH_SUPERMEMCARD
++#include "ps1_supermemcard.h"
++/* the card the SuperStation picked, kept for a card that restarts in a running game (ps1_supermemcard.c) */
++#define SS1_PICKED(id) ps1_supermemcard_note_pick((id), ps1_supermemcard_active() || ps1_supermemcard_restoring())
++#define OTHER_PICK() ps1_supermemcard_note_pick(NULL, false)
++#else
++#define SS1_PICKED(id)
++#define OTHER_PICK()
++#endif
+ 
+ #if WITH_GUI
+ #include <gui.h>
+@@ -39,39 +48,48 @@
+                 game_db_update_game(received_game_id);
+                 game_db_get_current_parent(received_game_id);
+                 ps1_cardman_set_game_id(received_game_id);
++                SS1_PICKED(received_game_id);
+                 break;
+             }
+             case MMCE_PS1_NXT_CARD:
+                 DPRINTF("Received next card.\n");
+                 ps1_cardman_next_idx();
++                OTHER_PICK();
+                 break;
+             case MMCE_PS1_PRV_CARD:
+                 DPRINTF("Received prev card.\n");
+                 ps1_cardman_prev_idx();
++                OTHER_PICK();
+                 break;
+             case MMCE_PS1_NXT_CH:
+                 DPRINTF("Received next chan.\n");
+                 ps1_cardman_next_channel();
++                OTHER_PICK();
+                 break;
+             case MMCE_PS1_PRV_CH:
+                 DPRINTF("Received prev chan.\n");
+                 ps1_cardman_prev_channel();
++                OTHER_PICK();
+                 break;
+             case MMCE_PS1_SWITCH_BOOTCARD:
+                 DPRINTF("Received switch boot card.\n");
+                 ps1_cardman_switch_bootcard();
++                OTHER_PICK();
+                 break;
+             case MMCE_PS1_SWITCH_DEFAULT:
+                 DPRINTF("Received switch default card.\n");
+                 ps1_cardman_switch_default();
++                OTHER_PICK();
+                 break;
+             case MMCE_PS1_SET_CARD:
+                 DPRINTF("Received set card index: %d\n", mmce_cnum);
+                 ps1_cardman_set_idx(mmce_cnum);
++                OTHER_PICK();
+                 break;
+             case MMCE_PS1_SET_CHANNEL:
+                 DPRINTF("Received set channel index: %d\n", mmce_chn);
+                 ps1_cardman_set_channel(mmce_chn);
++                OTHER_PICK();
+                 break;
+             case MMCE_PS1_RESET:
+                 DPRINTF("Received reset command.\n");
+@@ -80,6 +98,7 @@
+                 } else {
+                     ps1_cardman_switch_default();
+                 }
++                OTHER_PICK();
+                 break;
+             default:
+                 DPRINTF("Invalid ODE Command received.");
+@@ -115,6 +134,11 @@
+     char sanitized_game_id[11] = {0};
+     bool ret = false;
+     log(LOG_INFO, "Raw Game ID: %s\n", game_id);
++#if WITH_SUPERMEMCARD
++    /* in a SuperStation the SS1 picks the card: a game's own Game ID changes nothing there */
++    if (!ps1_supermemcard_take_game_id(game_id))
++        return false;
++#endif
+ 
+     game_db_extract_title_id(game_id, sanitized_game_id, UINT8_MAX, sizeof(sanitized_game_id));
+     log(LOG_INFO, "Game ID: %s\n", sanitized_game_id);

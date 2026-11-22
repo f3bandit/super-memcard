@@ -859,6 +859,52 @@ static void t_smc_game_id_in_ss1(void) {
     CHECK(strcmp(vcard_card_path(), "MemoryCards/PS1/SLUS-01234/SLUS-01234-1.mcd") == 0);
 }
 
+static void t_smc_game_own_id_in_ss1(void) {
+    /* the SS1 picked the game's card (81 21 right after a Hello); the game's own Game ID later (as for a MemCard
+     * PRO: FFT TLW sends one the card can't use, which sent it back to the default card) changes nothing */
+    CHECK_EQ(smc_hello(&fbus, SMC_HOST_TEST, 0, NULL), 1);
+    bus_wake();
+    mmce_game_id("cdrom:\\SLUS_012.34;1");
+    vcard_settle();
+    CHECK(strcmp(vcard_card_path(), "MemoryCards/PS1/SLUS-01234/SLUS-01234-1.mcd") == 0);
+    usleep(1500 * 1000);   /* the game's, long after the SuperStation's last command (it boots first) */
+    mmce_game_id("not a title id");
+    vcard_settle();
+    CHECK(strcmp(vcard_card_path(), "MemoryCards/PS1/SLUS-01234/SLUS-01234-1.mcd") == 0);
+    mmce_game_id("cdrom:\\SCUS_942.21;1");
+    vcard_settle();
+    CHECK(strcmp(vcard_card_path(), "MemoryCards/PS1/SLUS-01234/SLUS-01234-1.mcd") == 0);
+    /* the SS1's next pick still counts */
+    CHECK_EQ(smc_hello(&fbus, SMC_HOST_TEST, 0, NULL), 1);
+    bus_wake();
+    mmce_game_id("cdrom:\\SCUS_942.21;1");
+    vcard_settle();
+    CHECK(strcmp(vcard_card_path(), "MemoryCards/PS1/SCUS-94221/SCUS-94221-1.mcd") == 0);
+}
+
+static void t_smc_pick_after_power_cut(void) {
+    /* a card on the port's power alone restarts when it's pulled from a running game: it comes back on the game's
+     * card the SuperStation picked, not its default one (f3bandit, Nov 22 2026: FFT showed no saves after that) */
+    CHECK_EQ(smc_hello(&fbus, SMC_HOST_TEST, 0, NULL), 1);
+    bus_wake();
+    mmce_game_id("cdrom:\\SLUS_012.34;1");
+    vcard_settle();
+    CHECK(strcmp(vcard_card_path(), "MemoryCards/PS1/SLUS-01234/SLUS-01234-1.mcd") == 0);
+    vcard_stop();
+    CHECK_EQ(vcard_start(sd), 0);
+    vcard_settle();
+    CHECK(strcmp(vcard_card_path(), "MemoryCards/PS1/SLUS-01234/SLUS-01234-1.mcd") == 0);
+    /* the SuperStation's menu sends it to its default card: a restart stays there */
+    CHECK_EQ(smc_hello(&fbus, SMC_HOST_TEST, 0, NULL), 1);
+    CHECK_EQ(smc_ps1_default_card(&fbus), SMC_OK);
+    vcard_settle();
+    CHECK(strcmp(vcard_card_path(), CARD1) == 0);
+    vcard_stop();
+    CHECK_EQ(vcard_start(sd), 0);
+    vcard_settle();
+    CHECK(strcmp(vcard_card_path(), CARD1) == 0);
+}
+
 static void t_smc_combo_off_in_ss1(void) {
     /* the combo that picks the next card on a PS1 does nothing in a SuperStation: the SS1 picks the card */
     enum { UP = 1 << 4, L2 = 1 << 8, R2 = 1 << 9, L1 = 1 << 10, R1 = 1 << 11 };
@@ -879,6 +925,8 @@ static void t_smc_combo_off_in_ss1(void) {
 #define SMC_TESTS \
     {"SMC: the SuperStation's screen (81 70)", t_smc_screen, true, NULL}, \
     {"SMC: Game ID always on in a SuperStation", t_smc_game_id_in_ss1, false, NULL}, \
+    {"SMC: a game's own Game ID changes nothing in a SuperStation", t_smc_game_own_id_in_ss1, false, NULL}, \
+    {"SMC: after a power cut, back on the SuperStation's pick", t_smc_pick_after_power_cut, false, NULL}, \
     {"SMC: the controller combo is off in a SuperStation", t_smc_combo_off_in_ss1, true, NULL}, \
     {"SMC: firmware update: sent, checked, applied byte for byte", t_smc_update, true, NULL}, \
     {"SMC: firmware update refuses a wrong or damaged firmware", t_smc_update_refuses, true, NULL}, \

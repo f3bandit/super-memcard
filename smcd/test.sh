@@ -191,6 +191,13 @@ ask HELLO | grep -q "^card " && ok "  and used it as soon as it was free (the ow
 # 2. the memory manager's Read card
 r=$(ask READ)
 echo "$r" | grep -q "^read ok .*pushed=1" && ok "READ: the save to the card" || bad "READ: $r"
+# the PSX core's own save files (saves/PSX, its virtual card) aren't synced with Super MemCard's old PSX folder on a
+# version 4 card: Read card leaves them where they are and puts no copy there (Nov 21 2026, FFT's save)
+mkdir -p "$w/saves/PSX"; head -c 131072 /dev/urandom > "$w/saves/PSX/PSX Game.sav"; psxmd5=$(md5sum < "$w/saves/PSX/PSX Game.sav")
+ask READ > /dev/null
+[ "$(md5sum < "$w/saves/PSX/PSX Game.sav" 2>/dev/null)" = "$psxmd5" ] && [ ! -e "$w/sd/SuperMemCard/PSX/Card1/PSX Game" ] \
+    && ok "PSX core saves: left alone by Read card (not synced with the old PSX folder)" || bad "PSX core saves: $(ls "$w/saves/PSX" "$w/sd/SuperMemCard/PSX/Card1" 2>&1)"
+rm -f "$w/saves/PSX/PSX Game.sav"
 ask LIST\ NES | grep -q "Test Game" && ok "LIST NES shows the game" || bad "LIST NES"
 sec=$(ask SECTION)
 echo "$sec" | grep -q "^system	NES	NES	1	1$" && echo "$sec" | grep -q "^game	NES	Test Game	" && echo "$sec" | grep -q "^section	1	1$" && ok "SECTION: the other systems' saves in one answer" || bad "SECTION: $sec"

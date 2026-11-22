@@ -609,8 +609,23 @@ static void card_close(struct conn *c) {
 }
 
 /* ---- the sync's setup ---- */
+/* the systems synced with the card: every console's, but PSX on a version 4 card, where each game's own PS1 card is the
+ * store and the PSX core's own save files are never synced with the card's old PSX copies (launch_game) */
+static const char *const *sync_systems(void) {
+    static const char *no_psx[24];
+    if (!files_card)
+        return smc_console_systems;
+    if (!no_psx[0]) {
+        int n = 0;
+        for (const char *const *x = smc_console_systems; *x && n < 23; x++)
+            if (strcmp(*x, "PSX"))
+                no_psx[n++] = *x;
+    }
+    return no_psx;
+}
+
 static struct smc_sync_cfg cfg(void) {
-    struct smc_sync_cfg k = {saves, state, smc_console_systems, SMC_HOST_MAIN, lib_log, games, lists};
+    struct smc_sync_cfg k = {saves, state, sync_systems(), SMC_HOST_MAIN, lib_log, games, lists};
     return k;
 }
 
@@ -912,7 +927,10 @@ static void launch_game(const char *sys, const char *game, const char *mgl) {
     core_told = card > 0;
     lg("%s core: %s %d", sys, card > 0 ? "its card" : "the card didn't answer Core", card);
     int sync_ok = 1;
-    if (card > 0 && play_game[0]) {
+    /* PSX on a version 4 card: the store is each game's own PS1 card (PSXMERGE); the PSX core's own save file
+     * (saves/PSX/<game>.sav, its virtual card) is never synced with the card's old PSX copies, whose "deleted" marks
+     * would take it away (Nov 21 2026: FFT's save was moved out of saves/PSX that way) */
+    if (card > 0 && play_game[0] && !(files_card && !strcmp(sys, "PSX"))) {
         struct smc_sync_cfg k = cfg();
         struct smc_sync_report rep;
         xfer_begin(&c, "Loading", play_game);
@@ -947,7 +965,8 @@ static void do_menu(void) {
     struct smc_sync_cfg k = cfg();
     struct smc_sync_report rep;
     memset(&rep, 0, sizeof(rep));
-    int rc = game[0] ? smc_sync_game(&c.bus, &k, sys, game, &rep) : smc_sync_changed(&c.bus, &k, sys, &rep);
+    int rc = files_card && !strcmp(sys, "PSX") ? 0   /* (PSX: its own card is the store, as at launch) */
+           : game[0] ? smc_sync_game(&c.bus, &k, sys, game, &rep) : smc_sync_changed(&c.bus, &k, sys, &rep);
     if (rc < 0)
         lg("sync stopped with an error");
     /* no game core now: the card's buttons and screen are the PS1 card's again (told later if it missed this) */

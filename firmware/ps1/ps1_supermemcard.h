@@ -103,6 +103,12 @@ enum { SMC_HOST_MAIN = 1, SMC_HOST_CONSOLE_MODE = 2, SMC_HOST_CORE = 3, SMC_HOST
 
 /* core 1 (bus) */
 bool ps1_supermemcard_active(void);
+/* core 1: whether a Game ID (81 21) is taken: always off a SuperStation; there only the SS1's own (see the .c) */
+bool ps1_supermemcard_take_game_id(const uint8_t *id);
+/* core 0: the card the SuperStation picked (by_ss1: its Game ID), or NULL / false: something else picked one */
+void ps1_supermemcard_note_pick(const char *id, bool by_ss1);
+/* putting the SuperStation's pick back after the card restarted: Game ID is on for that switch */
+bool ps1_supermemcard_restoring(void);
 /* Bytes this command's request has in total, given the first `have` bytes (-1: malformed). */
 int ps1_supermemcard_req_len(uint8_t cmd, const uint8_t *req, int have);
 /* Hand a complete request to core 0 and wait for the answer; gives up if *abort becomes set
