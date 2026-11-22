@@ -1,6 +1,6 @@
 /* Copyright (C) 2026 f3bandit. Super MemCard additions to sd2psXtd: GPL-3.0-or-later, as sd2psXtd.
  * This program is distributed WITHOUT ANY WARRANTY; see the GNU General Public License. */
-/* Super MemCard for sd2psXtd's PS1 mode: commands 81 60..6F (docs/05-design.md §2).
+/* Super MemCard for sd2psXtd's PS1 mode: commands 81 60..70 (docs/05-design.md §2).
  *
  * Other systems' saves live on the card's SD card under SuperMemCard/<system>/Card<N>/<game ID>/, never
  * inside a .mcd, so PS1 mode can't see or change them (rule 3). Each system has virtual cards 1..99, like
@@ -44,7 +44,13 @@ enum {
     /* the card's own firmware, through the front port (ps1_supermemcard_update.c); Hello's features bit 5 when the
      * card has the resident updater */
     SMC_UPDATE = 0x6F,  /* sub ...: see SMC_UPD_* */
+    /* the SuperStation's screen (Hello's features bit 6): what the SS1 is on, shown while no game core has the card */
+    SMC_SCREEN = 0x70,  /* textlen text                         -> status (1): the card shows "SuperStation" and the
+                         * text ("Memory manager"); textlen 0: the card's own screen again. A PS1 game using the card
+                         * ends it, as it ends a system's mode */
 };
+#define SMC_SCREEN_TEXT 32
+#define SMC_FEATURE_SCREEN 0x40
 /* SMC_UPDATE's sub-commands */
 enum {
     SMC_UPD_BEGIN = 0, /* size[4] crc[4] (zlib CRC-32 of the firmware) -> status why (2) */
@@ -133,6 +139,8 @@ const char *ps1_supermemcard_mode_system(void);
 int ps1_supermemcard_mode_card(void);
 /* Changes whenever the system or its card changes (to redraw). */
 uint32_t ps1_supermemcard_mode_seq(void);
+/* the SuperStation's screen (SMC_SCREEN): its text, "" when none (the card's own screen). Changes bump mode_seq */
+const char *ps1_supermemcard_ss_screen(void);
 /* a line of the system mode's screen (SMC_SCREEN_*), sent by the SuperStation with Core; "" : not sent */
 const char *ps1_supermemcard_mode_line(int line);
 /* A card button: next (+1) / previous (-1) virtual card of the running system. Returns false when no

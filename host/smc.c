@@ -7,7 +7,7 @@
 #include <unistd.h>
 
 enum { C_HELLO = 0x60, C_SELECT, C_READ, C_WRITE, C_CREATE, C_COMMIT, C_STATUS, C_LIST, C_INFO, C_CORE, C_DELETE,
-       C_CERT, C_AUTH, C_AUTHSIG, C_PROGRESS, C_UPDATE };
+       C_CERT, C_AUTH, C_AUTHSIG, C_PROGRESS, C_UPDATE, C_SCREEN };
 enum { U_BEGIN, U_DATA, U_CHECK, U_APPLY, U_INFO };
 enum { GOOD = 0x47, BAD_CHECKSUM = 0x4E, NOT_FOUND = 0x4F, DELETED = 0x44, PENDING = 0x50 };
 
@@ -573,5 +573,16 @@ int smc_update_send(const struct smc_bus *b, const uint8_t *fw, uint32_t size, i
 int smc_update_apply(const struct smc_bus *b) {
     uint8_t req[1] = {U_APPLY}, a[1];
     int rc = smc_frame(b, C_UPDATE, req, 1, a, 1);
+    return rc ? rc : a[0] == GOOD ? SMC_OK : SMC_E_BAD;
+}
+
+int smc_screen(const struct smc_bus *b, const char *text) {
+    uint8_t req[1 + SMC_SCREEN_TEXT], a[1];
+    size_t n = text ? strlen(text) : 0;
+    if (n > SMC_SCREEN_TEXT)
+        n = SMC_SCREEN_TEXT;
+    req[0] = (uint8_t)n;
+    memcpy(req + 1, text, n);
+    int rc = smc_frame(b, C_SCREEN, req, 1 + (int)n, a, 1);
     return rc ? rc : a[0] == GOOD ? SMC_OK : SMC_E_BAD;
 }

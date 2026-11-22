@@ -135,6 +135,13 @@ int smc_genuine(const struct smc_bus *b, const struct smc_card *card, char *why,
 /* smcd built with the test key (tools/smccert/test-rr.key) instead of Retro Remake's */
 bool smc_genuine_test_key(void);
 
+/* ---- the SuperStation's screen on the card (SMC_SCREEN 81 70) ---- */
+#define SMC_FEATURE_SCREEN 0x40 /* Hello's features: the card shows a SuperStation screen (smc_screen) */
+#define SMC_SCREEN_TEXT 32
+/* The card shows "SuperStation" and text ("Memory manager") while no game core has it; "" or NULL: its own screen
+ * again. SMC_OK or <0 */
+int smc_screen(const struct smc_bus *b, const char *text);
+
 /* ---- the card's own firmware, through the front port (firmware/ps1/ps1_supermemcard_update.c) ---- */
 #define SMC_FEATURE_UPDATE 0x20 /* Hello's features: the card has the resident updater (takes SMC_UPDATE) */
 enum { SMC_UPDATE_NONE = 0, SMC_UPDATE_UPDATED = 1, SMC_UPDATE_FAILED = 2 };

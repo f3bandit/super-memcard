@@ -34,6 +34,9 @@ the card has the answer (an SD access, so up to tens of milliseconds late: Super
 | `6A` **Delete** | `file gen[4] time[4]` | `end`: the save is deleted at generation gen; the card keeps a tombstone (meta.ini `<file>=-<gen>`) and the file itself in `<game>/.deleted/` |
 
 | `6F` **Update** | `sub ...`: the card's own firmware through the front port (`firmware/ps1/ps1_supermemcard_update.c`, Hello's features bit `0x20` when the card has the resident updater). `00` Begin `size[4] crc[4]` (zlib CRC-32) → `status why` (why: 1 no updater, 2 too big, 3 SD card); `01` Data `blk_hi blk_lo data[128] chk` → `end`, as Write; `02` Check → `50` pending (ask again), `47` checked, `4E` not the firmware Begin announced or not built for the updater; `03` Apply → `47`, then the card stages it in flash and restarts into the updater; `04` Info → `status updater result version[24]` (result 1: updated at this start, 2: the last apply failed) | see the left |
+| `70` **Screen** | `textlen text` (32 at most): the card shows "SuperStation" and the text while no game core has it (the memory manager: "Memory manager"); textlen 0: its own screen again. A PS1 game using the card ends it. Hello's features bit `0x40` | `status` |
+
+In a SuperStation (a Hello since power-up) the card also keeps **Game ID** on whatever its menu says (each PS1 game's own card), and its **controller combo** (L1+L2+R1+R2 and Up/Down: next/previous card) is off: the SuperStation picks the card.
 
 Status bytes: `47` good, `44` deleted, `4F` not found, `53` no game selected, `FF` failed. Before a Hello, `61`-`6A` aren't
 ACKed (exactly like stock firmware). Names that could leave `SuperMemCard/` (`/`, `\`, `:`, `..`, leading or

@@ -15,6 +15,8 @@
  *                           core and starts the core again with the game, LAUNCH) | DONE saves | DONE (as LAUNCH)
  *   PROBE                   what each front port holds: port <n> smc <card id> <free kb, ? not counted yet> | port <n> ps1 | port <n> empty
  *   HELLO                   the card: id, version, free space
+ *   SCREEN [<text>]         the card shows "SuperStation" and the text while no game core has it (the memory manager);
+ *                           without text its own screen again: screen ok | unsupported | failed
  *   FWINFO                  the card's firmware: fwinfo <updater 0|1> <none|updated|failed> <version> | fwinfo none
  *   FWUPDATE <file>         the card's new firmware (<variant>.bin, built for its updater) through the front port:
  *                           fwupdate ok <version> | noupdater | badfile | refused <why> | failed <step> (about 4 min)
@@ -617,6 +619,8 @@ static char play_sys[65], play_game[256];
 static time_t seen, synced;   /* its saves' newest time: last seen, last on the card */
 static time_t retry_at;       /* a save that didn't reach the card: not tried again before this */
 static int core_told;         /* the card was told this game's system (Core): its screen shows it */
+static int core_left;         /* the game is over but the card couldn't be told yet (busy, not reachable): it still
+                                 shows the game's save screen until it is (menu_poll) */
 static int no_card;           /* tries that found no card this game (a core without the front ports, the card not in
                                * yet, or the core still starting): asked again after a while, never given up on */
 static time_t no_card_at;     /* when to try again */
@@ -934,8 +938,11 @@ static void do_menu(void) {
     if (!sys[0])
         return;   /* no game was played: the card isn't touched */
     struct conn c;
-    if (!card_open(&c))
+    if (!card_open(&c)) {
+        core_left = 1;   /* told when the card is reachable again: its own screen back (menu_poll) */
         return;
+    }
+    core_left = 0;
     xfer_begin(&c, "Saving", game);
     struct smc_sync_cfg k = cfg();
     struct smc_sync_report rep;
@@ -943,7 +950,25 @@ static void do_menu(void) {
     int rc = game[0] ? smc_sync_game(&c.bus, &k, sys, game, &rep) : smc_sync_changed(&c.bus, &k, sys, &rep);
     if (rc < 0)
         lg("sync stopped with an error");
-    smc_core(&c.bus, NULL, true);   /* no game core now: the card's buttons are the PS1 card's again */
+    /* no game core now: the card's buttons and screen are the PS1 card's again (told later if it missed this) */
+    core_left = smc_core(&c.bus, NULL, true) < 0;
+    card_close(&c);
+}
+
+/* back in the menu with the card still on the last game's screen (it couldn't be told at MENU): told once it's
+ * reachable, every 5 s */
+static void menu_poll(void) {
+    static time_t at;
+    if (!core_left || play_sys[0] || time(NULL) < at)
+        return;
+    at = time(NULL) + 5;
+    struct conn c;
+    if (!card_open(&c))
+        return;
+    if (smc_core(&c.bus, NULL, true) >= 0) {
+        core_left = 0;
+        lg("menu: the card's own screen again (told late)");
+    }
     card_close(&c);
 }
 
@@ -1734,6 +1759,13 @@ static void do_command(int fd, char *l) {
     if (!strcmp(l, "HELLO")) {
         say(fd, "card %s version %u features 0x%02x free_kb %u\n", c.card.id, c.card.version, c.card.features,
             c.card.free_kb);
+    } else if (!strcmp(l, "SCREEN") || !strncmp(l, "SCREEN ", 7)) {
+        /* the SuperStation's screen on the card while no game core has it ("SCREEN Memory manager"; "SCREEN": the
+         * card's own again): screen ok | screen unsupported (an older card) | screen failed */
+        if (!(c.card.features & SMC_FEATURE_SCREEN))
+            say(fd, "screen unsupported\n");
+        else
+            say(fd, smc_screen(&c.bus, l[6] ? l + 7 : "") == SMC_OK ? "screen ok\n" : "screen failed\n");
     } else if (!strcmp(l, "FWINFO")) {
         fw_info(fd, &c);
     } else if (!strncmp(l, "FWUPDATE ", 9)) {
@@ -2250,6 +2282,7 @@ int main(int argc, char **argv) {
             }
         }
         game_poll();
+        menu_poll();
         icon_poll();
     }
 }

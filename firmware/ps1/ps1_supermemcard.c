@@ -137,6 +137,10 @@ int ps1_supermemcard_req_len(uint8_t cmd, const uint8_t *r, int have) {
     case SMC_AUTH:
     case SMC_AUTHSIG: return ps1_supermemcard_id_req_len(cmd);
     case SMC_UPDATE: return ps1_supermemcard_update_req_len(r, have);
+    case SMC_SCREEN:
+        if (have < 1) return 1;
+        if (r[0] > SMC_SCREEN_TEXT) return -1;
+        return 1 + r[0];
     case SMC_CORE: {
         if (have < 1) return 1;
         if (r[0] == 0 || r[0] > SMC_SYS_LEN) return -1;
@@ -423,6 +427,8 @@ static void set_mode(const char *sys) {
 }
 
 void ps1_supermemcard_ps1_used(void) { __atomic_store_n(&ps1_used, true, __ATOMIC_RELEASE); }
+static char ss_screen[SMC_SCREEN_TEXT + 1];   /* the SuperStation's screen (SMC_SCREEN): "" none */
+const char *ps1_supermemcard_ss_screen(void) { return ss_screen; }
 const char *ps1_supermemcard_mode_system(void) { return mode_sys; }
 int ps1_supermemcard_mode_card(void) { return mode_card; }
 uint32_t ps1_supermemcard_mode_seq(void) { return mode_seq; }
@@ -777,7 +783,7 @@ static int do_command(uint8_t cmd, const uint8_t *r, int len, uint8_t *a) {
         a[2] = SMC_VERSION;
         /* features: save files, list, virtual cards (Core), delete, identity (CERT/AUTH); the firmware update through
          * the front port when the card has the resident updater */
-        a[3] = 0x1F | (ps1_supermemcard_update_available() ? SMC_FEATURE_UPDATE : 0);
+        a[3] = 0x1F | SMC_FEATURE_SCREEN | (ps1_supermemcard_update_available() ? SMC_FEATURE_UPDATE : 0);
         for (int i = 0; i < 8; i++) {
             unsigned v = 0;
             sscanf(card_id + i * 2, "%2x", &v);
@@ -1063,6 +1069,23 @@ static int do_command(uint8_t cmd, const uint8_t *r, int len, uint8_t *a) {
     case SMC_UPDATE:
         return ps1_supermemcard_update_command(r, len, a);
 
+    case SMC_SCREEN: {
+        char t[SMC_SCREEN_TEXT + 1];
+        int n = r[0];
+        for (int i = 0; i < n; i++)
+            t[i] = r[1 + i] >= 0x20 && r[1 + i] < 0x7F ? (char)r[1 + i] : ' ';   /* (the card's font: ASCII) */
+        t[n] = 0;
+        if (strcmp(t, ss_screen)) {
+            snprintf(ss_screen, sizeof(ss_screen), "%s", t);
+            smc_log("screen: %s\n", t[0] ? t : "the card's own");
+            if (t[0])
+                __atomic_store_n(&ps1_used, false, __ATOMIC_RELEASE);   /* (only PS1 use from now on ends it) */
+            mode_seq++;
+        }
+        a[0] = SMC_GOOD;
+        return 1;
+    }
+
     case SMC_PROGRESS: {
         /* the SS1's progress bar: printable ASCII only (the font) */
         int pct = r[0], tl = r[1] > SMC_PROGRESS_TEXT ? SMC_PROGRESS_TEXT : r[1];
@@ -1197,6 +1220,10 @@ void ps1_supermemcard_task(void) {
     /* a PS1 game is using the card: the buttons are the PS1 card's again */
     if (mode_sys[0] && __atomic_load_n(&ps1_used, __ATOMIC_ACQUIRE))
         set_mode("");
+    if (ss_screen[0] && __atomic_load_n(&ps1_used, __ATOMIC_ACQUIRE)) {
+        ss_screen[0] = 0;   /* a PS1 game has the card: its own screen */
+        mode_seq++;
+    }
     if (mode_dirty && time_us_64() >= mode_save_at)
         save_mode_card();
 

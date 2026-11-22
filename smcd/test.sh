@@ -395,6 +395,9 @@ ask "FWUPDATE $w/fw.bin" | grep -q "^fwupdate ok " && cmp -s "$w/fw.bin" "$w/sd/
     && ok "FWUPDATE: sent, checked by the card, installed byte for byte" || bad "FWUPDATE"
 ask FWINFO | grep -q "^fwinfo 1 updated " && ok "  and FWINFO says it was updated" || bad "FWINFO after: $(ask FWINFO)"
 ask "FWUPDATE $w/nothing.bin" | grep -q "^fwupdate badfile" && ok "FWUPDATE: no such file" || bad "FWUPDATE no file"
+if ask "SCREEN Memory manager" | grep -q "^screen ok" && ask SCREEN | grep -q "^screen ok"; then
+    ok "SCREEN: the card takes the SuperStation's screen, then its own again"
+else bad "SCREEN: $(ask "SCREEN Memory manager")"; fi
 kill $fwshim 2>/dev/null || true; wait $fwshim 2>/dev/null || true
 
 kill $(pgrep -f "$B/smcd") 2>/dev/null || true; sleep 0.5; rm -f /tmp/smcd.sock

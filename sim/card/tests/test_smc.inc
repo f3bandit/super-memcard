@@ -54,7 +54,7 @@ static void fill(uint8_t *d, size_t n, int seed) {
 static void t_smc_off_until_hello(void) {
     /* before a Hello the card is a stock card: 61..6F aren't ACKed */
     bus_wake();
-    for (int c = 0x61; c <= 0x6F; c++) {
+    for (int c = 0x61; c <= 0x70; c++) {
         uint8_t out[4] = {0x81, (uint8_t)c, 0, 0};
         bool ack[4];
         CHECK_EQ(bus_frame(out, NULL, ack, 4), 2);
@@ -836,7 +836,50 @@ static void t_smc_update_refuses(void) {
     CHECK_EQ(result, SMC_UPDATE_NONE);
 }
 
+/* ---- in a SuperStation (a Hello since power-up): its screen, Game ID always on, the controller combo off ---- */
+
+static void t_smc_screen(void) {
+    struct smc_card c;
+    CHECK_EQ(smc_hello(&fbus, SMC_HOST_TEST, 0, &c), 1);
+    CHECK(c.features & SMC_FEATURE_SCREEN);
+    CHECK_EQ(smc_screen(&fbus, "Memory manager"), SMC_OK);
+    CHECK_EQ(smc_screen(&fbus, ""), SMC_OK);
+    /* longer than the card takes: refused at its length byte, the frame not ACKed */
+    uint8_t req[1 + 40] = {40}, a[1];
+    memset(req + 1, 'x', 40);
+    CHECK_EQ(smc_frame(&fbus, 0x70, req, sizeof(req), a, 1), SMC_E_NO_REPLY);
+}
+
+static void t_smc_game_id_in_ss1(void) {
+    /* the card's Game ID setting off (game_id false in this test's table), but in a SuperStation it's on */
+    CHECK_EQ(smc_hello(&fbus, SMC_HOST_TEST, 0, NULL), 1);
+    bus_wake();
+    mmce_game_id("cdrom:\\SLUS_012.34;1");
+    vcard_settle();
+    CHECK(strcmp(vcard_card_path(), "MemoryCards/PS1/SLUS-01234/SLUS-01234-1.mcd") == 0);
+}
+
+static void t_smc_combo_off_in_ss1(void) {
+    /* the combo that picks the next card on a PS1 does nothing in a SuperStation: the SS1 picks the card */
+    enum { UP = 1 << 4, L2 = 1 << 8, R2 = 1 << 9, L1 = 1 << 10, R1 = 1 << 11 };
+    CHECK_EQ(smc_hello(&fbus, SMC_HOST_TEST, 0, NULL), 1);
+    bus_wake();
+    for (int i = 0; i < 4; i++) {
+        ctrl_poll(L1 | L2 | R1 | R2 | UP);
+        usleep(16 * 1000);
+    }
+    for (int i = 0; i < 4; i++) {
+        ctrl_poll(0);
+        usleep(16 * 1000);
+    }
+    vcard_settle();
+    CHECK(strcmp(vcard_card_path(), CARD1) == 0);
+}
+
 #define SMC_TESTS \
+    {"SMC: the SuperStation's screen (81 70)", t_smc_screen, true, NULL}, \
+    {"SMC: Game ID always on in a SuperStation", t_smc_game_id_in_ss1, false, NULL}, \
+    {"SMC: the controller combo is off in a SuperStation", t_smc_combo_off_in_ss1, true, NULL}, \
     {"SMC: firmware update: sent, checked, applied byte for byte", t_smc_update, true, NULL}, \
     {"SMC: firmware update refuses a wrong or damaged firmware", t_smc_update_refuses, true, NULL}, \
     {"SMC: whole-frame transport (the front ports' way)", t_smc_frame_transport, true, NULL}, \
