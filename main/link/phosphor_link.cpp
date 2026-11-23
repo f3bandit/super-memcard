@@ -20,7 +20,10 @@ int phosphor_disc_command(const char *, char *, size_t) { return 0; }
 void phosphor_disc_poll(void (*)(const char *)) {}
 void phosphor_disc_status(char *out, size_t n, int) { if (n) snprintf(out, n, "{\"ok\":true,\"drive\":false}"); }
 int phosphor_disc_busy(void) { return 0; }
+int phosphor_disc_eject(void) { return -1; }
 __attribute__((weak)) void menu_phosphor_screen(int) {}
+__attribute__((weak)) int menu_select_ini_pending(void) { return 0; }   // (the boot video rescue: Phosphor's Main only)
+__attribute__((weak)) void menu_select_ini_pick(int) {}
 __attribute__((weak)) int menu_foreign_console(void) { return 0; }
 __attribute__((weak)) void video_fb_console() {}
 __attribute__((weak)) void video_fb_console_done() {}

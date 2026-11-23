@@ -40,6 +40,8 @@ int phosphor_keep_main(const char *cfg_main);
 const char *phosphor_script_path(void);   // the line that puts phosphor/compat first on a script's PATH, or ""
 // while Phosphor's shell is starting (Main just started in the menu core), Main's file browser stays
 // closed instead of popping up first; 0 once the shell has the screen, gave it back, or 60 s passed
+int phosphor_rescue_boot(void);                    // 1 on Main's first start since the SuperStation started (the video rescue's time)
+int phosphor_rescue_stock(void);                   // the boot video rescue: 1 = MiSTer's own picker (Phosphor's shell isn't there)
 int phosphor_hold_menu(void);
 uint32_t phosphor_osd_button(uint32_t c);           // the OSD (pair) button's short press, as the shell set it: the key, or 0
 int phosphor_bt_pair(void);           // the Bluetooth button with Phosphor's screen up: Phosphor's own pairing (1)

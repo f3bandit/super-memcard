@@ -76,6 +76,7 @@
 #include "phosphor_disc.h"
 #include "scaler.h"
 #include "menu.h"
+#include "cfg.h"
 #include "user_io.h"
 #include "video.h"
 #include "fpga_io.h"
@@ -129,7 +130,7 @@ static char last_core[64];
 static int last_osd = -1;
 static unsigned long f12_down;   // when the menu button went down (sheet), 0: not held
 static int osd_direct;             // Main's own menu key press and release, from "ingame osd": straight through
-static int osd_btn;                // the pair (OSD) button's short press: 0 menu, 1 osd, 2 pair, 3 none (phosphor_osd_button)
+static int osd_btn;                // the pair (OSD) button's short press: 0 menu, 1 pair, 2 eject, 3 none (phosphor_osd_button)
 static unsigned long osd_release;  // when to send that release (MiSTer's menu opens the OSD on the release)
 static int inited;
 static unsigned long hold_until;   // Main's file browser waits for the shell until then (0: no wait)
@@ -912,6 +913,61 @@ static void crt_command(int i, const char *args)
 }
 
 
+// The boot video rescue (the OSD button, the SS1's pair button, held while Main starts: user_io.cpp altcfg(0) and
+// SelectINI, as stock). Phosphor's shell shows it on its own screen, in MiSTer's layout (up MiSTer.ini, left/down/right
+// profiles 1-3) and answers with "rescue N"; MiSTer's own picker only when the shell isn't there within 60 s (at start-up Phosphor's screen comes about 20 s after Main)
+// (troubleshooting, testing). menu.cpp asks this before opening its picker: 1 to open it.
+static int rescue_shell;
+static unsigned long rescue_wait;
+int phosphor_rescue_stock(void)
+{
+	if (!inited) ph_init();
+	if (rescue_shell) return 0;
+	if (!phosphor_installed()) return 1;
+	if (!rescue_wait) rescue_wait = GetTimer(60000);
+	return CheckTimer(rescue_wait);
+}
+
+// The rescue only as the SuperStation starts: Main starts again with every core (and back to the menu), and the
+// pair button held then is the user's own setting (Settings > Pair button), not a rescue. 1 on Main's first start
+// since Linux started (a mark in /tmp, which starts empty), 0 after.
+int phosphor_rescue_boot(void)
+{
+	static int first = -1;
+	if (first < 0)
+	{
+		const char *mark = "/tmp/phosphor-main.started";
+		first = access(mark, F_OK) != 0;
+		if (first) { FILE *f = fopen(mark, "w"); if (f) fclose(f); }
+	}
+	return first;
+}
+
+static void rescue_poll(void)
+{
+	if (!rescue_shell && owner >= 0 && menu_select_ini_pending() && !CheckTimer(rescue_wait ? rescue_wait : GetTimer(60000)))
+	{
+		rescue_shell = 1;
+		event_all("{\"event\":\"rescue\"}");
+	}
+	if (rescue_shell && !menu_select_ini_pending()) rescue_shell = 0;
+}
+
+static void rescue_reply(int i)
+{
+	rescue_poll();                       // (the shell asks right after taking the screen: not a pass later)
+	char b[600], nm[3][200];
+	for (int k = 1; k <= 3; k++)
+	{
+		const char *n = cfg_get_name(k);
+		snprintf(nm[k - 1], sizeof(nm[0]), "%s", n && *n && FileExists(n) ? n : "");
+		for (char *c = nm[k - 1]; *c; c++) if (*c == '"' || *c == '\\') *c = '_';
+	}
+	snprintf(b, sizeof(b), "{\"ok\":true,\"rescue\":%s,\"inis\":[\"MiSTer.ini\",\"%s\",\"%s\",\"%s\"]}",
+	         rescue_shell ? "true" : "false", nm[0], nm[1], nm[2]);
+	send_line(i, b);
+}
+
 static void command(int i, char *line)
 {
 	char out[512];
@@ -1028,12 +1084,20 @@ static void command(int i, char *line)
 		if (ingame_client == i) { ingame_client = -1; rep_mask = 0; ingame_end_text(); if (!is_menu() && video_fb_state()) video_fb_enable(0); }
 		send_line(i, "{\"ok\":true}");
 	}
+	else if (!strcmp(line, "rescue")) rescue_reply(i);
+	else if (!strncmp(line, "rescue ", 7))
+	{
+		int n = atoi(line + 7);
+		if (!rescue_shell || n < 0 || n > 3) { send_line(i, "{\"ok\":false,\"error\":\"no video rescue (rescue 0-3)\"}"); return; }
+		send_line(i, "{\"ok\":true}");
+		menu_select_ini_pick(n);
+	}
 	else if (!strncmp(line, "button ", 7))
 	{
-		static const char *const modes[] = { "menu", "osd", "pair", "none" };
+		static const char *const modes[] = { "menu", "pair", "eject", "none" };
 		int m = -1;
 		for (int k = 0; k < 4; k++) if (!strcmp(line + 7, modes[k])) m = k;
-		if (m < 0) { send_line(i, "{\"ok\":false,\"error\":\"button menu|osd|pair|none\"}"); return; }
+		if (m < 0) { send_line(i, "{\"ok\":false,\"error\":\"button menu|pair|eject|none\"}"); return; }
 		osd_btn = m;
 		send_line(i, "{\"ok\":true}");
 	}
@@ -1407,6 +1471,7 @@ void phosphor_poll(void)
 	if (!inited) ph_init();
 	if (lfd < 0) return;
 	script_poll();
+	rescue_poll();
 
 	int fd;
 	while ((fd = accept4(lfd, NULL, NULL, SOCK_NONBLOCK | SOCK_CLOEXEC)) >= 0)
@@ -1517,26 +1582,26 @@ int phosphor_bt_pair(void)
 	return 1;
 }
 
-// The SS1's pair button is MiSTer's OSD button. Held while the menu starts: MiSTer's video rescue (user_io.cpp
-// SelectINI, untouched); held 3 s: pairing (phosphor_bt_pair). A short press, as the shell sets it ("button
-// menu|osd|pair|none", Settings > Pair button): menu (default) as any menu button (Phosphor's in-game menu in a game);
-// osd MiSTer's own menu in a game; pair Phosphor's pairing in its menus (the in-game menu in a game); none nothing.
+// The SS1's pair button is MiSTer's OSD button. Held while the menu starts: the boot video rescue (rescue_poll);
+// held 3 s: pairing (phosphor_bt_pair). A short press, as the shell sets it ("button menu|pair|eject|none",
+// Settings > Pair button): menu (default) as any menu button (Phosphor's in-game menu in a game); pair Phosphor's
+// pairing in its menus (the in-game menu in a game); eject opens the dock's disc tray (in a game too: changing
+// discs); none nothing.
 uint32_t phosphor_osd_button(uint32_t c)
 {
 	if (!inited) ph_init();
 	switch (osd_btn)
 	{
 	case 1:
-		if (is_menu()) return 0;            // (Phosphor's screens: MiSTer's menu stays under them)
-		if (!user_io_osd_is_visible()) { osd_direct = 1; f12_down = 0; }
-		return c;
-	case 2:
 		if (is_menu()) { phosphor_bt_pair(); return 0; }
-		return c;
+		return phosphor_filter_key(c);
+	case 2:
+		phosphor_disc_eject();
+		return 0;
 	case 3:
 		return 0;
 	default:
-		return c;
+		return phosphor_filter_key(c);   // (as a menu key: Phosphor's in-game menu in a game, not MiSTer's OSD)
 	}
 }
 
