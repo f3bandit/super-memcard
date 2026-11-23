@@ -947,6 +947,8 @@ static void launch_game(const char *sys, const char *game, const char *mgl) {
     smc_sync_hold_card(true);    /* the game has this card's save in memory from now on */
 }
 
+static int psx_left;   /* a PS1 game ended while the card couldn't be reached: its default card later (menu_poll) */
+
 static void do_menu(void) {
     smc_sync_hold_card(false);   /* the game is over: a card picked meanwhile is used from now on */
     char sys[65], game[256];
@@ -958,9 +960,11 @@ static void do_menu(void) {
     struct conn c;
     if (!card_open(&c)) {
         core_left = 1;   /* told when the card is reachable again: its own screen back (menu_poll) */
+        psx_left = !strcmp(sys, "PSX");
         return;
     }
     core_left = 0;
+    psx_left = 0;
     xfer_begin(&c, "Saving", game);
     struct smc_sync_cfg k = cfg();
     struct smc_sync_report rep;
@@ -971,6 +975,8 @@ static void do_menu(void) {
         lg("sync stopped with an error");
     /* no game core now: the card's buttons and screen are the PS1 card's again (told later if it missed this) */
     core_left = smc_core(&c.bus, NULL, true) < 0;
+    if (!strcmp(sys, "PSX"))
+        smc_ps1_default_card(&c.bus);   /* PSX: the game's own card let go, the card's default card again */
     card_close(&c);
 }
 
@@ -986,6 +992,8 @@ static void menu_poll(void) {
         return;
     if (smc_core(&c.bus, NULL, true) >= 0) {
         core_left = 0;
+        if (psx_left) smc_ps1_default_card(&c.bus);
+        psx_left = 0;
         lg("menu: the card's own screen again (told late)");
     }
     card_close(&c);

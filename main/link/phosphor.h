@@ -11,6 +11,7 @@
 void phosphor_poll(void);
 void phosphor_file_loaded(const char *path);
 void phosphor_thumbs(int dev, int right, int press);       // a stick pressed in: both together take a screenshot
+int phosphor_screenshot_key(void);                       // the keyboard's screenshot keys: 1 when the shell takes it (Phosphor's picture shown)
 int phosphor_screenshot_result(const char *file, int ok);    // a screenshot finished: 1 when Phosphor asked for it (its note shown)   // a file was loaded into the core (MiSTer's menu or an MGL): "status" reports it
 // a controller button (MiSTer's JOY_* mask) while the framebuffer is up: 1 if it went to the shell
 int phosphor_pad(uint32_t mask, int press);
@@ -40,6 +41,7 @@ const char *phosphor_script_path(void);   // the line that puts phosphor/compat 
 // while Phosphor's shell is starting (Main just started in the menu core), Main's file browser stays
 // closed instead of popping up first; 0 once the shell has the screen, gave it back, or 60 s passed
 int phosphor_hold_menu(void);
+uint32_t phosphor_osd_button(uint32_t c);           // the OSD (pair) button's short press, as the shell set it: the key, or 0
 int phosphor_bt_pair(void);           // the Bluetooth button with Phosphor's screen up: Phosphor's own pairing (1)
 int phosphor_ingame_text(void);
 int phosphor_ingame_shown(void);        // Phosphor's in-game menu is over the game (the pads go to it)         // Phosphor's in-game menu is OSD text (CRT mode): the pads go to it

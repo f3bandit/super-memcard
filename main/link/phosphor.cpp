@@ -129,6 +129,7 @@ static char last_core[64];
 static int last_osd = -1;
 static unsigned long f12_down;   // when the menu button went down (sheet), 0: not held
 static int osd_direct;             // Main's own menu key press and release, from "ingame osd": straight through
+static int osd_btn;                // the pair (OSD) button's short press: 0 menu, 1 osd, 2 pair, 3 none (phosphor_osd_button)
 static unsigned long osd_release;  // when to send that release (MiSTer's menu opens the OSD on the release)
 static int inited;
 static unsigned long hold_until;   // Main's file browser waits for the shell until then (0: no wait)
@@ -811,6 +812,15 @@ void phosphor_thumbs(int dev, int right, int press)
 	}
 }
 
+// the keyboard's screenshot keys (Win+PrtScr, Alt/Win+ScrLk: what mrext Remote and Companion press):
+// on Phosphor's picture the shell takes it, as with the combo; 1 when it did (else MiSTer's own as usual)
+int phosphor_screenshot_key(void)
+{
+	if (owner < 0 || !video_fb_state()) return 0;
+	event_all("{\"event\":\"shot\"}");
+	return 1;
+}
+
 int phosphor_screenshot_result(const char *file, int ok)
 {
 	if (!shot_ours) return 0;
@@ -1016,6 +1026,15 @@ static void command(int i, char *line)
 	else if (!strcmp(line, "ingame off"))
 	{
 		if (ingame_client == i) { ingame_client = -1; rep_mask = 0; ingame_end_text(); if (!is_menu() && video_fb_state()) video_fb_enable(0); }
+		send_line(i, "{\"ok\":true}");
+	}
+	else if (!strncmp(line, "button ", 7))
+	{
+		static const char *const modes[] = { "menu", "osd", "pair", "none" };
+		int m = -1;
+		for (int k = 0; k < 4; k++) if (!strcmp(line + 7, modes[k])) m = k;
+		if (m < 0) { send_line(i, "{\"ok\":false,\"error\":\"button menu|osd|pair|none\"}"); return; }
+		osd_btn = m;
 		send_line(i, "{\"ok\":true}");
 	}
 	else if (!strcmp(line, "shot on") || !strcmp(line, "shot off"))
@@ -1496,6 +1515,29 @@ int phosphor_bt_pair(void)
 	if (owner < 0 || !is_menu() || !video_fb_state() || cl[owner].fd < 0) return 0;
 	send_line(owner, "{\"event\":\"bt_pair\"}");
 	return 1;
+}
+
+// The SS1's pair button is MiSTer's OSD button. Held while the menu starts: MiSTer's video rescue (user_io.cpp
+// SelectINI, untouched); held 3 s: pairing (phosphor_bt_pair). A short press, as the shell sets it ("button
+// menu|osd|pair|none", Settings > Pair button): menu (default) as any menu button (Phosphor's in-game menu in a game);
+// osd MiSTer's own menu in a game; pair Phosphor's pairing in its menus (the in-game menu in a game); none nothing.
+uint32_t phosphor_osd_button(uint32_t c)
+{
+	if (!inited) ph_init();
+	switch (osd_btn)
+	{
+	case 1:
+		if (is_menu()) return 0;            // (Phosphor's screens: MiSTer's menu stays under them)
+		if (!user_io_osd_is_visible()) { osd_direct = 1; f12_down = 0; }
+		return c;
+	case 2:
+		if (is_menu()) { phosphor_bt_pair(); return 0; }
+		return c;
+	case 3:
+		return 0;
+	default:
+		return c;
+	}
 }
 
 int phosphor_hold_menu(void)
