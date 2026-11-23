@@ -975,8 +975,9 @@ static void do_menu(void) {
         lg("sync stopped with an error");
     /* no game core now: the card's buttons and screen are the PS1 card's again (told later if it missed this) */
     core_left = smc_core(&c.bus, NULL, true) < 0;
-    if (!strcmp(sys, "PSX"))
-        smc_ps1_default_card(&c.bus);   /* PSX: the game's own card let go, the card's default card again */
+    /* PSX: the game's own card let go, the card's default card again (missed: tried again with the screen) */
+    if (!strcmp(sys, "PSX") && (core_left || smc_ps1_default_card(&c.bus) != SMC_OK))
+        core_left = psx_left = 1;
     card_close(&c);
 }
 
@@ -992,8 +993,8 @@ static void menu_poll(void) {
         return;
     if (smc_core(&c.bus, NULL, true) >= 0) {
         core_left = 0;
-        if (psx_left) smc_ps1_default_card(&c.bus);
-        psx_left = 0;
+        if (psx_left && smc_ps1_default_card(&c.bus) != SMC_OK) core_left = 1;   /* (again in 5 s) */
+        else psx_left = 0;
         lg("menu: the card's own screen again (told late)");
     }
     card_close(&c);

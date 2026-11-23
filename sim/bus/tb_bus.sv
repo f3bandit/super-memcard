@@ -175,7 +175,7 @@ module tb;
 			start_frame(8'h60); put("S"); put("M"); put(8'd1); put(8'd1); put(8'd0); zeros(16); raw_frame(0, fl);
 			check("Hello: whole frame answered", rst[7:0], 23);
 			check("Hello: 'S' 'M'", {fr[7], fr[8]}, 16'h534D);
-			check("Hello: card version 2", fr[9], 2);
+			check("Hello: card version 4 (SMC_VERSION)", fr[9], 4);
 
 			// 3. Core: SNES is running (card 1); Select SNES / Bus Test on its current card
 			start_frame(8'h69); put_str("SNES", 4); put(8'h01); zeros(2); raw_frame(0, fl);

@@ -112,7 +112,7 @@ $(B)/smcd: $(B)/smcd.o $(B)/smc_vcard.o $(B)/smc_host.o $(B)/smc_genuine.o $(B)/
 # test only: main/smc_shim.cpp as Main runs it, with vcardd for the front ports
 CXX ?= g++
 $(B)/shimtest: ../../smcd/shimtest.cpp ../../main/smc_shim.cpp ../../main/smc_osd.cpp $(B)/smc_vcard.o $(B)/smc_host.o
-	$(CXX) -O1 -g -no-pie -I../../smcd/teststub -I../../main -I../../host $^ -o $@
+	$(CXX) -O1 -g -no-pie $(if $(SAN),-fsanitize=$(SAN) -fno-omit-frame-pointer) -I../../smcd/teststub -I../../main -I../../host $^ -o $@
 
 $(B)/tests/test_card.o: tests/test_smc.inc tests/test_sync.inc
 
@@ -135,7 +135,7 @@ $(B)/%.o: %.c $(if $(filter 1,$(SMC)),$(B)/fw/.ready)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -fno-pie -c $< -o $@
 
-$(B)/test_card: $(B)/tests/test_card.o $(B)/tests/bus.o $(B)/host/vcard_client.o $(B)/smc_host.o $(B)/smc_genuine.o $(B)/smc_sync.o $(B)/smc_icons.o $(B)/smc_art_icon.o $(B)/smc_ident.o $(B)/smc_gameid.o $(B)/smc_gamedb.o $(HOST_OBJ) $(FW_OBJ)
+$(B)/test_card: $(B)/tests/test_card.o $(B)/tests/bus.o $(B)/host/vcard_client.o $(B)/smc_host.o $(B)/smc_genuine.o $(B)/smc_sync.o $(B)/smc_icons.o $(B)/smc_art_icon.o $(B)/smc_ident.o $(B)/smc_gameid.o $(B)/smc_gamedb.o $(HOST_OBJ) $(FW_OBJ) $(if $(filter 1,$(SMC)),,$(B)/monocypher.o)
 	$(CC) $^ $(LDFLAGS) $(LDFLAGS_STATIC) -o $@
 
 test: $(B)/test_card
