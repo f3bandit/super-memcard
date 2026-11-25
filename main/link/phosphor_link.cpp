@@ -16,10 +16,6 @@
 #include <strings.h>
 
 // ---- the menu core's, the dock's, the mapping's: none here
-int phosphor_disc_command(const char *, char *, size_t) { return 0; }
-void phosphor_disc_poll(void (*)(const char *)) {}
-void phosphor_disc_status(char *out, size_t n, int) { if (n) snprintf(out, n, "{\"ok\":true,\"drive\":false}"); }
-int phosphor_disc_busy(void) { return 0; }
 int phosphor_disc_eject(void) { return -1; }
 __attribute__((weak)) void menu_phosphor_screen(int) {}
 __attribute__((weak)) int menu_select_ini_pending(void) { return 0; }   // (the boot video rescue: Phosphor's Main only)
@@ -27,7 +23,6 @@ __attribute__((weak)) void menu_select_ini_pick(int) {}
 __attribute__((weak)) int menu_foreign_console(void) { return 0; }
 __attribute__((weak)) void video_fb_console() {}
 __attribute__((weak)) void video_fb_console_done() {}
-__attribute__((weak)) int mgl_run_here(const char *) { return -1; }
 __attribute__((weak)) int menu_mouse_map = 0;
 __attribute__((weak)) void set_menu_mouse_map(int) {}
 __attribute__((weak)) int step_back_map_setting() { return 0; }
@@ -42,6 +37,141 @@ __attribute__((weak)) int input_map_running(void) { return 0; }
 __attribute__((weak)) void input_map_jump(int) {}
 __attribute__((weak)) uint32_t input_map_dev_vidpid(void) { return 0; }
 __attribute__((weak)) const char *input_map_file(void) { return ""; }
+
+// ---- an MGL's <option>s on the core running now (phosphor.cpp's "here": the in-game menu's live option changes)
+// phosphor-main's mra_loader.cpp mgl_apply_options(), the same matching, for a Main without MGL options (MiSTer_RA,
+// MiSTer_Physical-CD): <option [page=".."] name=".." value=".."/> set as the OSD would. Its <file>s and <reset>s are
+// Phosphor's Main's only: left out here (the reset command uses the core's own reset first).
+
+static int lk_field(const char *p, int n, char *out, int size)
+{
+	while (n && *p) if (*p++ == ',') n--;
+	if (n) return 0;
+	while (*p == ' ') p++;
+	int len = 0;
+	while (p[len] && p[len] != ',') len++;
+	while (len && p[len - 1] == ' ') len--;
+	if (len >= size) len = size - 1;
+	memcpy(out, p, len);
+	out[len] = 0;
+	return 1;
+}
+
+static int lk_same(const char *a, const char *b)
+{
+	while (*a == ' ') a++;
+	while (*b == ' ') b++;
+	int la = strlen(a), lb = strlen(b);
+	while (la && a[la - 1] == ' ') la--;
+	while (lb && b[lb - 1] == ' ') lb--;
+	return la == lb && !strncasecmp(a, b, la);
+}
+
+static int lk_line(char *p, char **opt, char *title, int title_size)
+{
+	while ((p[0] == 'H' || p[0] == 'D' || p[0] == 'h' || p[0] == 'd') && strlen(p) > 2) p += 2;
+	int pg = 0;
+	if (p[0] == 'P' && p[1] >= '0' && p[1] <= '9')
+	{
+		if (p[2] == ',')
+		{
+			lk_field(p, 1, title, title_size);
+			return -(p[1] - '0') - 1;
+		}
+		pg = p[1] - '0';
+		p += 2;
+	}
+	*opt = p;
+	return pg;
+}
+
+// an XML attribute's value (&amp; &lt; &gt; &quot; &apos; undone)
+static void lk_attr(const char *tag, const char *name, char *out, int size)
+{
+	out[0] = 0;
+	char key[32];
+	snprintf(key, sizeof(key), " %s=\"", name);
+	const char *p = strstr(tag, key);
+	if (!p) return;
+	p += strlen(key);
+	int j = 0;
+	while (*p && *p != '"' && j < size - 1)
+	{
+		static const struct { const char *e; char c; } ents[] = { {"&amp;", '&'}, {"&lt;", '<'}, {"&gt;", '>'}, {"&quot;", '"'}, {"&apos;", '\''} };
+		int done = 0;
+		if (*p == '&')
+			for (auto &x : ents)
+				if (!strncmp(p, x.e, strlen(x.e))) { out[j++] = x.c; p += strlen(x.e); done = 1; break; }
+		if (!done) out[j++] = *p++;
+	}
+	out[j] = 0;
+}
+
+static void lk_option(const char *page, const char *name, const char *value)
+{
+	char titles[10][64] = {};
+	char s[256], spec[16], title[64];
+	for (int i = 2; ; i++)
+	{
+		char *p = user_io_get_confstr(i);
+		if (!p) break;
+		char *opt = NULL;
+		int pg = lk_line(p, &opt, title, sizeof(title));
+		if (pg < 0) snprintf(titles[-pg - 1], sizeof(titles[0]), "%s", title);
+	}
+	int matches = 0, value_n = -1, ex = 0;
+	spec[0] = 0;
+	for (int i = 2; ; i++)
+	{
+		char *p = user_io_get_confstr(i);
+		if (!p) break;
+		char *opt = NULL;
+		int pg = lk_line(p, &opt, title, sizeof(title));
+		if (pg < 0 || (opt[0] != 'O' && opt[0] != 'o')) continue;
+		if (!lk_field(opt, 1, s, sizeof(s)) || !lk_same(s, name)) continue;
+		if (page[0] && !(pg && lk_same(titles[pg], page))) continue;
+		matches++;
+		const char *b = opt + 1;
+		int n = 0;
+		while (b[n] && b[n] != ',' && n < (int)sizeof(spec) - 1) { spec[n] = b[n]; n++; }
+		spec[n] = 0;
+		ex = (opt[0] == 'o');
+		value_n = -1;
+		for (int v = 0; lk_field(opt, v + 2, s, sizeof(s)); v++)
+			if (lk_same(s, value)) { value_n = v; break; }
+	}
+	if (matches != 1 || value_n < 0 || value_n >= (1 << user_io_status_bits(spec, 0, 0, ex)))
+	{
+		printf("MGL option: %s = %s: not set (%d matches)\n", name, value, matches);
+		return;
+	}
+	printf("MGL option: %s = %s (%s%s, %d)\n", name, value, ex ? "o" : "O", spec, value_n);
+	user_io_status_set(spec, value_n, ex);
+}
+
+__attribute__((weak)) int mgl_run_here(const char *xml)
+{
+	FILE *f = fopen(xml, "r");
+	if (!f) return -1;
+	static char buf[8192];
+	size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+	fclose(f);
+	buf[n] = 0;
+	for (char *t = strstr(buf, "<option"); t; t = strstr(t + 1, "<option"))
+	{
+		char *e = strchr(t, '>');
+		if (!e) break;
+		char tag[1024], page[128], name[128], value[128];
+		int l = (int)(e - t) < (int)sizeof(tag) - 1 ? (int)(e - t) : (int)sizeof(tag) - 1;
+		memcpy(tag, t, l);
+		tag[l] = 0;
+		lk_attr(tag, "page", page, sizeof(page));
+		lk_attr(tag, "name", name, sizeof(name));
+		lk_attr(tag, "value", value, sizeof(value));
+		if (name[0] && value[0]) lk_option(page, name, value);
+	}
+	return 0;
+}
 
 // ---- the core's options (phosphor-main's menu.cpp, the same code)
 

@@ -177,3 +177,124 @@ int cheats_toggle_at(int i)
 '''
 edit('cheats.cpp', cheats)
 print('cheats in', d)
+
+# Coreshell's handoff (ported from corehost.patch / Phosphor's Main): the settings Coreshell's MGL hands this launch,
+# <status mask value> over the core's .CFG and <setting key value> over the INI, in memory only (neither file
+# written). Coreshell sends them (SuperCard among them) only to a Main whose binary says "Coreshell handoff: ".
+def ho_cfg(s):
+    s = once(s, '\nvoid cfg_parse()\n{\n', '''
+// Coreshell's handoff (ported from Phosphor's Main): INI settings for this launch, read after the INI (never written)
+static char cfg_overrides[2048];
+
+void cfg_set_overrides(const char *lines)
+{
+	snprintf(cfg_overrides, sizeof(cfg_overrides), "%s", lines ? lines : "");
+}
+
+static void cfg_apply_overrides()
+{
+	char line[512];
+	for (const char *p = cfg_overrides; *p; )
+	{
+		const char *e = strchr(p, '\\n');
+		size_t n = e ? (size_t)(e - p) : strlen(p);
+		if (n && n < sizeof(line))
+		{
+			memcpy(line, p, n);
+			line[n] = 0;
+			ini_parse_var(line);
+		}
+		p += n + (e ? 1 : 0);
+	}
+}
+
+void cfg_parse()
+{
+''')
+    return once(s, '\t\tini_parse(altcfg(), video_get_core_mode_name(0));\n\t}\n',
+                '\t\tini_parse(altcfg(), video_get_core_mode_name(0));\n\t}\n\tcfg_apply_overrides();   // Coreshell\'s handoff\n')
+def ho_cfgh(s):
+    return once(s, '#endif // __CFG_H__', 'void cfg_set_overrides(const char *lines);   // Coreshell: "key=value\\n" lines read after the INI, this launch only\n\n#endif // __CFG_H__')
+def ho_mra(s):
+    nomra = 'mgl_from_mra' not in s
+    s = once(s, '''		if (!strcasecmp(node->tag, "mistergamedescription")) inside_mgl = 1;
+''', '''		if (!strcasecmp(node->tag, "mistergamedescription")) inside_mgl = 1;
+		else if (inside_mgl && !mgl_from_mra && !strcasecmp(node->tag, "setting"))
+		{
+			// Coreshell: an INI setting for this launch (over the active INI, in memory)
+			const char *k = NULL, *v = "";
+			for (int i = 0; i < node->n_attributes; i++)
+			{
+				if (!strcasecmp(node->attributes[i].name, "key")) k = node->attributes[i].value;
+				else if (!strcasecmp(node->attributes[i].name, "value")) v = node->attributes[i].value;
+			}
+			size_t len = strlen(mgl.cs_ini);
+			if (k && *k && !strpbrk(k, "=\\n") && !strchr(v, '\\n') && len + strlen(k) + strlen(v) + 3 < sizeof(mgl.cs_ini))
+			{
+				snprintf(mgl.cs_ini + len, sizeof(mgl.cs_ini) - len, "%s=%s\\n", k, v);
+				printf("Coreshell handoff: INI %s=%s\\n", k, v);
+			}
+		}
+		else if (inside_mgl && !mgl_from_mra && !strcasecmp(node->tag, "status"))
+		{
+			// Coreshell: the core's settings for this launch: these status bits (hex, byte 0 first)
+			const char *m = NULL, *v = NULL;
+			for (int i = 0; i < node->n_attributes; i++)
+			{
+				if (!strcasecmp(node->attributes[i].name, "mask")) m = node->attributes[i].value;
+				else if (!strcasecmp(node->attributes[i].name, "value")) v = node->attributes[i].value;
+			}
+			if (m && v && strlen(m) <= 32 && strlen(v) <= 32)
+			{
+				memset(mgl.cs_mask, 0, sizeof(mgl.cs_mask));
+				memset(mgl.cs_value, 0, sizeof(mgl.cs_value));
+				for (int i = 0; m[2 * i] && m[2 * i + 1]; i++) { char b[3] = { m[2 * i], m[2 * i + 1], 0 }; mgl.cs_mask[i] = (unsigned char)strtoul(b, NULL, 16); }
+				for (int i = 0; v[2 * i] && v[2 * i + 1]; i++) { char b[3] = { v[2 * i], v[2 * i + 1], 0 }; mgl.cs_value[i] = (unsigned char)strtoul(b, NULL, 16); }
+				mgl.cs_status = 1;
+				printf("Coreshell handoff: status mask=%s value=%s\\n", m, v);
+			}
+		}
+''')
+    if nomra: s = s.replace('inside_mgl && !mgl_from_mra && !strcasecmp(node->tag, "setting")', 'inside_mgl && !strcasecmp(node->tag, "setting")').replace('inside_mgl && !mgl_from_mra && !strcasecmp(node->tag, "status")', 'inside_mgl && !strcasecmp(node->tag, "status")')
+    return once(s, '\nmgl_struct* mgl_get()\n{\n\treturn &mgl;\n}\n', '''
+mgl_struct* mgl_get()
+{
+	return &mgl;
+}
+
+// ---- Coreshell's handoff (ported from Phosphor's Main) ----
+void mgl_apply_coreshell_status(unsigned char *status, int size)
+{
+	if (!mgl.cs_status) return;
+	for (int i = 0; i < size && i < (int)sizeof(mgl.cs_mask); i++)
+		status[i] = (unsigned char)((status[i] & ~mgl.cs_mask[i]) | (mgl.cs_value[i] & mgl.cs_mask[i]));
+	printf("Coreshell handoff: the core's settings applied (its .CFG untouched)\\n");
+}
+''')
+def ho_mrah(s):
+    s = re.sub(r'(struct mgl_struct\n\{\n(?:[^}]*\n))\};\n', lambda m: m.group(1) + '''	char cs_ini[2048];          // Coreshell: <setting key="..." value="..."/>: "key=value\\n" lines, over the active INI
+	unsigned char cs_mask[16];  // Coreshell: <status mask="hex" value="hex"/>: these status bits, over the core's .CFG
+	unsigned char cs_value[16];
+	int  cs_status;
+};
+''', s, count=1)
+    return once(s, 'mgl_struct* mgl_get();\n', 'mgl_struct* mgl_get();\nvoid mgl_apply_coreshell_status(unsigned char *status, int size);   // Coreshell\'s handoff\n')
+def ho_uio(s):
+    s = once(s, '\tcfg_parse();\n\tcfg_print();\n', '''	// Coreshell: the INI settings its MGL hands this launch, over the user's INI (never written)
+	if (xml && isXmlName(xml) == 2) cfg_set_overrides(mgl_parse(xml)->cs_ini);
+	else cfg_set_overrides(NULL);
+	cfg_parse();
+	cfg_print();
+''')
+    # after the core's .CFG is read (CORE_TYPE_8BIT), before the status goes to the core
+    return re.sub(r'(printf\("Loading config %s\\n", name\);.*?\n)(\t+)(user_io_status_set\("\[0\]", 1\);)',
+                  lambda m: m.group(1) + m.group(2) + '// Coreshell: the core\'s settings it hands this launch, over its .CFG (never written)\n'
+                  + m.group(2) + 'if (xml && isXmlName(xml) == 2) mgl_apply_coreshell_status((unsigned char *)cur_status, sizeof(cur_status));\n'
+                  + m.group(2) + m.group(3), s, count=1, flags=re.S)
+if 'Coreshell handoff' in open(os.path.join(d, 'support/arcade/mra_loader.cpp'), errors='surrogateescape').read():
+    print('handoff already in', d)
+else:
+    edit('cfg.cpp', ho_cfg); edit('cfg.h', ho_cfgh)
+    edit('support/arcade/mra_loader.cpp', ho_mra); edit('support/arcade/mra_loader.h', ho_mrah)
+    edit('user_io.cpp', ho_uio)
+    print('handoff in', d)

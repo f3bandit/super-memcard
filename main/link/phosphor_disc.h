@@ -1,16 +1,15 @@
 // Phosphor's in-game link in another Main (the Super MemCard / Coreshell shim): phosphor.cpp as in Phosphor's own
-// Main (phosphor-main), with what only that Main has (the dock's disc drive; the controller mapping Phosphor runs in
-// the menu core) answered here as "none" (phosphor_link.cpp). GPL-3.0.
+// Main (phosphor-main), with what only that Main has (the pair button's disc tray; the controller mapping Phosphor runs
+// in the menu core) answered here as "none" (phosphor_link.cpp). GPL-3.0.
 // Copyright (C) 2026 f3bandit. GPL-3.0 (see LICENSE).
 #ifndef PHOSPHOR_DISC_H
 #define PHOSPHOR_DISC_H
 #include <stddef.h>
 #include <stdint.h>
 
-void phosphor_disc_poll(void (*send_event)(const char *));     // from phosphor_poll
-int phosphor_disc_command(const char *line, char *out, size_t n);  // 1: handled, reply in out
-void phosphor_disc_status(char *out, size_t n, int event);
-int phosphor_disc_busy(void);
+int phosphor_disc_eject(void);   // the pair button's "Open the disc tray": -1 here (no drive in this Main)
+int menu_select_ini_pending(void);   // the boot video rescue: Phosphor's Main only (phosphor_link.cpp)
+void menu_select_ini_pick(int n);
 
 // the mapping's steps (phosphor-main's input.h): the menu core's, never run in a game
 #ifndef SYS_MAP_POS_OSD

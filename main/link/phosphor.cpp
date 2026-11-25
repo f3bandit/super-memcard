@@ -5,7 +5,7 @@
 //
 // Unix socket /tmp/phosphor-main.sock (root only), one command per line, one JSON reply per line:
 //   hello                  {"ok":true,"api":7,"name":"phosphor-main","pads":true,"scripts":true,"mapping":true,
-//                          "disc":true,"ingame":true}
+//                          "ingame":true}
 //   status                 core, menu core or not, OSD visible, framebuffer shown, who owns the screen
 //   script PATH            (the shell, owning the screen) run a script the way MiSTer's Scripts menu does:
 //                          MiSTer's terminal on tty2, controllers as its keys, "Press any key to continue";
@@ -24,8 +24,6 @@
 //                          framebuffer): then osdmenu SEL TITLE<0x1f>line<0x1f>line... draws Phosphor's in-game
 //                          menu as text in the OSD, row SEL inverted; ingame off ends it
 //   ingame osd             from Phosphor's in-game menu to MiSTer's menu (the core's own options)
-//   disc / disc eject      the dock's CD/DVD drive: what's in it, and open the tray (phosphor_disc.cpp);
-//                          subscribers get {"event":"disc",...} when it changes
 //   launch <path>          load a core (.rbf) or a .mgl/.mra, like MiSTer_cmd load_core (under /media only)
 //   (Main's OSD has "Launch Phosphor": first on MiSTer's System page, and on a core's System page under
 //   Video processing; holding the menu button 2 s in MiSTer's menu does the same: phosphor_start)
@@ -973,7 +971,7 @@ static void command(int i, char *line)
 	char out[512];
 	while (*line == ' ') line++;
 	if (!strcmp(line, "hello"))
-		send_line(i, "{\"ok\":true,\"api\":7,\"name\":\"phosphor-main\",\"pads\":true,\"scripts\":true,\"mapping\":true,\"disc\":true,\"ingame\":true,\"crt\":true,\"osdapi\":true}");   // osdapi: confstr, opt, action, reset, here (the frontend's own OSD); api 3: scripts, 4: mapping, 5: disc, ingame, 7: crt
+		send_line(i, "{\"ok\":true,\"api\":7,\"name\":\"phosphor-main\",\"pads\":true,\"scripts\":true,\"mapping\":true,\"ingame\":true,\"crt\":true,\"osdapi\":true}");   // osdapi: confstr, opt, action, reset, here (the frontend's own OSD); api 3: scripts, 4: mapping, 5: ingame, 7: crt (the disc API is gone: phosphord reads the drive)
 	else if (!strncmp(line, "script ", 7)) script_start(i, line + 7);
 	else if (!strcmp(line, "osdtext"))   // the test bench: the OSD's rows, as text
 	{
@@ -1111,8 +1109,6 @@ static void command(int i, char *line)
 		if (is_menu()) send_line(i, "{\"ok\":false,\"error\":\"no game is running\"}");
 		else { shot_ours = 1; request_screenshot(NULL, 1); send_line(i, "{\"ok\":true}"); }
 	}
-	else if (!strncmp(line, "disc", 4) && (!line[4] || line[4] == ' ') && phosphor_disc_command(line, out, sizeof(out)))
-		send_line(i, out);
 	else if (!strcmp(line, "sheet off")) { if (sheet_client == i) sheet_client = -1; send_line(i, "{\"ok\":true}"); }
 	// The frontend API (a frontend doing what MiSTer's OSD does, without it): the running core's options as raw
 	// status bits, its config string, and an MGL's options, file loads and resets applied to it with no reload
@@ -1489,7 +1485,6 @@ void phosphor_poll(void)
 	pad_seq_poll();
 	smc_shim_poll_ui();             // Super MemCard phase 2: a game's save to the card as soon as it saves
 	map_poll();
-	phosphor_disc_poll(event_all);
 	// MiSTer's menu (a long press) or Main itself took the screen back from Phosphor's in-game menu
 	// MiSTer's menu (a long press) took the OSD from Phosphor's text in-game menu: that ends it
 	if (ingame_text && ingame_client >= 0)
@@ -1618,9 +1613,8 @@ int phosphor_hold_menu(void)
 // the hybrid platform's (MiSTer_hybrid), and Update All's:
 //   [A0CD-*] main=MiSTer_Physical-CD   games from the dock's CD drive (Main_MiSTer_Physical_Disc)
 //   [RA_*]   main=MiSTer_RA            RetroAchievements (odelot's Main_MiSTer)
-// Neither is merged here any more, so neither has to be kept in sync: Update All keeps them current,
-// and Coreshell launches their cores like any other. Phosphor still reads the drive itself to show
-// what disc is in (phosphor_disc.cpp, with the drive code from support/physical_disc).
+// Neither is merged here, so neither has to be kept in sync: Update All keeps them current, and
+// Coreshell launches their cores like any other. What disc is in, phosphord reads itself (discdrive.c).
 int phosphor_keep_main(const char *cfg_main)
 {
 	if (!cfg_main || !*cfg_main) return 1;
