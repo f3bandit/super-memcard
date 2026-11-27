@@ -1,0 +1,109 @@
+--- a/src/gui.c
++++ b/src/gui.c
+@@ -863,6 +863,39 @@
+     lv_label_set_text(smc_prog_pct, "");
+ }
+ 
++/* A game saving to the card (PS1 mode): its percentage while it writes, -1 when it isn't. A save is a burst of sector
++   writes; it ends 0.8 s after the last one (100% from 0.3 s). Its size isn't known ahead: the bar fills a block (64
++   sectors, 8 KB) at a time, the directory's sectors not counted. */
++static int game_save_pct(void) {
++    static bool active;
++    static uint32_t last_all, base;
++    static uint64_t last_us;
++    uint32_t all, data;
++    uint64_t now = time_us_64();
++    if (settings_get_mode(true) != MODE_PS1)
++        return -1;
++    ps1_mc_data_interface_game_writes(&all, &data);
++    if (all != last_all) {
++        if (!active) {
++            active = true;
++            base = data;
++        }
++        last_all = all;
++        last_us = now;
++    }
++    if (!active)
++        return -1;
++    if (now - last_us > 800 * 1000) {
++        active = false;
++        return -1;
++    }
++    if (now - last_us > 300 * 1000)
++        return 100;
++    uint32_t done = data - base, total = done ? (done + 63) / 64 * 64 : 64;
++    int pct = (int)(done * 100 / total);
++    return pct > 99 ? 99 : pct;
++}
++
+ /* the bar and text as the SS1 last sent them */
+ static void update_smc_progress(int pct, const char *text) {
+     static lv_point_t pts[2] = {{0, DISPLAY_HEIGHT / 2 + 4}, {0, DISPLAY_HEIGHT / 2 + 4}};
+@@ -1356,6 +1389,9 @@
+         if (write_occured) {
+             input_flush();
+             if (!visible) {
++#if WITH_SUPERMEMCARD
++                if (settings_get_mode(true) != MODE_PS1)   /* PS1: the progress bar shows a game's save instead */
++#endif
+                 lv_obj_clear_flag(g_activity_frame, LV_OBJ_FLAG_HIDDEN);
+                 visible = true;
+             }
+@@ -1454,6 +1490,17 @@
+     char card_name[127];
+     const char *folder_name = NULL;
+ 
++#if WITH_SUPERMEMCARD
++    int save_pct = game_save_pct();
++    int smc_pct;
++    const char *smc_text;
++    if (save_pct >= 0 && !ps1_supermemcard_progress(&smc_pct, &smc_text)
++        && (ui_state == UI_STATE_MAIN || ui_state == UI_STATE_GAME_IMG)) {   /* (not over the menu or a card switch) */
++        ui_goto_screen(scr_smc_progress);
++        update_smc_progress(save_pct, "Saving");
++        oled_update_last_action_time();
++    } else
++#endif
+     if (time_us_64() > GUI_SCREEN_IMAGE_TIMEOUT_US) {
+         switch (ui_state) {
+             case UI_STATE_GAME_IMG:
+--- a/src/ps1/ps1_mc_data_interface.c
++++ b/src/ps1/ps1_mc_data_interface.c
+@@ -79,8 +79,23 @@
+     write_occured = true;
+ }
+ 
++#if WITH_SUPERMEMCARD
++/* sectors a game has written (for the card screen's progress bar while it saves): all, and those past block 0, the
++   directory, which are the save's own data */
++static volatile uint32_t game_sectors, game_data_sectors;
++void ps1_mc_data_interface_game_writes(uint32_t *all, uint32_t *data) {
++    *all = game_sectors;
++    *data = game_data_sectors;
++}
++#endif
++
+ void __time_critical_func(ps1_mc_data_interface_write_mc)(uint32_t page) {
+     ps1_dirty_mark(page);
++#if WITH_SUPERMEMCARD
++    game_sectors++;
++    if (page >= 64)
++        game_data_sectors++;
++#endif
+ }
+ 
+ void __time_critical_func(ps1_mc_data_interface_wait_for_byte)(uint32_t offset) {
+--- a/src/ps1/ps1_mc_data_interface.h
++++ b/src/ps1/ps1_mc_data_interface.h
+@@ -11,6 +11,10 @@
+ void ps1_mc_data_interface_setup_read_page(uint32_t page);
+ void ps1_mc_data_interface_write_byte(uint32_t address, uint8_t byte);
+ void ps1_mc_data_interface_write_mc(uint32_t page);
++#if WITH_SUPERMEMCARD
++/* how many sectors games have written since the card started (all, and outside the directory) */
++void ps1_mc_data_interface_game_writes(uint32_t *all, uint32_t *data);
++#endif
+ void ps1_mc_data_interface_erase(uint32_t page);
+ uint8_t* ps1_mc_data_interface_get_page(uint32_t page);
+ void ps1_mc_data_interface_commit_write(uint32_t page, uint8_t *buf);
